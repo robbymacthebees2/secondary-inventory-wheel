@@ -103,6 +103,10 @@ bool get_bool_option(ConfigVarHandle handle, bool fallback) {
     return value;
 }
 
+bool vanillaAutoJumpDisabled() {
+    return get_bool_option(g_disableVanillaAutoJump, false);
+}
+
 bool infiniteLavaWalkEnabled() {
     return get_bool_option(g_infiniteLavaWalk, false);
 }

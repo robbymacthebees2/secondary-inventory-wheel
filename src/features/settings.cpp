@@ -58,6 +58,19 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     }
 
     control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Disable vanilla autojump";
+    control.help_rml =
+        "Prevent the game's automatic jump from triggering. This does not disable the mod's "
+        "Manual jump button. Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_disableVanillaAutoJump;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_NUMBER;
     control.label = "Glide bow slow time";
     control.help_rml =

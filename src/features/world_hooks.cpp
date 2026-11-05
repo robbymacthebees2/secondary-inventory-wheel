@@ -108,17 +108,26 @@ void maintain_hover_height(ModContext*, void* args, void*, void*) {
 
 HookAction handle_hover_airborne_action(ModContext*, void* args, void* retval, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (alink == nullptr || !hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
-        !g_hoverGroundHeightValid ||
-        alink->checkEventRun() || alink->checkModeFlg(daAlink_c::MODE_SWIMMING) ||
-        alink->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE) ||
-        alink->mLinkAcch.ChkGroundHit())
-    {
+    if (alink == nullptr) {
         return HOOK_CONTINUE;
     }
 
-    *static_cast<BOOL*>(retval) = TRUE;
-    return HOOK_SKIP_ORIGINAL;
+    if (hoverBootsAirwalkingEnabled() && g_hoverBootsEquipped &&
+        g_hoverGroundHeightValid && !alink->checkEventRun() &&
+        !alink->checkModeFlg(daAlink_c::MODE_SWIMMING) &&
+        !alink->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE) &&
+        !alink->mLinkAcch.ChkGroundHit())
+    {
+        *static_cast<BOOL*>(retval) = TRUE;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    if (vanillaAutoJumpDisabled()) {
+        *static_cast<BOOL*>(retval) = FALSE;
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    return HOOK_CONTINUE;
 }
 
 void continue_hover_landing(ModContext*, void* args, void*, void*) {
