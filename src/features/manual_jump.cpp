@@ -1,4 +1,27 @@
 bool g_manualJumpPendingR = false;
+bool g_manualJumpLeftStickWasHeld = false;
+bool g_manualJumpRightStickWasHeld = false;
+bool g_manualJumpLeftStickTriggered = false;
+bool g_manualJumpRightStickTriggered = false;
+bool g_manualJumpLeftBumperWasHeld = false;
+bool g_manualJumpLeftBumperTriggered = false;
+bool g_manualJumpUiVisibilityFailureReported = false;
+// SDL_GamepadButton::LEFT_SHOULDER; the mod SDK only exposes native button polling.
+constexpr s32 kNativeLeftShoulderButton = 9;
+
+bool manual_jump_l1_ui_blocked() {
+    bool documentVisible = false;
+    if (svc_ui->is_any_document_visible(mod_ctx, &documentVisible) != MOD_OK) {
+        if (!g_manualJumpUiVisibilityFailureReported) {
+            svc_log->warn(mod_ctx, "could not check Dusklight UI visibility for L1 manual jump");
+            g_manualJumpUiVisibilityFailureReported = true;
+        }
+        return true;
+    }
+
+    g_manualJumpUiVisibilityFailureReported = false;
+    return documentVisible;
+}
 
 bool start_manual_cucco_glide(daAlink_c* alink) {
     if (alink->mProcID == daAlink_c::PROC_FALL) {
@@ -189,6 +212,13 @@ HookAction enable_manual_glide_bow_aim_context(
 #endif
 
 void update_manual_cucco_glide(daAlink_c* alink) {
+    if (g_manualCuccoGlideActive && !manualJumpAndGlideEnabled() &&
+        alink != nullptr && !alink->checkEventRun() && !alink->checkWolf() &&
+        alink->mProcID == daAlink_c::PROC_AUTO_JUMP)
+    {
+        release_manual_cucco_glide(alink);
+    }
+
     if (g_manualCuccoGlideActive &&
         (alink == nullptr || alink->checkEventRun() || alink->checkWolf() ||
          alink->mLinkAcch.ChkGroundHit() ||
@@ -278,13 +308,33 @@ void update_hover_plane_lowering(daAlink_c* alink) {
     g_hoverLandingFrames = 0;
 }
 
+bool manual_jump_ground_action_ready(const daAlink_c* alink) {
+    if (alink == nullptr) {
+        return false;
+    }
+
+    if (alink->checkWolf()) {
+        return alink->mProcID == daAlink_c::PROC_WOLF_WAIT ||
+               alink->mProcID == daAlink_c::PROC_WOLF_MOVE ||
+               alink->mProcID == daAlink_c::PROC_WOLF_WAIT_SLIP ||
+               alink->mProcID == daAlink_c::PROC_WOLF_WAIT_TURN ||
+               alink->mProcID == daAlink_c::PROC_WOLF_TIRED_WAIT;
+    }
+
+    return alink->mProcID == daAlink_c::PROC_WAIT ||
+           alink->mProcID == daAlink_c::PROC_MOVE;
+}
+
 bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
-    if (alink == nullptr || g_secondaryRing != nullptr || g_primaryRingOpen ||
+    if (!manualJumpAndGlideEnabled() || alink == nullptr ||
+        g_secondaryRing != nullptr || g_primaryRingOpen ||
         g_sitActionState != SitActionState::Inactive || g_shieldSurfActive ||
-        alink->checkWolf() || alink->checkEventRun() || alink->checkRideOn())
+        alink->checkEventRun() || alink->checkRideOn())
     {
         return false;
     }
+    const bool wolf = alink->checkWolf();
+    const bool wolfGrounded = wolf && manual_jump_ground_action_ready(alink);
 
     int buttonMask = 0;
     bool triggered = false;
@@ -298,8 +348,7 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
         triggered = mDoCPd_c::getTrigB(PAD_1) != 0;
         break;
     case 3:
-        buttonMask = daAlink_c::BTN_L;
-        triggered = mDoCPd_c::getTrigL(PAD_1) != 0;
+        triggered = g_manualJumpLeftBumperTriggered && !manual_jump_l1_ui_blocked();
         break;
     case 4:
         buttonMask = daAlink_c::BTN_R;
@@ -308,6 +357,16 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
     case 5:
         buttonMask = daAlink_c::BTN_Z;
         triggered = mDoCPd_c::getTrigZ(PAD_1) != 0;
+        break;
+    case 6:
+        triggered = g_manualJumpLeftStickTriggered;
+        break;
+    case 7:
+        triggered = g_manualJumpRightStickTriggered;
+        break;
+    case 8:
+        buttonMask = daAlink_c::BTN_L;
+        triggered = mDoCPd_c::getTrigL(PAD_1) != 0;
         break;
     default:
         return false;
@@ -319,8 +378,7 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
 
     if (!pendingRPress && buttonMask == daAlink_c::BTN_R &&
         alink->mLinkAcch.ChkGroundHit() &&
-        (alink->mProcID == daAlink_c::PROC_WAIT ||
-         alink->mProcID == daAlink_c::PROC_MOVE))
+        manual_jump_ground_action_ready(alink))
     {
         // Let vanilla R interactions choose Link's action before treating the press as a jump.
         g_manualJumpPendingR = true;
@@ -335,8 +393,8 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
         return true;
     }
 
-    const bool hovering = is_hover_boots_hovering(alink);
-    if (!alink->mLinkAcch.ChkGroundHit() && !hovering) {
+    const bool hovering = !wolf && is_hover_boots_hovering(alink);
+    if (!alink->mLinkAcch.ChkGroundHit() && !hovering && !wolfGrounded) {
         if (g_hoverBootsEquipped) {
             if (!hoverBootsAirwalkingEnabled() ||
                 alink->checkModeFlg(daAlink_c::MODE_SWIMMING) ||
@@ -377,15 +435,15 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
         return true;
     }
 
-    if (alink->mProcID != daAlink_c::PROC_WAIT &&
-        alink->mProcID != daAlink_c::PROC_MOVE)
-    {
+    if (!manual_jump_ground_action_ready(alink)) {
         return false;
     }
 
     const f32 horizontalMomentum = alink->mNormalSpeed;
     const s16 momentumAngle = alink->current.angle.y;
-    if (!alink->procAutoJumpInit(0)) {
+    const int jumpStarted = wolf ? alink->procWolfAutoJumpInit(0)
+                                 : alink->procAutoJumpInit(0);
+    if (!jumpStarted) {
         return false;
     }
 
@@ -412,22 +470,32 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
 
     const bool pendingRPress = g_manualJumpPendingR;
     g_manualJumpPendingR = false;
+    const u32 extendedButtons = JUTGamePad::mPadStatus[PAD_1].extButton;
+    const bool leftStickHeld = (extendedButtons & PAD_BUTTON_LEFT_STICK) != 0;
+    const bool rightStickHeld = (extendedButtons & PAD_BUTTON_RIGHT_STICK) != 0;
+    const bool leftBumperHeld =
+        PADGetNativeButtonPressed(PAD_1) == kNativeLeftShoulderButton;
+    g_manualJumpLeftStickTriggered = leftStickHeld && !g_manualJumpLeftStickWasHeld;
+    g_manualJumpRightStickTriggered = rightStickHeld && !g_manualJumpRightStickWasHeld;
+    g_manualJumpLeftBumperTriggered = leftBumperHeld && !g_manualJumpLeftBumperWasHeld;
+    g_manualJumpLeftStickWasHeld = leftStickHeld;
+    g_manualJumpRightStickWasHeld = rightStickHeld;
+    g_manualJumpLeftBumperWasHeld = leftBumperHeld;
     update_hover_plane_lowering(alink);
-
-    if (alink->checkWolf()) {
-        return;
-    }
 
     if (pendingRPress && manualJumpBinding() == 4 &&
         alink->mLinkAcch.ChkGroundHit() &&
-        (alink->mProcID == daAlink_c::PROC_WAIT ||
-         alink->mProcID == daAlink_c::PROC_MOVE) &&
+        manual_jump_ground_action_ready(alink) &&
         try_manual_jump(alink, true))
     {
         return;
     }
 
     if (try_manual_jump(alink)) {
+        return;
+    }
+
+    if (alink->checkWolf()) {
         return;
     }
 
