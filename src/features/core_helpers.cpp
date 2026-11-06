@@ -75,7 +75,7 @@ bool hoverPlaneLowerBindingHeld(int64_t binding) {
     const u32 extendedButtons = JUTGamePad::mPadStatus[PAD_1].extButton;
     switch (binding) {
     case 0:
-        return (buttons & PAD_TRIGGER_L) != 0;
+        return PADGetNativeButtonPressed(PAD_1) == kNativeLeftShoulderButton;
     case 1:
         return (buttons & PAD_TRIGGER_L) == 0 && mDoCPd_c::getAnalogL(PAD_1) >= 0.5f;
     case 2:
@@ -91,10 +91,6 @@ bool hoverPlaneLowerBindingHeld(int64_t binding) {
     }
 }
 
-bool mapOpensDown() {
-    return !wheelOpensDown();
-}
-
 bool get_bool_option(ConfigVarHandle handle, bool fallback) {
     bool value = fallback;
     if (handle == 0 || svc_config->get_bool(mod_ctx, handle, &value) != MOD_OK) {
@@ -103,8 +99,12 @@ bool get_bool_option(ConfigVarHandle handle, bool fallback) {
     return value;
 }
 
-bool manualJumpAndGlideEnabled() {
-    return get_bool_option(g_manualJumpAndGlideEnabled, true);
+bool secondaryWheelBindingEnabled() {
+    return get_bool_option(g_secondaryWheelBindingEnabled, true);
+}
+
+bool mapOpensDown() {
+    return secondaryWheelBindingEnabled() && !wheelOpensDown();
 }
 
 bool vanillaAutoJumpDisabled() {
@@ -127,6 +127,18 @@ bool hoverBootsWaterWalkingEnabled() {
     return get_bool_option(g_hoverBootsWaterWalking, false);
 }
 
+bool sitHealingEnabled() {
+    return get_bool_option(g_sitHealingEnabled, false);
+}
+
+bool spinnerSurfaceBounceDisabled() {
+    return get_bool_option(g_disableSpinnerSurfaceBounce, false);
+}
+
+bool spinnerAttackAlwaysActive() {
+    return get_bool_option(g_spinnerAttackAlwaysActive, false);
+}
+
 bool shieldSurfRBoostEnabled() {
     return get_bool_option(g_shieldSurfRBoost, false);
 }
@@ -144,6 +156,10 @@ bool is_hover_boots_hovering(const daAlink_c* alink) {
 
 bool rupeeMagnetEnabled() {
     return get_bool_option(g_rupeeMagnetEnabled, false);
+}
+
+bool rupeeMagnetClawshotOrbsEnabled() {
+    return get_bool_option(g_rupeeMagnetClawshotOrbs, false);
 }
 
 int64_t rupeeMagnetRadiusPercent() {

@@ -49,10 +49,57 @@ HookAction delay_goron_lava_return(ModContext*, void* args, void* retval, void*)
 
 void maintain_hover_height(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (alink == nullptr || !hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
-        alink->checkEventRun() ||
+    if (alink != nullptr && alink->mLinkAcch.ChkGroundHit() &&
+        dComIfG_Bgsp().ChkPolySafe(alink->mLinkAcch.m_gnd))
+    {
+        g_shieldSurfGroundPolygon.SetPolyInfo(alink->mLinkAcch.m_gnd);
+        g_shieldSurfGroundPolygonValid = true;
+    }
+
+    const bool shieldSurfOnHoverPlane =
+        alink != nullptr && g_shieldSurfActive && g_shieldSurfHoverPlaneActive &&
+        alink->checkBoardRide() &&
+        g_hoverGroundHeightValid &&
+        alink->speed.y <= 0.0f &&
+        alink->current.pos.y <= g_hoverGroundHeight + 1.0f;
+    if (alink == nullptr || alink->checkEventRun() ||
         alink->checkModeFlg(daAlink_c::MODE_SWIMMING))
     {
+        return;
+    }
+    if ((!hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped) &&
+        !shieldSurfOnHoverPlane)
+    {
+        return;
+    }
+
+    if (g_shieldSurfActive && g_shieldSurfHoverPlaneActive &&
+        alink->checkBoardRide() &&
+        g_hoverGroundHeightValid &&
+        alink->speed.y <= 0.0f && alink->current.pos.y <= g_hoverGroundHeight)
+    {
+        alink->current.pos.y = g_hoverGroundHeight;
+        alink->speed.y = 0.0f;
+        g_hoverAtSurface = true;
+        g_hoverLandingSequenceActive = false;
+        g_hoverLandingFrames = 0;
+        if (alink->mProcID == daAlink_c::PROC_BOARD_RIDE ||
+            alink->mProcID == daAlink_c::PROC_BOARD_JUMP)
+        {
+            const f32 surfSpeed = alink->mNormalSpeed;
+            const s16 surfAngle = alink->current.angle.y;
+            const f32 horizontalSpeedX = alink->speed.x;
+            const f32 horizontalSpeedZ = alink->speed.z;
+            auto* board = static_cast<daObjIceLeaf_c*>(
+                fopAcM_SearchByID(g_shieldSurfBoardId));
+            if (board != nullptr) {
+                alink->procBoardWaitInit(board);
+                alink->mNormalSpeed = surfSpeed;
+                alink->current.angle.y = surfAngle;
+                alink->speed.x = horizontalSpeedX;
+                alink->speed.z = horizontalSpeedZ;
+            }
+        }
         return;
     }
 
@@ -106,6 +153,13 @@ void maintain_hover_height(ModContext*, void* args, void*, void*) {
     }
 }
 
+void disable_hover_boots_for_wolf(ModContext*, void* args, void*, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink != nullptr && alink->checkWolf() && g_hoverBootsEquipped) {
+        disable_hover_boots();
+    }
+}
+
 HookAction handle_hover_airborne_action(ModContext*, void* args, void* retval, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     if (alink == nullptr) {
@@ -130,12 +184,19 @@ HookAction handle_hover_airborne_action(ModContext*, void* args, void* retval, v
     return HOOK_CONTINUE;
 }
 
-void continue_hover_landing(ModContext*, void* args, void*, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (alink == nullptr || !hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
-        !g_hoverLandingSequenceActive ||
+void update_hover_landing_recovery(daAlink_c* alink) {
+    if (alink == nullptr || !g_hoverLandingSequenceActive) {
+        return;
+    }
+
+    if (!hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
         alink->mLinkAcch.ChkGroundHit() || alink->mProcID != daAlink_c::PROC_LAND)
     {
+        g_hoverLandingSequenceActive = false;
+        g_hoverLandingFrames = 0;
+        if (alink->mLinkAcch.ChkGroundHit()) {
+            g_hoverAtSurface = false;
+        }
         return;
     }
 
@@ -491,6 +552,14 @@ HookAction suppress_twilight_ward_hit_stun(ModContext*, void* args, void* retval
         return HOOK_CONTINUE;
     }
 
+    if (alink->mProcID == daAlink_c::PROC_SAND_WALL_HIT ||
+        alink->mProcID == daAlink_c::PROC_LAVA_RETURN ||
+        is_lava_polygon_contact(alink) ||
+        (alink->mLinkAcch.ChkGroundHit() && alink->mGndPolyAtt1 == 2))
+    {
+        return HOOK_CONTINUE;
+    }
+
     *static_cast<int*>(retval) = 1;
     return HOOK_SKIP_ORIGINAL;
 }
@@ -512,4 +581,24 @@ void collect_nearby_rupees(ModContext*, void* args, void*, void*) {
     if (fopAcM_searchPlayerDistance(item) < radius) {
         item->itemGetNextExecute();
     }
+}
+
+HookAction collect_nearby_clawshot_orbs(ModContext*, void* args, void*, void*) {
+    auto* orb = mods::arg<daGlwSph_c*>(args, 0);
+    auto* minigameNpc = static_cast<daNpcChin_c*>(
+        fopAcM_SearchByName(fpcNm_NPC_CHIN_e));
+    if (!rupeeMagnetEnabled() || !rupeeMagnetClawshotOrbsEnabled() ||
+        orb == nullptr || orb->is_getted() ||
+        orb->mAction == daGlwSph_c::ACTION_GET_e ||
+        minigameNpc == nullptr || !minigameNpc->isMiniGamePlaying())
+    {
+        return HOOK_CONTINUE;
+    }
+
+    const f32 radius =
+        kRupeeMagnetBaseRadius * static_cast<f32>(rupeeMagnetRadiusPercent()) / 100.0f;
+    if (fopAcM_searchPlayerDistance(orb) < radius) {
+        orb->actionGetInit();
+    }
+    return HOOK_CONTINUE;
 }

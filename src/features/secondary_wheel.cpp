@@ -864,6 +864,9 @@ HookAction remap_left_trigger(ModContext*, void*, void* retval, void*) {
 
 HookAction prepare_secondary_wheel(ModContext*, void* args, void*, void*) {
     g_openingSecondaryRing = false;
+    if (!secondaryWheelBindingEnabled()) {
+        return HOOK_CONTINUE;
+    }
 
     const bool secondaryPressed =
         wheelOpensDown() ? mDoCPd_c::getTrigDown(PAD_1) != 0 :

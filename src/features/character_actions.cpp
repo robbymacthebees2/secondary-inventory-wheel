@@ -6,13 +6,17 @@ HookAction handle_hover_boots_heavy_toggle(ModContext*, void* args, void* retval
         return HOOK_CONTINUE;
     }
 
-    g_hoverBootsTransitionPending = false;
     *static_cast<int*>(retval) = 0;
     return HOOK_SKIP_ORIGINAL;
 }
 
 void begin_hover_boots_toggle(daAlink_c* alink) {
     if (alink == nullptr) {
+        return;
+    }
+
+    if (g_shieldSurfActive && alink->checkBoardRide()) {
+        set_hover_boots_enabled(alink, !g_hoverBootsEquipped);
         return;
     }
 
@@ -54,6 +58,38 @@ bool can_start_sit_action(const daAlink_c* alink) {
             alink->mProcID == daAlink_c::PROC_ATN_ACTOR_WAIT ||
             alink->mProcID == daAlink_c::PROC_ATN_ACTOR_MOVE);
 }
+
+namespace {
+OSTime g_sitHealNextTick = 0;
+bool g_sitHealTimerStarted = false;
+
+void reset_sit_healing_timer() {
+    g_sitHealTimerStarted = false;
+}
+
+void update_sit_healing() {
+    const OSTime now = OSGetTime();
+    if (!sitHealingEnabled()) {
+        g_sitHealTimerStarted = false;
+        return;
+    }
+    if (!g_sitHealTimerStarted) {
+        g_sitHealNextTick = now + OSSecondsToTicks(4);
+        g_sitHealTimerStarted = true;
+        return;
+    }
+    if (now < g_sitHealNextTick) {
+        return;
+    }
+
+    const u16 life = dComIfGs_getLife();
+    const u16 maxLife = dComIfGs_getMaxLifeGauge();
+    if (life < maxLife) {
+        dComIfGp_setItemLifeCount(1.0f, 1);
+    }
+    g_sitHealNextTick = now + OSSecondsToTicks(1);
+}
+}  // namespace
 
 void align_link_to_ground(daAlink_c* alink) {
     const f32 groundHeight = alink->mLinkAcch.GetGroundH();
@@ -104,6 +140,7 @@ void begin_sit_action(daAlink_c* alink) {
     }
     alink->setSingleAnimeBase(daAlink_c::ANM_WAIT_SIT);
     g_sitActionState = SitActionState::Seated;
+    reset_sit_healing_timer();
     svc_log->info(mod_ctx, "Sit action entered");
 }
 
@@ -116,6 +153,7 @@ void begin_stand_action(daAlink_c* alink) {
     alink->mSinkShapeOffset = 0.0f;
     alink->setSingleAnimeBase(daAlink_c::ANM_WAIT);
     g_sitActionState = SitActionState::Inactive;
+    g_sitHealTimerStarted = false;
     svc_log->info(mod_ctx, "Sit action ended by player");
 }
 
@@ -145,6 +183,7 @@ void suppress_sit_stick_input(ModContext*, void* args, void*, void*) {
 
 void update_sit_action() {
     if (g_sitActionState == SitActionState::Inactive) {
+        g_sitHealTimerStarted = false;
         return;
     }
 
@@ -168,8 +207,11 @@ void update_sit_action() {
             alink->mSinkShapeOffset = 0.0f;
         }
         g_sitActionState = SitActionState::Inactive;
+        g_sitHealTimerStarted = false;
         return;
     }
+
+    update_sit_healing();
 
     if (hovering) {
         alink->current.pos.y = g_hoverGroundHeight;
@@ -184,6 +226,7 @@ void update_sit_action() {
         restore_sit_shape_angles(alink);
         alink->mSinkShapeOffset = 0.0f;
         g_sitActionState = SitActionState::Inactive;
+        g_sitHealTimerStarted = false;
         svc_log->warn(mod_ctx, "Sit action ended: no valid ground height");
         return;
     }

@@ -261,9 +261,13 @@ void disable_hover_boots() {
 
 void reset_secondary_items_for_save_change() {
     g_goronTunicEquipped = false;
+    reset_shield_surf_state_for_save_change();
     disable_hover_boots();
     g_secondaryHudAssignmentsInitialized = false;
     g_secondaryHudRefreshPending.fill(false);
+    g_hoverBootsTransitionPending = false;
+    g_hoverPlaneLowerBindingWasHeld = false;
+    reset_manual_jump_input_state();
 }
 
 void clear_secondary_items_for_new_save(ModContext*, uint32_t, void*) {
@@ -312,7 +316,18 @@ void set_hover_boots_enabled(daAlink_c* alink, bool enabled) {
     }
 
     if (!enabled) {
+        const bool retainSurfPlane =
+            g_shieldSurfActive && alink != nullptr && alink->checkBoardRide() &&
+            hoverBootsAirwalkingEnabled() && g_hoverGroundHeightValid &&
+            !alink->mLinkAcch.ChkGroundHit() &&
+            std::abs(alink->current.pos.y - g_hoverGroundHeight) <= 1.0f;
+        const f32 surfPlaneHeight = g_hoverGroundHeight;
         disable_hover_boots();
+        if (retainSurfPlane) {
+            g_hoverGroundHeight = surfPlaneHeight;
+            g_hoverGroundHeightValid = true;
+            g_hoverAtSurface = true;
+        }
     } else {
         g_hoverBootsEquipped = true;
         g_hoverGroundHeight = alink->current.pos.y;
