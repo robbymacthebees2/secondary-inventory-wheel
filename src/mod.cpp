@@ -289,6 +289,7 @@ bool g_manualJumpHeightConfigReadFailureReported = false;
 bool g_glideBowSlowTimeConfigReadFailureReported = false;
 bool g_hoverPlaneLowerBindingConfigReadFailureReported = false;
 bool g_hoverPlaneLowerBindingWasHeld = false;
+bool g_hoverPlaneRaiseBindingWasHeld = false;
 bool g_hoverGroundHeightValid = false;
 bool g_hoverLandingSequenceActive = false;
 bool g_hoverAtSurface = false;
