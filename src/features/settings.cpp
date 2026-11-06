@@ -1,6 +1,7 @@
 ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     static const char* kWheelDirectionOptions[] = {"Left", "Down"};
-    static const char* kManualJumpOptions[] = {"Disabled", "A", "B", "L", "R", "Z"};
+    static const char* kManualJumpOptions[] = {
+        "Disabled", "A", "B", "L1", "R", "Z", "L3", "R3", "L2"};
     static const char* kHoverPlaneLowerBindingOptions[] = {"L1", "L2", "L3", "R1", "R2", "R3"};
     initialize_sit_music_options();
     UiControlDesc control = UI_CONTROL_DESC_INIT;
@@ -27,13 +28,29 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.kind = UI_CONTROL_DROPDOWN;
     control.label = "Manual jump button";
     control.help_rml =
-        "Press the selected button while Link is grounded and walking or standing to jump. "
-        "The jump preserves Link's current horizontal momentum without adding forward speed. "
+        "Press the selected button while Link or Wolf Link is grounded and walking or standing "
+        "to jump. Wolf Link uses his native jump action; Link's jump preserves his current "
+        "horizontal momentum without adding forward speed. "
+        "L1 uses the gamepad's L1 input; L2 uses the game's vanilla L button. "
         "The selected button's normal action is replaced while these conditions are met.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_manualJumpBinding;
     control.options = kManualJumpOptions;
     control.option_count = sizeof(kManualJumpOptions) / sizeof(kManualJumpOptions[0]);
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Enable manual jump and glide";
+    control.help_rml =
+        "When disabled, the configured Manual jump button and manual Cucco glide are inactive. "
+        "Turning this off during a manual glide releases it. This does not affect vanilla "
+        "auto-jump or Hover Boots.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_manualJumpAndGlideEnabled;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
     if (result != MOD_OK) {
         return result;

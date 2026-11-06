@@ -18,7 +18,7 @@ int64_t manualJumpBinding() {
     }
 
     g_manualJumpConfigReadFailureReported = false;
-    return std::clamp(value, kManualJumpDisabled, static_cast<int64_t>(5));
+    return std::clamp(value, kManualJumpDisabled, static_cast<int64_t>(8));
 }
 
 int64_t manualJumpHeightPercent() {
@@ -101,6 +101,10 @@ bool get_bool_option(ConfigVarHandle handle, bool fallback) {
         return fallback;
     }
     return value;
+}
+
+bool manualJumpAndGlideEnabled() {
+    return get_bool_option(g_manualJumpAndGlideEnabled, true);
 }
 
 bool vanillaAutoJumpDisabled() {

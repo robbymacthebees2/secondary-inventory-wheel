@@ -169,6 +169,7 @@ enum class SitActionState : u8 {
 ConfigVarHandle g_wheelOpenDirection = 0;
 ConfigVarHandle g_manualJumpBinding = 0;
 ConfigVarHandle g_manualJumpHeightPercent = 0;
+ConfigVarHandle g_manualJumpAndGlideEnabled = 0;
 ConfigVarHandle g_disableVanillaAutoJump = 0;
 ConfigVarHandle g_glideBowSlowTimePercent = 0;
 ConfigVarHandle g_hoverPlaneLowerBinding = 0;
@@ -499,6 +500,12 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_manualGlideSlowTimeScaleActive = false;
     g_manualGlidePreviousTimeScale = 1.0f;
     g_manualJumpPendingR = false;
+    g_manualJumpLeftStickWasHeld = false;
+    g_manualJumpRightStickWasHeld = false;
+    g_manualJumpLeftStickTriggered = false;
+    g_manualJumpRightStickTriggered = false;
+    g_manualJumpLeftBumperWasHeld = false;
+    g_manualJumpLeftBumperTriggered = false;
     stop_manual_glide_aura();
     g_iceArrowSelected = false;
     g_iceArrowFrozenTargets.fill({});
@@ -552,6 +559,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     result = svc_config->register_var(mod_ctx, &config, &g_manualJumpHeightPercent);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register manual jump height setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "manualJumpAndGlideEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = true;
+    result = svc_config->register_var(mod_ctx, &config, &g_manualJumpAndGlideEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register manual jump and glide setting");
         return result;
     }
 
