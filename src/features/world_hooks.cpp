@@ -149,6 +149,13 @@ void maintain_hover_height(ModContext*, void* args, void*, void*) {
             g_hoverLandingSequenceActive = true;
             g_hoverAtSurface = true;
             g_hoverLandingFrames = 0;
+        } else if (!alink->mLinkAcch.ChkGroundHit() &&
+                   (alink->mProcID == daAlink_c::PROC_AUTO_JUMP ||
+                    alink->mProcID == daAlink_c::PROC_FALL) &&
+                   !g_hoverLandingSequenceActive)
+        {
+            g_hoverLandingSequenceActive = true;
+            g_hoverLandingFrames = 0;
         }
     }
 }
@@ -190,7 +197,8 @@ void update_hover_landing_recovery(daAlink_c* alink) {
     }
 
     if (!hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
-        alink->mLinkAcch.ChkGroundHit() || alink->mProcID != daAlink_c::PROC_LAND)
+        alink->mLinkAcch.ChkGroundHit() || !g_hoverGroundHeightValid ||
+        alink->current.pos.y > g_hoverGroundHeight + 1.0f || alink->speed.y > 0.0f)
     {
         g_hoverLandingSequenceActive = false;
         g_hoverLandingFrames = 0;
@@ -200,10 +208,19 @@ void update_hover_landing_recovery(daAlink_c* alink) {
         return;
     }
 
+    if (alink->mProcID != daAlink_c::PROC_LAND &&
+        alink->mProcID != daAlink_c::PROC_AUTO_JUMP &&
+        alink->mProcID != daAlink_c::PROC_FALL)
+    {
+        g_hoverLandingSequenceActive = false;
+        g_hoverLandingFrames = 0;
+        return;
+    }
+
     if (g_hoverLandingFrames < kHoverLandingRecoveryFrames) {
         ++g_hoverLandingFrames;
     }
-    const bool landingAnimationFinished =
+    const bool landingAnimationFinished = alink->mProcID == daAlink_c::PROC_LAND &&
         alink->mUnderFrameCtrl[0].getEndFlg() != 0 &&
         alink->mUnderFrameCtrl[0].getNowSetFlg() == 0;
     if (!landingAnimationFinished && g_hoverLandingFrames < kHoverLandingRecoveryFrames) {
@@ -213,6 +230,7 @@ void update_hover_landing_recovery(daAlink_c* alink) {
     g_hoverLandingSequenceActive = false;
     g_hoverLandingFrames = 0;
     alink->procMoveInit();
+    alink->offModeFlg(daAlink_c::MODE_JUMP);
 }
 
 HookAction suppress_hover_ledge_grab(ModContext*, void* args, void* retval, void*) {
