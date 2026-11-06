@@ -24,7 +24,10 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_arrow.h"
 #include "d/actor/d_a_ni.h"
+#include "d/actor/d_a_obj_glowSphere.h"
+#include "d/actor/d_a_spinner.h"
 #include "d/actor/d_a_obj_iceleaf.h"
+#include "d/actor/d_a_npc_chin.h"
 #include "d/d_a_item_static.h"
 #include "d/actor/d_a_npc_tk.h"
 #include "SSystem/SComponent/c_cc_d.h"
@@ -86,6 +89,10 @@ constexpr int64_t kGlideBowSlowTimeDefaultPercent = 0;
 constexpr int64_t kGlideBowSlowTimeMinPercent = 0;
 constexpr int64_t kGlideBowSlowTimeMaxPercent = 100;
 constexpr int64_t kHoverPlaneLowerDefaultBinding = 5;
+// SDL_GamepadButton::LEFT_SHOULDER; the mod SDK only exposes native button polling.
+constexpr s32 kNativeLeftShoulderButton = 9;
+// SDL_GamepadButton::RIGHT_STICK.
+constexpr s32 kNativeRightStickButton = 8;
 constexpr u8 kShieldSurfSlot = 0xFC;
 constexpr u8 kSitSlot = 0xFD;
 constexpr u8 kGoronTunicSlot = 0xFE;
@@ -167,9 +174,9 @@ enum class SitActionState : u8 {
 };
 
 ConfigVarHandle g_wheelOpenDirection = 0;
+ConfigVarHandle g_secondaryWheelBindingEnabled = 0;
 ConfigVarHandle g_manualJumpBinding = 0;
 ConfigVarHandle g_manualJumpHeightPercent = 0;
-ConfigVarHandle g_manualJumpAndGlideEnabled = 0;
 ConfigVarHandle g_disableVanillaAutoJump = 0;
 ConfigVarHandle g_glideBowSlowTimePercent = 0;
 ConfigVarHandle g_hoverPlaneLowerBinding = 0;
@@ -179,8 +186,12 @@ ConfigVarHandle g_hawkOneShotDamage = 0;
 ConfigVarHandle g_hoverBootsWaterWalking = 0;
 ConfigVarHandle g_shieldSurfRBoost = 0;
 ConfigVarHandle g_rupeeMagnetEnabled = 0;
+ConfigVarHandle g_rupeeMagnetClawshotOrbs = 0;
 ConfigVarHandle g_rupeeMagnetRadiusPercent = 0;
 ConfigVarHandle g_sitMusicTrack = 0;
+ConfigVarHandle g_sitHealingEnabled = 0;
+ConfigVarHandle g_disableSpinnerSurfaceBounce = 0;
+ConfigVarHandle g_spinnerAttackAlwaysActive = 0;
 std::array<std::array<char, 48>, kSitMusicOptionCount> g_sitMusicOptionLabelStorage{};
 std::array<const char*, kSitMusicOptionCount> g_sitMusicOptionLabels{};
 bool g_sitMusicOptionsInitialized = false;
@@ -216,6 +227,10 @@ bool g_hoverBootsEquipped = false;
 bool g_shieldSurfActive = false;
 bool g_shieldSurfStartPending = false;
 bool g_shieldSurfDismountPending = false;
+bool g_shieldSurfHoverPlaneActive = false;
+bool g_shieldSurfPlaneRaisePending = false;
+bool g_shieldSurfGroundPolygonValid = false;
+cBgS_PolyInfo g_shieldSurfGroundPolygon;
 fpc_ProcID g_shieldSurfBoardId = fpcM_ERROR_PROCESS_ID_e;
 unsigned int g_shieldSurfStartWaitFrames = 0;
 bool g_manualCuccoGlideActive = false;
@@ -342,6 +357,9 @@ std::array<J2DPicture*, 3> g_shieldSurfWheelItemTex{};
 std::array<ResTIMG*, 3> g_shieldSurfWheelItemBuf{};
 JKRExpHeap* g_shieldSurfWheelItemHeap = nullptr;
 
+void reset_shield_surf_state_for_save_change();
+void reset_manual_jump_input_state();
+
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
 #include "features/hover_boots.cpp"
@@ -375,6 +393,7 @@ ModResult install_hooks() {
     ADD_POST(SetRoomInfo, maintain_lava_ground);
     ADD_POST(SetRoomInfo, maintain_hover_water_surface);
     ADD_POST(AutoGroundHit, maintain_hover_height);
+    ADD_POST(PlayerExecute, disable_hover_boots_for_wolf);
     ADD_PRE(GetGroundAngle, flatten_hover_water_ground_angle);
     ADD_PRE(GetSlidePolygon, suppress_submerged_water_slide_polygon);
     ADD_PRE(CheckSlope, suppress_submerged_water_slope);
@@ -382,7 +401,6 @@ ModResult install_hooks() {
     ADD_PRE(IceSlipBgCheck, skip_submerged_ice_slip);
     ADD_PRE(SwimOutAfter, keep_hover_boots_on_water_surface);
     ADD_PRE(CheckAutoJumpAction, handle_hover_airborne_action);
-    ADD_POST(ProcLand, continue_hover_landing);
     ADD_PRE(ProcHangStartInit, suppress_hover_ledge_grab);
     ADD_PRE(ProcHangFallStartInit, suppress_hover_ledge_grab);
     ADD_PRE(CheckLandAction, land_on_lava_surface);
@@ -391,6 +409,7 @@ ModResult install_hooks() {
     ADD_PRE(CheckWaterPolygonUnder, suppress_lava_submersion);
     ADD_PRE(CheckPolyDamage, suppress_lava_damage);
     ADD_PRE(ProcDamageInit, suppress_twilight_ward_hit_stun);
+    ADD_PRE(ProcCoLargeDamageInit, prevent_shield_surf_collision_knockoff);
     ADD_PRE(ProcCoLargeDamageInit, suppress_twilight_ward_hit_stun);
     ADD_PRE(ProcLargeDamageUpInit, suppress_twilight_ward_hit_stun);
     ADD_PRE(ProcCoLargeDamageWallInit, suppress_twilight_ward_hit_stun);
@@ -415,7 +434,6 @@ ModResult install_hooks() {
     ADD_PRE(CheckSnowCode, allow_shield_surf_on_any_ground);
     ADD_PRE(CheckShieldDraw, suppress_player_shield_draw_during_surf);
     ADD_PRE(CheckNextActionBow, suppress_bow_action_during_shield_surf);
-    ADD_PRE(RideGetOff, release_shield_surf_ride_safely);
     ADD_PRE(CheckWaitAction, preserve_sit_idle_animation);
     ADD_POST(HawkGrassVoiceStart, spawn_hawk_after_grass_sound);
     ADD_PRE(RingMove, handle_secondary_ring_move);
@@ -444,6 +462,11 @@ ModResult install_hooks() {
     ADD_POST(PlayerExecute, process_shield_surf_transition);
     ADD_PRE(ProcAutoJump, release_manual_cucco_glide_on_a);
     ADD_POST(BoardCommon, boost_shield_surf_speed);
+    ADD_PRE(BoardCommon, prepare_shield_surf_hover_plane_board_common);
+    ADD_POST(BoardCommon, restore_shield_surf_hover_plane_board_common);
+    ADD_PRE(ShieldSurfGetTriPla, flatten_shield_surf_hover_plane_polygon);
+    ADD_PRE(SpinnerSetReflectAngle, prevent_spinner_surface_bounce);
+    ADD_PRE(SpinnerReflectAccept, keep_spinner_attack_always_active);
     ADD_PRE(IceLeafExecute, keep_shield_surf_board_in_ride_mode);
     ADD_PRE(IceLeafDraw, draw_shield_surf_on_native_board);
     ADD_POST(MakeArrow, set_ice_arrow_actor_type_after_creation);
@@ -455,6 +478,7 @@ ModResult install_hooks() {
     ADD_POST(LeafExecute, hold_ice_arrow_target_in_place);
     ADD_POST(LeafExecute, end_ice_arrow_actor_execute);
     ADD_PRE(CollisionSet, suppress_ice_frozen_enemy_attack);
+    ADD_PRE(DrawItemNum, hide_secondary_assigned_vanilla_ammo_count);
     ADD_POST(CollisionSet, restore_ice_frozen_enemy_attack);
     ADD_PRE(ProcCoLavaReturnInit, delay_goron_lava_return);
     ADD_PRE(CheckRestartRoom, suppress_water_surface_restart);
@@ -475,6 +499,7 @@ ModResult install_hooks() {
     ADD_POST(ModelCalc, update_hover_magic_after_model_calc);
     ADD_POST(SetWaterDropColor, tint_goron_tunic);
     ADD_POST(ItemExecute, collect_nearby_rupees);
+    ADD_PRE(GlowSphereExecute, collect_nearby_clawshot_orbs);
     return MOD_OK;
 }
 
@@ -543,6 +568,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
+    config.name = "secondaryWheelBindingEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = true;
+    result = svc_config->register_var(mod_ctx, &config, &g_secondaryWheelBindingEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register secondary wheel binding setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
     config.name = "manualJumpBinding";
     config.type = CONFIG_VAR_INT;
     config.default_int = kManualJumpDefaultBinding;
@@ -559,16 +594,6 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     result = svc_config->register_var(mod_ctx, &config, &g_manualJumpHeightPercent);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register manual jump height setting");
-        return result;
-    }
-
-    config = CONFIG_VAR_DESC_INIT;
-    config.name = "manualJumpAndGlideEnabled";
-    config.type = CONFIG_VAR_BOOL;
-    config.default_bool = true;
-    result = svc_config->register_var(mod_ctx, &config, &g_manualJumpAndGlideEnabled);
-    if (result != MOD_OK) {
-        svc_log->error(mod_ctx, "failed to register manual jump and glide setting");
         return result;
     }
 
@@ -663,6 +688,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
+    config.name = "rupeeMagnetClawshotOrbs";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_rupeeMagnetClawshotOrbs);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Rupee Magnet clawshot-orb setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
     config.name = "rupeeMagnetRadiusPercent";
     config.type = CONFIG_VAR_INT;
     config.default_int = kRupeeMagnetDefaultRadiusPercent;
@@ -681,6 +716,37 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         svc_log->error(mod_ctx, "failed to register Sit music setting");
         return result;
     }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "sitHealingEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_sitHealingEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Sit healing setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "disableSpinnerSurfaceBounce";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_disableSpinnerSurfaceBounce);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Spinner surface bounce setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "spinnerAttackAlwaysActive";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_spinnerAttackAlwaysActive);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Spinner attack hitbox setting");
+        return result;
+    }
+
     int64_t sitMusicTrack = 0;
     result = svc_config->get_int(mod_ctx, g_sitMusicTrack, &sitMusicTrack);
     if (result != MOD_OK) {
@@ -747,6 +813,10 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_sit_music();
     update_goron_lava_contact_timer();
     update_hover_boots();
+    recover_shield_surf_state(
+        static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
+    update_hover_landing_recovery(
+        static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     update_manual_cucco_glide(
         static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     update_manual_glide_bow_slow_time();

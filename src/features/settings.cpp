@@ -25,32 +25,35 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     }
 
     control = UI_CONTROL_DESC_INIT;
-    control.kind = UI_CONTROL_DROPDOWN;
-    control.label = "Manual jump button";
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Enable D-pad item wheel binding";
     control.help_rml =
-        "Press the selected button while Link or Wolf Link is grounded and walking or standing "
-        "to jump. Wolf Link uses his native jump action; Link's jump preserves his current "
-        "horizontal momentum without adding forward speed. "
-        "L1 uses the gamepad's L1 input; L2 uses the game's vanilla L button. "
-        "The selected button's normal action is replaced while these conditions are met.";
+        "When disabled, Left and Down use the game's normal map and item-wheel behavior "
+        "instead of opening the secondary inventory wheel. Other mod features remain available.";
     control.binding = UI_BINDING_CONFIG_VAR;
-    control.config_var = g_manualJumpBinding;
-    control.options = kManualJumpOptions;
-    control.option_count = sizeof(kManualJumpOptions) / sizeof(kManualJumpOptions[0]);
+    control.config_var = g_secondaryWheelBindingEnabled;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
     if (result != MOD_OK) {
         return result;
     }
 
     control = UI_CONTROL_DESC_INIT;
-    control.kind = UI_CONTROL_TOGGLE;
-    control.label = "Enable manual jump and glide";
+    control.kind = UI_CONTROL_DROPDOWN;
+    control.label = "Manual jump button";
     control.help_rml =
-        "When disabled, the configured Manual jump button and manual Cucco glide are inactive. "
-        "Turning this off during a manual glide releases it. This does not affect vanilla "
-        "auto-jump or Hover Boots.";
+        "Press the selected button while Link or Wolf Link is grounded and walking or standing "
+        "to jump. Wolf Link uses his native jump action; Link's jump preserves his current "
+        "horizontal momentum without adding forward speed. "
+        "While Shield Surfing on the Hover Boots plane, this button starts a board jump and "
+        "raises the plane with Link. "
+        "L1 uses the gamepad's L1 input; L2 uses the game's vanilla L button. "
+        "Select Disabled to turn off both manual jump and manual Cucco glide; doing so during "
+        "an active glide releases Link. The selected button's normal action is replaced while "
+        "the jump conditions are met.";
     control.binding = UI_BINDING_CONFIG_VAR;
-    control.config_var = g_manualJumpAndGlideEnabled;
+    control.config_var = g_manualJumpBinding;
+    control.options = kManualJumpOptions;
+    control.option_count = sizeof(kManualJumpOptions) / sizeof(kManualJumpOptions[0]);
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
     if (result != MOD_OK) {
         return result;
@@ -122,6 +125,20 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Heal while sitting";
+    control.help_rml =
+        "When enabled, Link restores one quarter of a heart after sitting for four seconds, "
+        "then once per second while seated. Healing uses the game's spring-healing sound and "
+        "stops at the current maximum health.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_sitHealingEnabled;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
     control.label = "Walk on lava indefinitely";
     control.help_rml =
         "When the Goron Tunic is equipped, stay at the lava surface without sinking or "
@@ -138,7 +155,8 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.label = "Twilight Ward (Magic Armor)";
     control.help_rml =
         "When Magic Armor is worn, hits still deal damage but do not interrupt Link, stun him, "
-        "or knock him back.";
+        "or knock him back. The normal game handling remains active while Link is sinking in "
+        "quicksand or lava.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_twilightWard;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
@@ -174,8 +192,9 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.kind = UI_CONTROL_DROPDOWN;
     control.label = "Lower Hover Boots plane button";
     control.help_rml =
-        "While airwalking with Hover Boots, press this button to lower the hover plane by "
-        "Link's vanilla standing-jump height. R3 is selected by default.";
+        "While airwalking with Hover Boots, including while Shield Surfing, press this button "
+        "to lower the hover plane by Link's vanilla standing-jump height. L1 uses the gamepad's "
+        "L1 bumper input; L2 uses the game's vanilla L trigger. R3 is selected by default.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_hoverPlaneLowerBinding;
     control.options = kHoverPlaneLowerBindingOptions;
@@ -201,10 +220,49 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Disable Spinner surface bouncing";
+    control.help_rml =
+        "When enabled, the Spinner slides along walls and steep surfaces instead of reflecting "
+        "its direction. Disabled by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_disableSpinnerSurfaceBounce;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Spinner attack hitbox always active";
+    control.help_rml =
+        "Keep the Spinner's powered-up attack hitbox active while riding, without performing "
+        "the attack. Disabled by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_spinnerAttackAlwaysActive;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
     control.label = "Rupee Magnet";
     control.help_rml = "Collect nearby rupees automatically. The radius is configurable below.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_rupeeMagnetEnabled;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Rupee Magnet collects clawshot minigame orbs";
+    control.help_rml =
+        "When Rupee Magnet is enabled, automatically collect nearby clawshot minigame orbs "
+        "within the configured radius during an active minigame. Disabled by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_rupeeMagnetClawshotOrbs;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
     if (result != MOD_OK) {
         return result;

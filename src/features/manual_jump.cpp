@@ -6,8 +6,16 @@ bool g_manualJumpRightStickTriggered = false;
 bool g_manualJumpLeftBumperWasHeld = false;
 bool g_manualJumpLeftBumperTriggered = false;
 bool g_manualJumpUiVisibilityFailureReported = false;
-// SDL_GamepadButton::LEFT_SHOULDER; the mod SDK only exposes native button polling.
-constexpr s32 kNativeLeftShoulderButton = 9;
+
+void reset_manual_jump_input_state() {
+    g_manualJumpPendingR = false;
+    g_manualJumpLeftStickWasHeld = false;
+    g_manualJumpRightStickWasHeld = false;
+    g_manualJumpLeftStickTriggered = false;
+    g_manualJumpRightStickTriggered = false;
+    g_manualJumpLeftBumperWasHeld = false;
+    g_manualJumpLeftBumperTriggered = false;
+}
 
 bool manual_jump_l1_ui_blocked() {
     bool documentVisible = false;
@@ -212,7 +220,8 @@ HookAction enable_manual_glide_bow_aim_context(
 #endif
 
 void update_manual_cucco_glide(daAlink_c* alink) {
-    if (g_manualCuccoGlideActive && !manualJumpAndGlideEnabled() &&
+    if (g_manualCuccoGlideActive &&
+        manualJumpBinding() == kManualJumpDisabled &&
         alink != nullptr && !alink->checkEventRun() && !alink->checkWolf() &&
         alink->mProcID == daAlink_c::PROC_AUTO_JUMP)
     {
@@ -260,23 +269,50 @@ void restore_manual_glide_bow_slow_time() {
     }
 }
 
-void update_hover_plane_lowering(daAlink_c* alink) {
-    const bool held = hoverPlaneLowerBindingHeld(hoverPlaneLowerBinding());
-    const bool pressed = held && !g_hoverPlaneLowerBindingWasHeld;
-    g_hoverPlaneLowerBindingWasHeld = held;
-    if (!pressed || !hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
-        !g_hoverGroundHeightValid || alink == nullptr)
-    {
-        return;
+bool manual_jump_binding_triggered(int64_t binding, bool pendingRPress) {
+    switch (binding) {
+    case 1:
+        return mDoCPd_c::getTrigA(PAD_1) != 0;
+    case 2:
+        return mDoCPd_c::getTrigB(PAD_1) != 0;
+    case 3:
+        return g_manualJumpLeftBumperTriggered && !manual_jump_l1_ui_blocked();
+    case 4:
+        return pendingRPress || mDoCPd_c::getTrigLockR(PAD_1) != 0;
+    case 5:
+        return mDoCPd_c::getTrigZ(PAD_1) != 0;
+    case 6:
+        return g_manualJumpLeftStickTriggered;
+    case 7:
+        return g_manualJumpRightStickTriggered;
+    case 8:
+        return mDoCPd_c::getTrigL(PAD_1) != 0;
+    default:
+        return false;
     }
+}
 
-    if (alink->mLinkAcch.ChkGroundHit() || alink->checkEventRun() ||
-        alink->checkModeFlg(daAlink_c::MODE_SWIMMING) ||
-        alink->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE))
-    {
-        return;
+int manual_jump_binding_button_mask(int64_t binding) {
+    switch (binding) {
+    case 1:
+        return daAlink_c::BTN_A;
+    case 2:
+        return daAlink_c::BTN_B;
+    case 4:
+        return daAlink_c::BTN_R;
+    case 5:
+        return daAlink_c::BTN_Z;
+    case 8:
+        return daAlink_c::BTN_L;
+    default:
+        return 0;
     }
+}
 
+bool get_vanilla_standing_jump_height(daAlink_c* alink, f32* outHeight) {
+    if (alink == nullptr || alink->mpHIO == nullptr || outHeight == nullptr) {
+        return false;
+    }
     const auto& jump = alink->mpHIO->mAutoJump.m;
     const f32 standingJumpSpeed =
         jump.mAlwaysMaxSpeedJump ? jump.mMaxJumpSpeed : jump.mMinJumpSpeed;
@@ -287,25 +323,129 @@ void update_hover_plane_lowering(daAlink_c* alink) {
         verticalJumpSpeed <= 0.0f)
     {
         svc_log->warn(mod_ctx, "could not determine vanilla jump height for Hover Boots");
-        return;
+        return false;
     }
 
-    const f32 vanillaJumpHeight =
-        verticalJumpSpeed * verticalJumpSpeed / (2.0f * gravityMagnitude);
-    if (!std::isfinite(vanillaJumpHeight) || vanillaJumpHeight <= 0.0f) {
+    *outHeight = verticalJumpSpeed * verticalJumpSpeed / (2.0f * gravityMagnitude);
+    if (!std::isfinite(*outHeight) || *outHeight <= 0.0f) {
         svc_log->warn(mod_ctx, "could not determine vanilla jump height for Hover Boots");
-        return;
+        return false;
+    }
+    return true;
+}
+
+bool update_hover_plane_lowering(daAlink_c* alink, bool pendingRPress) {
+    const bool held = hoverPlaneLowerBindingHeld(hoverPlaneLowerBinding());
+    const bool pressed = held && !g_hoverPlaneLowerBindingWasHeld;
+    g_hoverPlaneLowerBindingWasHeld = held;
+    const bool shieldSurfing = g_shieldSurfActive && alink != nullptr &&
+                               alink->checkBoardRide();
+    if (!hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
+        !g_hoverGroundHeightValid || alink == nullptr ||
+        (shieldSurfing && !g_shieldSurfHoverPlaneActive))
+    {
+        return false;
+    }
+
+    if ((!shieldSurfing && alink->mLinkAcch.ChkGroundHit()) || alink->checkEventRun() ||
+        alink->checkModeFlg(daAlink_c::MODE_SWIMMING) ||
+        alink->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE))
+    {
+        return false;
+    }
+
+    if (shieldSurfing && !pressed && !g_shieldSurfPlaneRaisePending &&
+        alink->mProcID == daAlink_c::PROC_BOARD_JUMP && alink->speed.y > 0.0f)
+    {
+        return false;
+    }
+
+    if (shieldSurfing && g_shieldSurfPlaneRaisePending) {
+        if (!pressed && alink->mProcID == daAlink_c::PROC_BOARD_JUMP &&
+            alink->speed.y > 0.0f)
+        {
+            g_hoverGroundHeight = alink->current.pos.y;
+            g_hoverGroundHeightValid = true;
+            g_hoverAtSurface = false;
+            g_hoverLandingSequenceActive = false;
+            g_hoverLandingFrames = 0;
+            return false;
+        }
+        g_shieldSurfPlaneRaisePending = false;
+    }
+
+    const int64_t jumpBinding = manualJumpBinding();
+    const bool raisePressed =
+        shieldSurfing && jumpBinding != kManualJumpDisabled &&
+        manual_jump_binding_triggered(jumpBinding, pendingRPress);
+    if (!pressed && !raisePressed) {
+        return false;
+    }
+
+    f32 vanillaJumpHeight = 0.0f;
+    if (!get_vanilla_standing_jump_height(alink, &vanillaJumpHeight)) {
+        return false;
+    }
+
+    if (raisePressed) {
+        if (alink->mProcID == daAlink_c::PROC_BOARD_RIDE ||
+            alink->mProcID == daAlink_c::PROC_BOARD_WAIT)
+        {
+            const int jumpStarted = alink->procBoardJumpInit(0.0f, FALSE);
+            if (jumpStarted != 0) {
+                g_shieldSurfPlaneRaisePending = true;
+                g_hoverAtSurface = false;
+                g_hoverLandingSequenceActive = false;
+                g_hoverLandingFrames = 0;
+                alink->mItemTrigger &= static_cast<u8>(
+                    ~manual_jump_binding_button_mask(jumpBinding));
+                return true;
+            }
+        } else if (alink->mProcID == daAlink_c::PROC_BOARD_JUMP &&
+                   alink->speed.y > 0.0f)
+        {
+            g_hoverGroundHeight = alink->current.pos.y;
+            g_shieldSurfPlaneRaisePending = true;
+            alink->mItemTrigger &= static_cast<u8>(
+                ~manual_jump_binding_button_mask(jumpBinding));
+            return true;
+        }
+    }
+
+    if (!pressed) {
+        return false;
+    }
+
+    if (shieldSurfing) {
+        if (alink->mProcID == daAlink_c::PROC_BOARD_RIDE ||
+            alink->mProcID == daAlink_c::PROC_BOARD_WAIT)
+        {
+            alink->procBoardJumpInit(0.0f, TRUE);
+        }
+        alink->setSpecialGravity(
+            alink->mpHIO->mAutoJump.m.mGravity,
+            alink->mpHIO->mAutoJump.m.mMaxFallSpeed, TRUE);
+        alink->speed.y = std::min(alink->speed.y, -0.5f);
+        g_shieldSurfPlaneRaisePending = false;
+        g_hoverGroundHeight -= vanillaJumpHeight;
+        g_hoverGroundHeightValid = true;
+        g_hoverLandingSequenceActive = false;
+        g_hoverAtSurface = false;
+        g_hoverLandingFrames = 0;
+        return true;
     }
 
     if (g_hoverAtSurface) {
-        alink->procFallInit(1, jump.mFallInterpolation);
+        alink->procFallInit(1, alink->mpHIO->mAutoJump.m.mFallInterpolation);
     }
+    const auto& jump = alink->mpHIO->mAutoJump.m;
     alink->setSpecialGravity(jump.mGravity, jump.mMaxFallSpeed, TRUE);
     alink->speed.y = std::min(alink->speed.y, -0.5f);
     g_hoverGroundHeight -= vanillaJumpHeight;
     g_hoverLandingSequenceActive = false;
     g_hoverAtSurface = false;
     g_hoverLandingFrames = 0;
+    return false;
 }
 
 bool manual_jump_ground_action_ready(const daAlink_c* alink) {
@@ -326,11 +466,14 @@ bool manual_jump_ground_action_ready(const daAlink_c* alink) {
 }
 
 bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
-    if (!manualJumpAndGlideEnabled() || alink == nullptr ||
-        g_secondaryRing != nullptr || g_primaryRingOpen ||
+    if (alink == nullptr || g_secondaryRing != nullptr || g_primaryRingOpen ||
         g_sitActionState != SitActionState::Inactive || g_shieldSurfActive ||
         alink->checkEventRun() || alink->checkRideOn())
     {
+        return false;
+    }
+    const int64_t binding = manualJumpBinding();
+    if (binding == kManualJumpDisabled) {
         return false;
     }
     const bool wolf = alink->checkWolf();
@@ -338,7 +481,7 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
 
     int buttonMask = 0;
     bool triggered = false;
-    switch (manualJumpBinding()) {
+    switch (binding) {
     case 1:
         buttonMask = daAlink_c::BTN_A;
         triggered = mDoCPd_c::getTrigA(PAD_1) != 0;
@@ -348,6 +491,7 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
         triggered = mDoCPd_c::getTrigB(PAD_1) != 0;
         break;
     case 3:
+        buttonMask = daAlink_c::BTN_L;
         triggered = g_manualJumpLeftBumperTriggered && !manual_jump_l1_ui_blocked();
         break;
     case 4:
@@ -394,6 +538,14 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
     }
 
     const bool hovering = !wolf && is_hover_boots_hovering(alink);
+    if (hovering && g_hoverLandingSequenceActive &&
+        alink->mProcID == daAlink_c::PROC_LAND)
+    {
+        g_hoverLandingSequenceActive = false;
+        g_hoverLandingFrames = 0;
+        alink->procMoveInit();
+    }
+
     if (!alink->mLinkAcch.ChkGroundHit() && !hovering && !wolfGrounded) {
         if (g_hoverBootsEquipped) {
             if (!hoverBootsAirwalkingEnabled() ||
@@ -468,11 +620,14 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         return;
     }
 
+    recover_shield_surf_state(alink);
     const bool pendingRPress = g_manualJumpPendingR;
     g_manualJumpPendingR = false;
     const u32 extendedButtons = JUTGamePad::mPadStatus[PAD_1].extButton;
     const bool leftStickHeld = (extendedButtons & PAD_BUTTON_LEFT_STICK) != 0;
-    const bool rightStickHeld = (extendedButtons & PAD_BUTTON_RIGHT_STICK) != 0;
+    const bool rightStickHeld =
+        (extendedButtons & PAD_BUTTON_RIGHT_STICK) != 0 ||
+        PADGetNativeButtonPressed(PAD_1) == kNativeRightStickButton;
     const bool leftBumperHeld =
         PADGetNativeButtonPressed(PAD_1) == kNativeLeftShoulderButton;
     g_manualJumpLeftStickTriggered = leftStickHeld && !g_manualJumpLeftStickWasHeld;
@@ -481,7 +636,9 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     g_manualJumpLeftStickWasHeld = leftStickHeld;
     g_manualJumpRightStickWasHeld = rightStickHeld;
     g_manualJumpLeftBumperWasHeld = leftBumperHeld;
-    update_hover_plane_lowering(alink);
+    if (update_hover_plane_lowering(alink, pendingRPress)) {
+        return;
+    }
 
     if (pendingRPress && manualJumpBinding() == 4 &&
         alink->mLinkAcch.ChkGroundHit() &&
@@ -504,6 +661,14 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     if (!xTriggered && !yTriggered) {
         return;
     }
+
+    const u8 pressedButtons = static_cast<u8>(
+        (secondaryItemAssigned(0) && xTriggered
+             ? daAlink_c::BTN_X : 0) |
+        (secondaryItemAssigned(1) && yTriggered
+             ? daAlink_c::BTN_Y : 0));
+    alink->mItemTrigger &= static_cast<u8>(~pressedButtons);
+    alink->mItemButton &= static_cast<u8>(~pressedButtons);
 
     if (g_secondaryRing != nullptr || g_primaryRingOpen || alink->checkEventRun()) {
         g_secondaryItemInputHandled = true;
@@ -540,16 +705,10 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         }
     }
 
-    const u8 pressedButtons = static_cast<u8>(
-        (secondaryItemAssigned(0) && xTriggered
-             ? daAlink_c::BTN_X : 0) |
-        (secondaryItemAssigned(1) && yTriggered
-             ? daAlink_c::BTN_Y : 0));
     if (pressedButtons == 0) {
         return;
     }
 
-    alink->mItemTrigger &= static_cast<u8>(~pressedButtons);
     if (g_secondaryItemInputHandled) {
         return;
     }

@@ -178,6 +178,26 @@ HookAction suppress_ice_frozen_enemy_attack(ModContext*, void* args, void*, void
     return HOOK_CONTINUE;
 }
 
+HookAction hide_secondary_assigned_vanilla_ammo_count(
+    ModContext*, void* args, void*, void*)
+{
+    auto* meterDraw = mods::arg<dMeter2Draw_c*>(args, 0);
+    const u8 button = mods::arg<u8>(args, 1);
+    auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
+    if (meterDraw == nullptr || button >= dMeter2Draw_c::SELECT_MAX_e ||
+        alink == nullptr || alink->checkWolf() || !secondaryItemAssigned(button))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    for (auto* digit : meterDraw->mpItemNumTex[button]) {
+        if (digit != nullptr) {
+            digit->setAlpha(0);
+        }
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
 void restore_ice_frozen_enemy_attack(ModContext*, void* args, void*, void*) {
     auto* collider = mods::arg<cCcD_Obj*>(args, 0);
     if (collider != nullptr && collider == g_iceArrowSuppressedAttackCollider) {
@@ -374,7 +394,9 @@ DEFINE_HOOK(&dMenu_Ring_c::setJumpItem, RingSetJumpItem);
 DEFINE_HOOK(&dMenu_Ring_c::isMixItemOn, RingIsMixItemOn);
 DEFINE_HOOK(&dMenu_Ring_c::isMixItemOff, RingIsMixItemOff);
 DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemXY, ChangeTextureItemXY);
+DEFINE_HOOK(&dMeter2Draw_c::drawItemNum, DrawItemNum);
 DEFINE_HOOK(&dMeter2_c::moveButtonXY, MeterMoveButtonXY);
+DEFINE_HOOK(&daSpinner_c::reflectAccept, SpinnerReflectAccept);
 DEFINE_HOOK(&dMeter2Info_readItemTexture, ReadItemTexture);
 DEFINE_HOOK(&daAlink_c::setWaterY, SetWaterY);
 DEFINE_HOOK(&daAlink_c::setRoomInfo, SetRoomInfo);
@@ -416,6 +438,10 @@ DEFINE_HOOK(&daAlink_c::setSandShapeOffset, SetSandShapeOffset);
 DEFINE_HOOK(&daAlink_c::checkWaterPolygonUnder, CheckWaterPolygonUnder);
 DEFINE_HOOK(&daAlink_c::checkPolyDamage, CheckPolyDamage);
 DEFINE_HOOK(&daAlink_c::setHeavyBoots, SetHeavyBoots);
+DEFINE_HOOK_SYMBOL(
+    "cBgS::GetTriPla", bool(const cBgS*, const cBgS_PolyInfo*, cM3dGPla*),
+    ShieldSurfGetTriPla);
+DEFINE_HOOK(&daSpinner_c::setReflectAngle, SpinnerSetReflectAngle);
 DEFINE_HOOK(&daAlink_c::voiceStart, HawkGrassVoiceStart);
 DEFINE_HOOK(&dMenu_Ring_c::_move, RingMove);
 DEFINE_HOOK(&dMenu_Ring_c::_draw, RingDraw);
@@ -460,3 +486,4 @@ DEFINE_HOOK(static_cast<void (dScnKy_env_light_c::*)(J3DModelData*, dKy_tevstr_c
 DEFINE_HOOK(&dScnKy_env_light_c::settingTevStruct, SettingTevStruct);
 DEFINE_HOOK(&daAlink_c::setWaterDropColor, SetWaterDropColor);
 DEFINE_HOOK(&daItem_c::_daItem_execute, ItemExecute);
+DEFINE_HOOK(&daGlwSph_c::execute, GlowSphereExecute);
