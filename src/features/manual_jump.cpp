@@ -15,6 +15,7 @@ void reset_manual_jump_input_state() {
     g_manualJumpRightStickTriggered = false;
     g_manualJumpLeftBumperWasHeld = false;
     g_manualJumpLeftBumperTriggered = false;
+    g_hoverPlaneRaiseBindingWasHeld = false;
 }
 
 bool manual_jump_l1_ui_blocked() {
@@ -292,6 +293,29 @@ bool manual_jump_binding_triggered(int64_t binding, bool pendingRPress) {
     }
 }
 
+bool manual_jump_binding_held(int64_t binding) {
+    switch (binding) {
+    case 1:
+        return mDoCPd_c::getHoldA(PAD_1) != 0;
+    case 2:
+        return mDoCPd_c::getHoldB(PAD_1) != 0;
+    case 3:
+        return g_manualJumpLeftBumperWasHeld && !manual_jump_l1_ui_blocked();
+    case 4:
+        return mDoCPd_c::getHoldLockR(PAD_1) != 0;
+    case 5:
+        return mDoCPd_c::getHoldZ(PAD_1) != 0;
+    case 6:
+        return g_manualJumpLeftStickWasHeld;
+    case 7:
+        return g_manualJumpRightStickWasHeld;
+    case 8:
+        return mDoCPd_c::getHoldL(PAD_1) != 0;
+    default:
+        return false;
+    }
+}
+
 int manual_jump_binding_button_mask(int64_t binding) {
     switch (binding) {
     case 1:
@@ -338,6 +362,10 @@ bool update_hover_plane_lowering(daAlink_c* alink, bool pendingRPress) {
     const bool held = hoverPlaneLowerBindingHeld(hoverPlaneLowerBinding());
     const bool pressed = held && !g_hoverPlaneLowerBindingWasHeld;
     g_hoverPlaneLowerBindingWasHeld = held;
+    const int64_t jumpBinding = manualJumpBinding();
+    const bool jumpHeld = manual_jump_binding_held(jumpBinding);
+    const bool jumpPressed = jumpHeld && !g_hoverPlaneRaiseBindingWasHeld;
+    g_hoverPlaneRaiseBindingWasHeld = jumpHeld;
     const bool shieldSurfing = g_shieldSurfActive && alink != nullptr &&
                                alink->checkBoardRide();
     if (!hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
@@ -374,10 +402,9 @@ bool update_hover_plane_lowering(daAlink_c* alink, bool pendingRPress) {
         g_shieldSurfPlaneRaisePending = false;
     }
 
-    const int64_t jumpBinding = manualJumpBinding();
     const bool raisePressed =
         shieldSurfing && jumpBinding != kManualJumpDisabled &&
-        manual_jump_binding_triggered(jumpBinding, pendingRPress);
+        (manual_jump_binding_triggered(jumpBinding, pendingRPress) || jumpPressed);
     if (!pressed && !raisePressed) {
         return false;
     }
