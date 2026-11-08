@@ -523,6 +523,7 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
             g_hoverGroundHeightValid = false;
             g_hoverLandingSequenceActive = false;
             g_hoverAtSurface = false;
+            g_hoverPlaneWasLeft = false;
             g_hoverLandingFrames = 0;
             g_hoverRippleEmitter = 0;
             stop_hover_magic_effects();

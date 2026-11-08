@@ -565,11 +565,13 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
     }
 
     const bool hovering = !wolf && is_hover_boots_hovering(alink);
-    if (hovering && g_hoverLandingSequenceActive &&
-        alink->mProcID == daAlink_c::PROC_LAND)
+    if (hovering && (alink->mProcID == daAlink_c::PROC_LAND ||
+                     alink->mProcID == daAlink_c::PROC_AUTO_JUMP ||
+                     alink->mProcID == daAlink_c::PROC_FALL))
     {
         g_hoverLandingSequenceActive = false;
         g_hoverLandingFrames = 0;
+        alink->offModeFlg(daAlink_c::MODE_JUMP);
         alink->procMoveInit();
     }
 

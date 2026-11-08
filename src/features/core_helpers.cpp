@@ -124,7 +124,12 @@ bool hawkOneShotDamageEnabled() {
 }
 
 bool hoverBootsWaterWalkingEnabled() {
+#if TARGET_ANDROID
+    // Keep the crashing Android water-walk hooks inactive until their runtime failure is fixed.
+    return false;
+#else
     return get_bool_option(g_hoverBootsWaterWalking, false);
+#endif
 }
 
 bool sitHealingEnabled() {
@@ -150,7 +155,8 @@ bool hoverBootsAirwalkingEnabled() {
 bool is_hover_boots_hovering(const daAlink_c* alink) {
     return alink != nullptr && hoverBootsAirwalkingEnabled() && g_hoverBootsEquipped &&
            g_hoverGroundHeightValid && g_hoverAtSurface &&
-           !alink->mLinkAcch.ChkGroundHit() && !alink->checkEventRun() &&
+           std::abs(alink->current.pos.y - g_hoverGroundHeight) <= 1.0f &&
+           !alink->checkEventRun() &&
            !alink->checkModeFlg(daAlink_c::MODE_SWIMMING);
 }
 

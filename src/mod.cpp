@@ -293,6 +293,7 @@ bool g_hoverPlaneRaiseBindingWasHeld = false;
 bool g_hoverGroundHeightValid = false;
 bool g_hoverLandingSequenceActive = false;
 bool g_hoverAtSurface = false;
+bool g_hoverPlaneWasLeft = false;
 bool g_hoverWaterGroundPlaneActive = false;
 f32 g_hoverWaterSurfaceHeight = 0.0f;
 f32 g_hoverWaterUnderlyingGroundHeight = -G_CM3D_F_INF;
@@ -390,10 +391,10 @@ ModResult install_hooks() {
     ADD_PRE(ReadItemTexture, apply_hawk_grass_equip_icon);
     ADD_POST(ReadItemTexture, replace_secondary_custom_icon);
     ADD_POST(SetWaterY, treat_lava_as_surface);
-    ADD_POST(SetWaterY, treat_water_as_surface_with_hover_boots);
     ADD_POST(SetRoomInfo, maintain_lava_ground);
     ADD_POST(SetRoomInfo, maintain_hover_water_surface);
     ADD_POST(AutoGroundHit, maintain_hover_height);
+    ADD_POST(AutoGroundHit, treat_water_as_surface_with_hover_boots);
     ADD_POST(PlayerExecute, disable_hover_boots_for_wolf);
     ADD_PRE(GetGroundAngle, flatten_hover_water_ground_angle);
     ADD_PRE(GetSlidePolygon, suppress_submerged_water_slide_polygon);
@@ -907,6 +908,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_hoverGroundHeightValid = false;
     g_hoverLandingSequenceActive = false;
     g_hoverAtSurface = false;
+    g_hoverPlaneWasLeft = false;
     clear_hover_water_ground_plane();
     g_hoverLandingFrames = 0;
     g_hoverRippleEmitter = 0;
