@@ -120,13 +120,31 @@ void maintain_hover_height(ModContext*, void* args, void*, void*) {
         return;
     }
 
+    if (g_hoverGroundHeightValid &&
+        (alink->speed.y > 0.0f ||
+         alink->current.pos.y > g_hoverGroundHeight + 1.0f))
+    {
+        g_hoverPlaneWasLeft = true;
+        g_hoverLandingSequenceActive = false;
+        g_hoverAtSurface = false;
+        g_hoverLandingFrames = 0;
+    }
+
     if (alink->mLinkAcch.ChkGroundHit() &&
         (!g_hoverGroundHeightValid || alink->current.pos.y >= g_hoverGroundHeight))
     {
+        const bool alreadyAtHoverPlane =
+            g_hoverAtSurface &&
+            std::abs(alink->current.pos.y - g_hoverGroundHeight) <= 1.0f;
+        const bool returnedToHoverPlane =
+            alreadyAtHoverPlane ||
+            (g_hoverPlaneWasLeft && alink->speed.y <= 0.0f &&
+             alink->current.pos.y <= g_hoverGroundHeight + 1.0f);
         g_hoverGroundHeight = alink->current.pos.y;
         g_hoverGroundHeightValid = true;
-        g_hoverLandingSequenceActive = false;
-        g_hoverAtSurface = false;
+        g_hoverLandingSequenceActive = returnedToHoverPlane && !alreadyAtHoverPlane;
+        g_hoverAtSurface = returnedToHoverPlane;
+        g_hoverPlaneWasLeft = false;
         g_hoverLandingFrames = 0;
     }
 
@@ -148,6 +166,12 @@ void maintain_hover_height(ModContext*, void* args, void*, void*) {
             alink->procLandInit(fallDistance);
             g_hoverLandingSequenceActive = true;
             g_hoverAtSurface = true;
+            g_hoverPlaneWasLeft = false;
+            g_hoverLandingFrames = 0;
+        } else if (alink->mLinkAcch.ChkGroundHit() && g_hoverPlaneWasLeft) {
+            g_hoverLandingSequenceActive = true;
+            g_hoverAtSurface = true;
+            g_hoverPlaneWasLeft = false;
             g_hoverLandingFrames = 0;
         } else if (!alink->mLinkAcch.ChkGroundHit() &&
                    (alink->mProcID == daAlink_c::PROC_AUTO_JUMP ||
@@ -197,14 +221,11 @@ void update_hover_landing_recovery(daAlink_c* alink) {
     }
 
     if (!hoverBootsAirwalkingEnabled() || !g_hoverBootsEquipped ||
-        alink->mLinkAcch.ChkGroundHit() || !g_hoverGroundHeightValid ||
+        !g_hoverGroundHeightValid ||
         alink->current.pos.y > g_hoverGroundHeight + 1.0f || alink->speed.y > 0.0f)
     {
         g_hoverLandingSequenceActive = false;
         g_hoverLandingFrames = 0;
-        if (alink->mLinkAcch.ChkGroundHit()) {
-            g_hoverAtSurface = false;
-        }
         return;
     }
 
@@ -229,6 +250,8 @@ void update_hover_landing_recovery(daAlink_c* alink) {
 
     g_hoverLandingSequenceActive = false;
     g_hoverLandingFrames = 0;
+    g_hoverAtSurface = true;
+    g_hoverPlaneWasLeft = false;
     alink->procMoveInit();
     alink->offModeFlg(daAlink_c::MODE_JUMP);
 }
@@ -280,10 +303,16 @@ void treat_lava_as_surface(ModContext*, void* args, void*, void*) {
     stabilize_lava_surface_contact(alink, true);
 }
 
+bool is_hover_boots_transitioning(const daAlink_c* alink) {
+    return alink != nullptr &&
+           (g_hoverBootsTransitionPending ||
+            alink->mProcID == daAlink_c::PROC_BOOTS_EQUIP);
+}
+
 bool is_hover_water_walk_active(const daAlink_c* alink) {
     if (!hoverBootsWaterWalkingEnabled() || !g_hoverBootsEquipped || alink == nullptr ||
-        alink->field_0x2fbc == 6 || alink->checkEventRun() ||
-        !g_hoverWaterGroundPlaneActive)
+        is_hover_boots_transitioning(alink) || alink->field_0x2fbc == 6 ||
+        alink->checkEventRun() || !g_hoverWaterGroundPlaneActive)
     {
         return false;
     }
@@ -316,10 +345,12 @@ f32 get_hover_water_surface_y(const daAlink_c* alink) {
 
 bool is_hover_water_walk_candidate(const daAlink_c* alink) {
     if (!hoverBootsWaterWalkingEnabled() || !g_hoverBootsEquipped || alink == nullptr ||
+        is_hover_boots_transitioning(alink) ||
+        (alink->mWaterY != -G_CM3D_F_INF && !alink->mLinkAcch.ChkWaterHit()) ||
+        (alink->mWaterY == -G_CM3D_F_INF && !g_hoverWaterGroundPlaneActive) ||
         alink->checkEventRun() || alink->field_0x2fbc == 6 ||
         (alink->mWaterY == -G_CM3D_F_INF &&
-         (!g_hoverWaterGroundPlaneActive ||
-          g_hoverWaterMissFrames > kHoverWaterMissToleranceFrames)))
+         g_hoverWaterMissFrames > kHoverWaterMissToleranceFrames))
     {
         return false;
     }
@@ -409,7 +440,11 @@ HookAction suppress_submerged_water_exit(ModContext*, void* args, void* retval, 
 
 void treat_water_as_surface_with_hover_boots(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (alink == nullptr) {
+    if (alink == nullptr || is_hover_boots_transitioning(alink)) {
+        return;
+    }
+
+    if (alink->mWaterY == -G_CM3D_F_INF && !g_hoverWaterGroundPlaneActive) {
         return;
     }
 

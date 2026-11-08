@@ -50,7 +50,7 @@ void release_shield_surf_player_state(daAlink_c* alink) {
         fopAcM_GetID(rideActor) == g_shieldSurfBoardId;
     const bool staleBoardRide =
         g_shieldSurfActive && alink->checkBoardRide() &&
-        is_shield_surf_board_process(alink->mProcID);
+        (rideActor == nullptr || is_shield_surf_board_process(alink->mProcID));
     if (ridingTrackedBoard)
     {
         auto* board = static_cast<daObjIceLeaf_c*>(rideActor);

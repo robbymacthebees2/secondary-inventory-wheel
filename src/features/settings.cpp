@@ -178,9 +178,17 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
+#if TARGET_ANDROID
+    control.label = "Hover Boots water walking (unavailable on Android)";
+    control.help_rml =
+        "Water walking is temporarily unavailable on Android due to a crash. Hover Boots use "
+        "airwalking on Android. On other platforms, enabling this makes Hover Boots walk on "
+        "water and disables airwalking.";
+#else
     control.label = "Hover Boots water walking (replaces airwalking)";
     control.help_rml =
         "When enabled, Hover Boots walk on water and no longer airwalk. Disabled by default.";
+#endif
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_hoverBootsWaterWalking;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);

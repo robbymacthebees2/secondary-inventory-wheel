@@ -231,6 +231,7 @@ void update_hover_boots() {
             g_hoverGroundHeightValid = false;
             g_hoverLandingSequenceActive = false;
             g_hoverAtSurface = false;
+            g_hoverPlaneWasLeft = false;
             g_hoverLandingFrames = 0;
         }
         return;
@@ -254,6 +255,7 @@ void disable_hover_boots() {
     g_hoverGroundHeightValid = false;
     g_hoverLandingSequenceActive = false;
     g_hoverAtSurface = false;
+    g_hoverPlaneWasLeft = false;
     g_hoverLandingFrames = 0;
     g_hoverRippleEmitter = 0;
     stop_hover_magic_effects();
@@ -327,13 +329,16 @@ void set_hover_boots_enabled(daAlink_c* alink, bool enabled) {
             g_hoverGroundHeight = surfPlaneHeight;
             g_hoverGroundHeightValid = true;
             g_hoverAtSurface = true;
+            g_hoverPlaneWasLeft = false;
         }
     } else {
+        clear_hover_water_ground_plane();
         g_hoverBootsEquipped = true;
         g_hoverGroundHeight = alink->current.pos.y;
-        g_hoverGroundHeightValid = true;
+        g_hoverGroundHeightValid = hoverBootsAirwalkingEnabled();
         g_hoverLandingSequenceActive = false;
         g_hoverAtSurface = false;
+        g_hoverPlaneWasLeft = false;
         g_hoverLandingFrames = 0;
         g_hoverRippleEmitter = 0;
     }
