@@ -1,0 +1,4 @@
+name = Zora Link (Alt Eyes)
+by = SkilarBabcock
+about = Model and textures by SkilarBabcock; fixes by Oxygno.
+preset = false

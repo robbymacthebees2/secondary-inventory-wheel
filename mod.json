@@ -1,7 +1,7 @@
 {
   "id": "dev.twilitrealm.secondary_inventory_wheel",
-  "name": "RobinWheelAndTweaks",
-  "version": "1.7.1",
+  "name": "Secondary Inventory Wheel",
+  "version": "2.0.0",
   "author": "RobinTheSoundsmith",
-  "description": "Adds a secondary inventory wheel with a Lens of Truth after Ice Arrow, a Stone Mask, a Goron Mask, a Giant's Mask, and an Armos Hammer, plus Shield Surf, Dark Link Form, Hover Boots, Magic Armor Twilight Ward, Rupee Magnet, Sit, Hawk Grass, Goron Tunic lava walking, and Hawk attack options."
+  "description": "Adds a secondary inventory wheel with custom items, co-op player and actor synchronization, third-party player models, and Shield Surf, Sit, and Deku Nut support."
 }

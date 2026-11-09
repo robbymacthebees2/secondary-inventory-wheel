@@ -1,0 +1,280 @@
+Dark Link/body.bmd
+Dark Link/equipment/al_poda.bmd
+Dark Link/equipment/al_podm.bmd
+Dark Link/equipment/al_sha.bmd
+Dark Link/equipment/al_swa.bmd
+Dark Link/equipment/al_swm.bmd
+Dark Link/face.bmd
+Dark Link/hands.bmd
+Dark Link/head.bmd
+Dark Link/icons.bin
+Dark Link/magic/body.bmd
+Dark Link/magic/face.bmd
+Dark Link/magic/hands.bmd
+Dark Link/magic/head.bmd
+Dark Link/model.txt
+Dark Link/zora/body.bmd
+Dark Link/zora/face.bmd
+Dark Link/zora/hands.bmd
+Dark Link/zora/head.bmd
+Hero of Time/body.bmd
+Hero of Time/cutscene/demo04_link_cut99_gp_hihead_o.bmd
+Hero of Time/cutscene/demo17_blhead_cut00_gp_1.bmd
+Hero of Time/cutscene/demo22_alswm_cut00_gp_1.bmd
+Hero of Time/cutscene/demo24_blhead_cut00_gp_1.bmd
+Hero of Time/cutscene/demo29_sword_cut00_gp_1.bmd
+Hero of Time/cutscene/demo37_blhead_cut00_gp_1.bmd
+Hero of Time/equipment/al_arrow.bmd
+Hero of Time/equipment/al_arrowb.bmd
+Hero of Time/equipment/al_bomb.bmd
+Hero of Time/equipment/al_boom.bmd
+Hero of Time/equipment/al_bow.bmd
+Hero of Time/equipment/al_crod.bmd
+Hero of Time/equipment/al_hs.bmd
+Hero of Time/equipment/al_hs_tip.bmd
+Hero of Time/equipment/al_ib.bmd
+Hero of Time/equipment/al_pachi_nut.bmd
+Hero of Time/equipment/al_pend.bmd
+Hero of Time/equipment/al_poda.bmd
+Hero of Time/equipment/al_podm.bmd
+Hero of Time/equipment/al_sha.bmd
+Hero of Time/equipment/al_shc.bmd
+Hero of Time/equipment/al_sp.bmd
+Hero of Time/equipment/al_swa.bmd
+Hero of Time/equipment/al_swm.bmd
+Hero of Time/equipment/crod_ball.bmd
+Hero of Time/equipment/ef_setboom.bmd
+Hero of Time/equipment/ef_shippu.bmd
+Hero of Time/equipment/footmark.bmd
+Hero of Time/equipment/hk.bmd
+Hero of Time/equipment/inochidama.bmd
+Hero of Time/equipment/o_al_swm.bmd
+Hero of Time/equipment/pb.bmd
+Hero of Time/equipment/pg.bmd
+Hero of Time/equipment/rod_ukia.bmd
+Hero of Time/equipment/rod_ukib.bmd
+Hero of Time/equipment/rod_ukic.bmd
+Hero of Time/equipment/sango_fook.bmd
+Hero of Time/equipment/sfook.bmd
+Hero of Time/equipment/uki.bmd
+Hero of Time/equipment/uki_saki.bmd
+Hero of Time/equipment/wl_change.bmd
+Hero of Time/equipment/worm.bmd
+Hero of Time/equipment/worm_hole.bmd
+Hero of Time/face.bmd
+Hero of Time/hands.bmd
+Hero of Time/head.bmd
+Hero of Time/icons.bin
+Hero of Time/magic/body.bmd
+Hero of Time/magic/face.bmd
+Hero of Time/magic/head.bmd
+Hero of Time/model.txt
+Hero of Time/ordon/body.bmd
+Hero of Time/ordon/head.bmd
+Hero of Time/wolf/body.bmd
+Hero of Time/zora/body.bmd
+Hero of Time/zora/face.bmd
+Hero of Time/zora/hands.bmd
+Hero of Time/zora/head.bmd
+Hero of the Sky/body.bmd
+Hero of the Sky/equipment/al_arrow.bmd
+Hero of the Sky/equipment/al_arrowb.bmd
+Hero of the Sky/equipment/al_bomb.bmd
+Hero of the Sky/equipment/al_boom.bmd
+Hero of the Sky/equipment/al_bow.bmd
+Hero of the Sky/equipment/al_hs.bmd
+Hero of the Sky/equipment/al_hs_kusari.bmd
+Hero of the Sky/equipment/al_hs_tip.bmd
+Hero of the Sky/equipment/al_pachi_nut.bmd
+Hero of the Sky/equipment/al_poda.bmd
+Hero of the Sky/equipment/al_podm.bmd
+Hero of the Sky/equipment/al_sha.bmd
+Hero of the Sky/equipment/al_sp.bmd
+Hero of the Sky/equipment/al_swa.bmd
+Hero of the Sky/equipment/al_swm.bmd
+Hero of the Sky/equipment/crod_ball.bmd
+Hero of the Sky/equipment/ef_setboom.bmd
+Hero of the Sky/equipment/ef_shippu.bmd
+Hero of the Sky/equipment/footmark.bmd
+Hero of the Sky/equipment/hk.bmd
+Hero of the Sky/equipment/inochidama.bmd
+Hero of the Sky/equipment/pb.bmd
+Hero of the Sky/equipment/pg.bmd
+Hero of the Sky/equipment/rod_ukia.bmd
+Hero of the Sky/equipment/rod_ukib.bmd
+Hero of the Sky/equipment/rod_ukic.bmd
+Hero of the Sky/equipment/sango_fook.bmd
+Hero of the Sky/equipment/sfook.bmd
+Hero of the Sky/equipment/uki.bmd
+Hero of the Sky/equipment/uki_saki.bmd
+Hero of the Sky/equipment/wl_change.bmd
+Hero of the Sky/equipment/worm.bmd
+Hero of the Sky/equipment/worm_hole.bmd
+Hero of the Sky/head.bmd
+Hero of the Sky/model.txt
+Hero of the Wild/body.bmd
+Hero of the Wild/equipment/al_arrow.bmd
+Hero of the Wild/equipment/al_arrowb.bmd
+Hero of the Wild/equipment/al_bomb.bmd
+Hero of the Wild/equipment/al_boom.bmd
+Hero of the Wild/equipment/al_bow.bmd
+Hero of the Wild/equipment/al_hs.bmd
+Hero of the Wild/equipment/al_hs_kusari.bmd
+Hero of the Wild/equipment/al_hs_tip.bmd
+Hero of the Wild/equipment/al_pachi_nut.bmd
+Hero of the Wild/equipment/al_poda.bmd
+Hero of the Wild/equipment/al_podm.bmd
+Hero of the Wild/equipment/al_sha.bmd
+Hero of the Wild/equipment/al_sp.bmd
+Hero of the Wild/equipment/al_swa.bmd
+Hero of the Wild/equipment/al_swm.bmd
+Hero of the Wild/equipment/crod_ball.bmd
+Hero of the Wild/equipment/ef_setboom.bmd
+Hero of the Wild/equipment/ef_shippu.bmd
+Hero of the Wild/equipment/footmark.bmd
+Hero of the Wild/equipment/hk.bmd
+Hero of the Wild/equipment/inochidama.bmd
+Hero of the Wild/equipment/pb.bmd
+Hero of the Wild/equipment/pg.bmd
+Hero of the Wild/equipment/rod_ukia.bmd
+Hero of the Wild/equipment/rod_ukib.bmd
+Hero of the Wild/equipment/rod_ukic.bmd
+Hero of the Wild/equipment/sango_fook.bmd
+Hero of the Wild/equipment/sfook.bmd
+Hero of the Wild/equipment/uki.bmd
+Hero of the Wild/equipment/uki_saki.bmd
+Hero of the Wild/equipment/wl_change.bmd
+Hero of the Wild/equipment/worm.bmd
+Hero of the Wild/equipment/worm_hole.bmd
+Hero of the Wild/head.bmd
+Hero of the Wild/model.txt
+Hyrule Warriors/body.bmd
+Hyrule Warriors/equipment/al_podm.bmd
+Hyrule Warriors/equipment/al_sha.bmd
+Hyrule Warriors/equipment/al_swm.bmd
+Hyrule Warriors/head.bmd
+Hyrule Warriors/model.txt
+Linkle/body.bmd
+Linkle/cutscene/demo00_link_cut00_fc_blend.bmd
+Linkle/cutscene/demo00_link_cut00_fc_tongue.bmd
+Linkle/cutscene/demo00_link_cut00_hl_tmp.bmd
+Linkle/cutscene/demo00_link_cut00_hr_tmp.bmd
+Linkle/cutscene/demo00_midna_cut00_bd_hairhand.bmd
+Linkle/cutscene/demo00_midna_cut00_bd_hands.bmd
+Linkle/cutscene/demo00_midna_cut00_bd_mask.bmd
+Linkle/cutscene/demo00_midna_cut00_bd_tmp.bmd
+Linkle/cutscene/demo00_midna_cut00_fc_blend.bmd
+Linkle/cutscene/demo00_midna_cut00_fc_tongue.bmd
+Linkle/cutscene/demo00_midna_cut00_hd_tmp.bmd
+Linkle/cutscene/demo00_midna_cut00_hl_tmp.bmd
+Linkle/cutscene/demo00_midna_cut00_hr_tmp.bmd
+Linkle/cutscene/demo04_link_cut99_gp_blnohandl_o.bmd
+Linkle/cutscene/demo04_link_cut99_gp_henkeiface_o.bmd
+Linkle/cutscene/demo04_link_cut99_gp_hiface_o.bmd
+Linkle/cutscene/demo04_link_cut99_gp_hihead_o.bmd
+Linkle/cutscene/demo04_link_cut99_gp_hl_o.bmd
+Linkle/cutscene/demo04_md_cut00_gp_1_o.bmd
+Linkle/cutscene/demo04_mdhairhand_cut00_gp_1_o.bmd
+Linkle/cutscene/demo04_mdmask_cut00_gp_1_o.bmd
+Linkle/cutscene/demo04_s2_cut00_gp_1_o.bmd
+Linkle/cutscene/demo04_wl_cut00_gp_1_o.bmd
+Linkle/cutscene/demo04_wl_cut99_gp_henkei_o.bmd
+Linkle/cutscene/demo11_hutu_cut00_gp_1.bmd
+Linkle/cutscene/demo11_lumrok_cut00_gp_1.bmd
+Linkle/cutscene/demo11_lumwtr_cut00_gp_1.bmd
+Linkle/cutscene/demo11_mdhair_cut00_gp_1.bmd
+Linkle/cutscene/demo11_seirei_cut00_gp_1.bmd
+Linkle/cutscene/demo11_seirei_cut00_gp_in.bmd
+Linkle/cutscene/demo11_seirei_cut00_gp_out.bmd
+Linkle/cutscene/demo11_seirei_cut01_gp_efin_o.bmd
+Linkle/cutscene/demo11_sizuku_cut00_gp_1.bmd
+Linkle/cutscene/demo11_water_cut00_gp_1.bmd
+Linkle/cutscene/demo17_besu_cut00_gp_1.bmd
+Linkle/cutscene/demo17_blface_cut00_gp_1.bmd
+Linkle/cutscene/demo17_blhead_cut00_gp_1.bmd
+Linkle/cutscene/demo17_blink_cut00_gp_1.bmd
+Linkle/cutscene/demo17_kolin_cut00_gp_1.bmd
+Linkle/cutscene/demo17_len_cut00_gp_1.bmd
+Linkle/cutscene/demo17_lud_cut00_gp_1.bmd
+Linkle/cutscene/demo17_maro_cut00_gp_1.bmd
+Linkle/cutscene/demo17_plane_cut15_gp_1.bmd
+Linkle/cutscene/demo17_taro_cut00_gp_1.bmd
+Linkle/cutscene/demo18_3daisin_cut06_gp_1.bmd
+Linkle/cutscene/demo18_3daisin_cut07_gp_1.bmd
+Linkle/cutscene/demo18_blind_cut00_gp_1.bmd
+Linkle/cutscene/demo18_blind_cut07_gp_1.bmd
+Linkle/cutscene/demo18_blind_cut13_gp_1.bmd
+Linkle/cutscene/demo18_blind_cut14_gp_1.bmd
+Linkle/cutscene/demo18_blind_cut23_gp_1.bmd
+Linkle/cutscene/demo18_boku_cut00_gp_1.bmd
+Linkle/cutscene/demo18_dlink_cut00_gp_1.bmd
+Linkle/cutscene/demo18_ground_cut00_gp_1.bmd
+Linkle/cutscene/demo18_hutu_cut00_gp_1.bmd
+Linkle/cutscene/demo18_linsw_cut00_gp_1.bmd
+Linkle/cutscene/demo18_mask_cut00_gp_1.bmd
+Linkle/cutscene/demo18_mdhair_cut00_gp_1.bmd
+Linkle/cutscene/demo18_seid_cut00_gp_1.bmd
+Linkle/cutscene/demo18_sizd_cut00_gp_1.bmd
+Linkle/cutscene/demo18_sizuku_cut23_gp_1.bmd
+Linkle/cutscene/demo18_star_cut00_gp_1.bmd
+Linkle/cutscene/demo18_triforce_cut00_gp_1.bmd
+Linkle/cutscene/demo18_water_cut01_gp_1.bmd
+Linkle/cutscene/demo18_yelia_cut00_gp_1.bmd
+Linkle/cutscene/demo18_yelib_cut00_gp_1.bmd
+Linkle/cutscene/demo18_yelsw_cut00_gp_1.bmd
+Linkle/cutscene/demo20_md_cut00_gp_1.bmd
+Linkle/cutscene/demo20_mdhairhand_cut00_gp_1.bmd
+Linkle/cutscene/demo20_mdmask_cut00_gp_1.bmd
+Linkle/cutscene/demo20_sizuku_cut00_gp_1.bmd
+Linkle/cutscene/demo20_wl_cut00_gp_1.bmd
+Linkle/cutscene/demo22_alswm_cut00_gp_1.bmd
+Linkle/cutscene/demo22_injyu_cut00_gp_1.bmd
+Linkle/cutscene/demo22_mdhair_cut00_gp_1.bmd
+Linkle/cutscene/demo22_mist_cut08_gp_1.bmd
+Linkle/cutscene/demo24_blface_cut00_gp_1.bmd
+Linkle/cutscene/demo24_blhead_cut00_gp_1.bmd
+Linkle/cutscene/demo24_blink_cut00_gp_1.bmd
+Linkle/cutscene/demo37_bgbord_cut00_gp_1.bmd
+Linkle/cutscene/demo37_blface_cut00_gp_1.bmd
+Linkle/cutscene/demo37_blhead_cut00_gp_1.bmd
+Linkle/cutscene/demo37_blink_cut00_gp_1.bmd
+Linkle/cutscene/demo37_yelia_cut00_gp_1.bmd
+Linkle/cutscene/demo37_ytear_cut00_gp_1.bmd
+Linkle/cutscene/demo38_twfilm_cut00_gp_1_o.bmd
+Linkle/cutscene/demo38_wl_cut00_gp_1_o.bmd
+Linkle/face.bmd
+Linkle/hands.bmd
+Linkle/head.bmd
+Linkle/magic/body.bmd
+Linkle/magic/face.bmd
+Linkle/magic/hands.bmd
+Linkle/magic/head.bmd
+Linkle/model.txt
+Linkle/ordon/body.bmd
+Linkle/ordon/face.bmd
+Linkle/ordon/hands.bmd
+Linkle/ordon/head.bmd
+Linkle/wolf/body.bmd
+Linkle/zora/body.bmd
+Linkle/zora/face.bmd
+Linkle/zora/hands.bmd
+Linkle/zora/head.bmd
+Ordon Warrior (No Hat)/body.bmd
+Ordon Warrior (No Hat)/head.bmd
+Ordon Warrior (No Hat)/model.txt
+Ordon Warrior/body.bmd
+Ordon Warrior/model.txt
+Zora Link (Alt Eyes)/equipment/al_bootsh.bmd
+Zora Link (Alt Eyes)/equipment/al_swb.bmd
+Zora Link (Alt Eyes)/model.txt
+Zora Link (Alt Eyes)/zora/body.bmd
+Zora Link (Alt Eyes)/zora/face.bmd
+Zora Link (Alt Eyes)/zora/hands.bmd
+Zora Link (Alt Eyes)/zora/head.bmd
+Zora Link/equipment/al_bootsh.bmd
+Zora Link/equipment/al_swb.bmd
+Zora Link/model.txt
+Zora Link/zora/body.bmd
+Zora Link/zora/face.bmd
+Zora Link/zora/hands.bmd
+Zora Link/zora/head.bmd

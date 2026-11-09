@@ -832,6 +832,9 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         svc_log->info(mod_ctx, g_armosHammerActive ? "Armos Hammer equipped" :
                                                      "Armos Hammer unequipped");
         break;
+    case kDekuNutItem:
+        begin_deku_nut_use(alink);
+        break;
     default:
         break;
     }

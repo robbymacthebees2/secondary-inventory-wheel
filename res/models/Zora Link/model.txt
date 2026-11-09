@@ -1,0 +1,4 @@
+name = Zora Link
+by = SkilarBabcock
+about = Model and textures by SkilarBabcock; fixes by Oxygno.
+preset = false

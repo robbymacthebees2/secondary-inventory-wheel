@@ -6,6 +6,7 @@
 #include "mods/svc/resource.h"
 #include "mods/svc/save.h"
 #include "mods/svc/ui.h"
+#include "coop/mod.hpp"
 
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DPacket.h"
@@ -14,6 +15,7 @@
 #include "JSystem/J3DGraphBase/J3DSys.h"
 #include "JSystem/J3DGraphBase/J3DTexture.h"
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
+#include "JSystem/J3DGraphLoader/J3DModelLoader.h"
 #include "JSystem/J2DGraph/J2DGrafContext.h"
 #include "JSystem/J2DGraph/J2DPicture.h"
 #include "JSystem/J2DGraph/J2DTextBox.h"
@@ -31,7 +33,9 @@
 #include "d/actor/d_a_obj_iceleaf.h"
 #include "d/actor/d_a_npc_chin.h"
 #include "d/d_a_item_static.h"
+#include "d/actor/d_a_nbomb.h"
 #include "d/actor/d_a_npc_tk.h"
+#include "d/d_bomb.h"
 #include "SSystem/SComponent/c_cc_d.h"
 #include "SSystem/SComponent/c_cc_s.h"
 #include "d/d_com_inf_game.h"
@@ -53,6 +57,7 @@
 #include "Z2AudioLib/Z2SeqMgr.h"
 #include "Z2AudioLib/Z2SoundMgr.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_op/f_op_actor_iter.h"
 #include "f_pc/f_pc_name.h"
 #include "f_pc/f_pc_leaf.h"
 #include "m_Do/m_Do_controller_pad.h"
@@ -110,6 +115,7 @@ constexpr u8 kTruthMaskItem = 0xF5;
 constexpr u8 kGoronMaskItem = 0xF4;
 constexpr u8 kGiantMaskItem = 0xF3;
 constexpr u8 kArmosHammerItem = 0xF2;
+constexpr u8 kDekuNutItem = 0xF1;
 constexpr int kGiantMaskSwordDamageMultiplier = 11;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
@@ -132,6 +138,7 @@ constexpr char kTruthMaskIconResource[] = "truth_mask.bti";
 constexpr char kGoronMaskIconResource[] = "goron_mask.bti";
 constexpr char kGiantMaskIconResource[] = "giants_mask.bti";
 constexpr char kArmosHammerIconResource[] = "armos_hammer.bti";
+constexpr char kDekuNutIconResource[] = "deku_nut.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
 constexpr u8 kGoronTunicDisplayItem = dItemNo_WEAR_KOKIRI_e;
@@ -184,6 +191,7 @@ enum class SecondaryIconContext : u8 {
     GoronMask,
     GiantMask,
     ArmosHammer,
+    DekuNut,
 };
 
 enum class SitActionState : u8 {
@@ -235,6 +243,7 @@ std::array<bool, 256> g_sitMusicWaveEraseFailureReported{};
 std::array<bool, 256> g_sitMusicWaveReleaseScheduled{};
 std::array<u8, 256> g_sitMusicWaveReleaseFrames{};
 UiMenuTabHandle g_robinMenuTab = 0;
+UiMenuTabHandle g_creditsMenuTab = 0;
 UiWindowHandle g_robinSettingsWindow = 0;
 SaveObserverHandle g_secondarySaveObserver = 0;
 dMenu_Ring_c* g_secondaryRing = nullptr;
@@ -293,6 +302,7 @@ struct IceArrowFrozenTarget {
     GXColorS10 originalTevColor{};
     u16 framesRemaining = 0;
     bool shaderColorCaptured = false;
+    bool showIceEffect = false;
     bool active = false;
 };
 std::array<IceArrowFrozenTarget, 32> g_iceArrowFrozenTargets{};
@@ -359,6 +369,7 @@ std::array<u8, MAX_ITEM_SLOTS> g_secondarySlots = [] {
     slots[6] = kGoronMaskItem;
     slots[7] = kGiantMaskItem;
     slots[8] = kArmosHammerItem;
+    slots[9] = kDekuNutItem;
     return slots;
 }();
 std::array<u8, MAX_SELECT_ITEM> g_secondarySelectedItems = [] {
@@ -422,6 +433,7 @@ JKRExpHeap* g_armosHammerWheelItemHeap = nullptr;
 
 void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
+void begin_deku_nut_use(daAlink_c* alink);
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
 #include "features/hover_boots.cpp"
@@ -436,6 +448,7 @@ void reset_manual_jump_input_state();
 #include "features/manual_jump.cpp"
 #include "features/settings.cpp"
 #include "features/ice_arrow.cpp"
+#include "features/deku_nut.cpp"
 #include "features/lens_of_truth.cpp"
 #include "features/truth_mask.cpp"
 #include "features/goron_mask.cpp"
@@ -545,7 +558,12 @@ ModResult install_hooks() {
     ADD_POST(PlayerExecute, record_armos_hammer_hand_matrix);
     ADD_POST(PlayerExecute, hide_armos_hammer_sword);
     ADD_POST(ArmosHammerGetSwordAtType, apply_armos_hammer_attack_type);
+    ADD_PRE(DekuNutBombExecute, handle_deku_nut_bomb_execute);
+    ADD_PRE(DekuNutBombExplodeInit, intercept_deku_nut_bomb_explosion);
+    ADD_PRE(DekuNutBombCheckTimerStop, suppress_deku_nut_bomb_fuse_effects);
+    ADD_PRE(DekuNutBombDraw, draw_deku_nut_bomb);
     ADD_POST(CheckSceneChange, disable_hover_boots_after_scene_change);
+    ADD_POST(CheckSceneChange, clear_deku_nut_bombs_after_scene_change);
     ADD_POST(CheckSceneChange, deactivate_giant_mask_after_scene_change);
     ADD_POST(CheckSceneChange, deactivate_armos_hammer_after_scene_change);
     ADD_PRE(OffWolfEyeUp, preserve_lens_of_truth_vision);
@@ -605,6 +623,15 @@ ModResult install_hooks() {
 
 }  // namespace
 
+bool wheel_is_sit_seated() {
+    return g_sitActionState == SitActionState::Seated;
+}
+
+bool wheel_is_shield_surf_board(daAlink_c* alink, fopAc_ac_c* ride) {
+    return g_shieldSurfActive && alink != nullptr && alink->checkBoardRide() &&
+           ride != nullptr && fopAcM_GetID(ride) == g_shieldSurfBoardId;
+}
+
 extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_giantMaskActive = false;
@@ -639,6 +666,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_lensOfTruthActive = false;
     g_lensVisionActivated = false;
     g_iceArrowFrozenTargets.fill({});
+    g_dekuNutBombIds.fill(fpcM_ERROR_PROCESS_ID_e);
     g_sitActionState = SitActionState::Inactive;
     g_sitMusicActiveTrack = 0;
     g_sitMusicAreaFadePending = false;
@@ -894,8 +922,22 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         return result;
     }
 
+    menuTab.label = "Credits";
+    menuTab.on_selected = open_combined_credits;
+    result = svc_ui->register_menu_tab(mod_ctx, &menuTab, &g_creditsMenuTab);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Credits menu entry");
+        return result;
+    }
+
     result = install_hooks();
     if (result != MOD_OK) {
+        return result;
+    }
+    result = coop_mod_initialize(error);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to initialize co-op runtime");
+        coop_mod_shutdown(error);
         return result;
     }
     svc_log->info(mod_ctx, "secondary inventory wheel initialized");
@@ -933,10 +975,11 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_goron_mask();
     update_giant_mask();
     update_armos_hammer();
-    return MOD_OK;
+    return coop_mod_update(nullptr);
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    const ModResult coopResult = coop_mod_shutdown(nullptr);
     g_giantMaskActive = false;
     if (g_armosHammerActive) {
         auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
@@ -988,6 +1031,10 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     if (g_robinMenuTab != 0) {
         svc_ui->unregister_menu_tab(mod_ctx, g_robinMenuTab);
         g_robinMenuTab = 0;
+    }
+    if (g_creditsMenuTab != 0) {
+        svc_ui->unregister_menu_tab(mod_ctx, g_creditsMenuTab);
+        g_creditsMenuTab = 0;
     }
     if (g_hawkGrassPhaseRequested) {
         dComIfG_resDelete(&g_hawkGrassPhase, "J_Tobi");
@@ -1083,6 +1130,6 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_keyWaitDepth = 0;
     g_mapInputDepth = 0;
     svc_log->info(mod_ctx, "secondary inventory wheel unloaded");
-    return MOD_OK;
+    return coopResult;
 }
 }
