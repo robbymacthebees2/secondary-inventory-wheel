@@ -107,6 +107,8 @@ constexpr u8 kIceArrowItem = 0xF8;
 constexpr u8 kLensOfTruthItem = 0xF6;
 constexpr u8 kTruthMaskItem = 0xF5;
 constexpr u8 kGoronMaskItem = 0xF4;
+constexpr u8 kGiantMaskItem = 0xF3;
+constexpr int kGiantMaskSwordDamageMultiplier = 11;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
 constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 3;
@@ -126,6 +128,7 @@ constexpr char kIceArrowIconResource[] = "ice_arrow.bti";
 constexpr char kLensOfTruthIconResource[] = "lens_of_truth.bti";
 constexpr char kTruthMaskIconResource[] = "truth_mask.bti";
 constexpr char kGoronMaskIconResource[] = "goron_mask.bti";
+constexpr char kGiantMaskIconResource[] = "giants_mask.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
 constexpr u8 kGoronTunicDisplayItem = dItemNo_WEAR_KOKIRI_e;
@@ -176,6 +179,7 @@ enum class SecondaryIconContext : u8 {
     LensOfTruth,
     TruthMask,
     GoronMask,
+    GiantMask,
 };
 
 enum class SitActionState : u8 {
@@ -349,6 +353,7 @@ std::array<u8, MAX_ITEM_SLOTS> g_secondarySlots = [] {
     slots[4] = kLensOfTruthItem;
     slots[5] = kTruthMaskItem;
     slots[6] = kGoronMaskItem;
+    slots[7] = kGiantMaskItem;
     return slots;
 }();
 std::array<u8, MAX_SELECT_ITEM> g_secondarySelectedItems = [] {
@@ -373,6 +378,9 @@ JKRExpHeap* g_lensOfTruthWheelItemHeap = nullptr;
 J2DPicture* g_goronMaskWheelItemTex = nullptr;
 ResTIMG* g_goronMaskWheelItemBuf = nullptr;
 JKRExpHeap* g_goronMaskWheelItemHeap = nullptr;
+J2DPicture* g_giantMaskWheelItemTex = nullptr;
+ResTIMG* g_giantMaskWheelItemBuf = nullptr;
+JKRExpHeap* g_giantMaskWheelItemHeap = nullptr;
 ResTIMG* g_goronMaskHudIcon = nullptr;
 JKRExpHeap* g_goronMaskHudIconHeap = nullptr;
 bool g_goronMaskHudIconLoadFailed = false;
@@ -395,6 +403,13 @@ request_of_phase_process_class g_goronMaskPhase{};
 JKRExpHeap* g_goronMaskHeap = nullptr;
 J3DModel* g_goronMaskModel = nullptr;
 u8 g_goronMaskInputBlockFrames = 0;
+bool g_giantMaskActive = false;
+bool g_giantMaskPhaseRequested = false;
+bool g_giantMaskArchiveLoaded = false;
+bool g_giantMaskLoadFailed = false;
+request_of_phase_process_class g_giantMaskPhase{};
+JKRExpHeap* g_giantMaskHeap = nullptr;
+J3DModel* g_giantMaskModel = nullptr;
 
 void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
@@ -414,6 +429,7 @@ void reset_manual_jump_input_state();
 #include "features/lens_of_truth.cpp"
 #include "features/truth_mask.cpp"
 #include "features/goron_mask.cpp"
+#include "features/giant_mask.cpp"
 
 ModResult install_hooks() {
     ADD_PRE(OpenExplain, suppress_secondary_explain);
@@ -507,11 +523,16 @@ ModResult install_hooks() {
     ADD_PRE(PlayerExecute, begin_goron_mask_roll);
     ADD_POST(PlayerExecute, continue_goron_mask_roll);
     ADD_POST(PlayerExecute, enable_goron_roll_attack);
+    ADD_POST(GiantMaskSetMatrix, apply_giant_mask_player_scale);
+    ADD_PRE(PlayerExecute, restore_giant_mask_attack_colliders);
+    ADD_POST(PlayerExecute, scale_giant_mask_attack_colliders);
     ADD_PRE(PlayerExecute, update_ice_arrow_freezes);
     ADD_POST(PlayerExecute, process_shield_surf_transition);
     ADD_POST(PlayerDraw, draw_truth_mask_on_player);
     ADD_POST(PlayerDraw, draw_goron_mask_model);
+    ADD_POST(PlayerDraw, draw_giant_mask_on_player);
     ADD_POST(CheckSceneChange, disable_hover_boots_after_scene_change);
+    ADD_POST(CheckSceneChange, deactivate_giant_mask_after_scene_change);
     ADD_PRE(OffWolfEyeUp, preserve_lens_of_truth_vision);
     ADD_PRE(ProcAutoJump, release_manual_cucco_glide_on_a);
     ADD_POST(BoardCommon, boost_shield_surf_speed);
@@ -554,8 +575,8 @@ ModResult install_hooks() {
     ADD_PRE(MaterialDiff, apply_dark_link_material_diff);
     ADD_PRE(ShapeDraw, apply_dark_link_terminal_output_before_shape_draw);
     ADD_POST(DamageMagnification, double_dark_link_incoming_damage);
-    ADD_PRE(SwordAtParam, double_dark_link_sword_damage);
-    ADD_PRE(CylinderAtParam, double_dark_link_cylinder_sword_damage);
+    ADD_PRE(SwordAtParam, modify_active_form_sword_damage);
+    ADD_PRE(CylinderAtParam, modify_active_form_cylinder_sword_damage);
     ADD_POST(ModelDraw, restore_dark_link_model_after_draw);
     ADD_POST(ModelCalc, update_hover_magic_after_model_calc);
     ADD_POST(SetWaterDropColor, tint_goron_tunic);
@@ -571,6 +592,12 @@ ModResult install_hooks() {
 
 extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError* error) {
+    g_giantMaskActive = false;
+    g_giantMaskPhaseRequested = false;
+    g_giantMaskArchiveLoaded = false;
+    g_giantMaskLoadFailed = false;
+    g_giantMaskPhase = {};
+    g_giantMaskModel = nullptr;
     g_darkLinkFormActive = false;
     g_darkLinkFormBlend = 0.0f;
     g_shieldSurfActive = false;
@@ -889,10 +916,12 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_lens_of_truth_poes();
     update_truth_mask_resource();
     update_goron_mask();
+    update_giant_mask();
     return MOD_OK;
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    g_giantMaskActive = false;
     if (g_manualGlideArrowAimStatusAdded) {
         dComIfGp_clearPlayerStatus0(0, 0x200000);
         g_manualGlideArrowAimStatusAdded = false;
@@ -961,6 +990,14 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     if (g_goronMaskPhaseRequested) {
         dComIfG_resDelete(&g_goronMaskPhase, "N_gD_mskT");
     }
+    if (g_giantMaskHeap != nullptr) {
+        mDoExt_destroyExpHeap(g_giantMaskHeap);
+        g_giantMaskHeap = nullptr;
+        g_giantMaskModel = nullptr;
+    }
+    if (g_giantMaskPhaseRequested) {
+        dComIfG_resDelete(&g_giantMaskPhase, "N_gD_mskF");
+    }
     if (g_goronMaskHudIconHeap != nullptr) {
         mDoExt_destroyExpHeap(g_goronMaskHudIconHeap);
         g_goronMaskHudIconHeap = nullptr;
@@ -972,6 +1009,10 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_goronMaskPhaseRequested = false;
     g_goronMaskArchiveLoaded = false;
     g_goronMaskLoadFailed = false;
+    g_giantMaskPhase = {};
+    g_giantMaskPhaseRequested = false;
+    g_giantMaskArchiveLoaded = false;
+    g_giantMaskLoadFailed = false;
     g_hawkGrassPhase = {};
     g_iceKeesePhase = {};
     g_hawkGrassPhaseRequested = false;
