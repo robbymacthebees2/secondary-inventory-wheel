@@ -461,6 +461,7 @@ DEFINE_HOOK(&daAlink_c::procCoLavaReturnInit, ProcCoLavaReturnInit);
 DEFINE_HOOK(&daAlink_c::checkSceneChange, CheckSceneChange);
 DEFINE_HOOK(&daAlink_c::procAutoJump, ProcAutoJump);
 DEFINE_HOOK(&daAlink_c::execute, PlayerExecute);
+DEFINE_HOOK(&daAlink_c::offWolfEyeUp, OffWolfEyeUp);
 DEFINE_HOOK(&daObjIceLeaf_c::execute, IceLeafExecute);
 DEFINE_HOOK(&daObjIceLeaf_c::draw, IceLeafDraw);
 DEFINE_HOOK(&daAlink_c::draw, PlayerDraw);

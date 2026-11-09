@@ -23,6 +23,7 @@
 #include "JSystem/JUtility/JUTNameTab.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_arrow.h"
+#include "d/actor/d_a_e_po.h"
 #include "d/actor/d_a_ni.h"
 #include "d/actor/d_a_obj_glowSphere.h"
 #include "d/actor/d_a_spinner.h"
@@ -103,6 +104,8 @@ constexpr u8 kHawkGrassItem = 0xFD;
 constexpr u8 kHoverBootsItem = 0xFC;
 constexpr u8 kDarkLinkItem = 0xFA;
 constexpr u8 kIceArrowItem = 0xF8;
+constexpr u8 kLensOfTruthItem = 0xF6;
+constexpr u8 kTruthMaskItem = 0xF5;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
 constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 3;
@@ -119,6 +122,8 @@ constexpr size_t kItemTextureBufferSize = 0xC00;
 constexpr char kHoverBootsIconResource[] = "hover_boots_wings.bti";
 constexpr char kDarkLinkIconResource[] = "dark_link.bti";
 constexpr char kIceArrowIconResource[] = "ice_arrow.bti";
+constexpr char kLensOfTruthIconResource[] = "lens_of_truth.bti";
+constexpr char kTruthMaskIconResource[] = "truth_mask.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
 constexpr u8 kGoronTunicDisplayItem = dItemNo_WEAR_KOKIRI_e;
@@ -166,6 +171,8 @@ enum class SecondaryIconContext : u8 {
     HoverBoots,
     DarkLink,
     IceArrow,
+    LensOfTruth,
+    TruthMask,
 };
 
 enum class SitActionState : u8 {
@@ -283,6 +290,7 @@ fpc_ProcID g_iceArrowExecutingActorId = fpcM_ERROR_PROCESS_ID_e;
 fpc_ProcID g_iceArrowPreviousExecutingActorIds[16]{};
 u8 g_iceArrowActorExecuteDepth = 0;
 bool g_iceArrowSelected = false;
+bool g_lensOfTruthActive = false;
 bool g_secondaryItemInputHandled = false;
 bool g_manualJumpConfigReadFailureReported = false;
 bool g_manualJumpHeightConfigReadFailureReported = false;
@@ -335,6 +343,8 @@ std::array<u8, MAX_ITEM_SLOTS> g_secondarySlots = [] {
     slots[1] = kHoverBootsItem;
     slots[2] = kDarkLinkItem;
     slots[3] = kIceArrowItem;
+    slots[4] = kLensOfTruthItem;
+    slots[5] = kTruthMaskItem;
     return slots;
 }();
 std::array<u8, MAX_SELECT_ITEM> g_secondarySelectedItems = [] {
@@ -353,13 +363,22 @@ JKRExpHeap* g_tunicWheelItemHeap = nullptr;
 J2DPicture* g_sitWheelItemTex = nullptr;
 ResTIMG* g_sitWheelItemBuf = nullptr;
 JKRExpHeap* g_sitWheelItemHeap = nullptr;
+J2DPicture* g_lensOfTruthWheelItemTex = nullptr;
+ResTIMG* g_lensOfTruthWheelItemBuf = nullptr;
+JKRExpHeap* g_lensOfTruthWheelItemHeap = nullptr;
 std::array<J2DPicture*, 3> g_shieldSurfWheelItemTex{};
 std::array<ResTIMG*, 3> g_shieldSurfWheelItemBuf{};
 JKRExpHeap* g_shieldSurfWheelItemHeap = nullptr;
+bool g_truthMaskActive = false;
+bool g_truthMaskPhaseRequested = false;
+bool g_truthMaskArchiveLoaded = false;
+bool g_truthMaskLoadFailed = false;
+request_of_phase_process_class g_truthMaskPhase{};
+JKRExpHeap* g_truthMaskHeap = nullptr;
+J3DModel* g_truthMaskModel = nullptr;
 
 void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
-
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
 #include "features/hover_boots.cpp"
@@ -373,6 +392,8 @@ void reset_manual_jump_input_state();
 #include "features/manual_jump.cpp"
 #include "features/settings.cpp"
 #include "features/ice_arrow.cpp"
+#include "features/lens_of_truth.cpp"
+#include "features/truth_mask.cpp"
 
 ModResult install_hooks() {
     ADD_PRE(OpenExplain, suppress_secondary_explain);
@@ -460,6 +481,9 @@ ModResult install_hooks() {
     ADD_PRE(CheckRestartRoom, prevent_lava_return);
     ADD_PRE(PlayerExecute, update_ice_arrow_freezes);
     ADD_POST(PlayerExecute, process_shield_surf_transition);
+    ADD_POST(PlayerDraw, draw_truth_mask_on_player);
+    ADD_POST(CheckSceneChange, disable_hover_boots_after_scene_change);
+    ADD_PRE(OffWolfEyeUp, preserve_lens_of_truth_vision);
     ADD_PRE(ProcAutoJump, release_manual_cucco_glide_on_a);
     ADD_POST(BoardCommon, boost_shield_surf_speed);
     ADD_PRE(BoardCommon, prepare_shield_surf_hover_plane_board_common);
@@ -475,9 +499,17 @@ ModResult install_hooks() {
     ADD_PRE(ArrowAtHitCallBack, register_ice_arrow_hit);
     ADD_PRE(MorfFrameUpdate, freeze_ice_arrow_target_animation);
     ADD_PRE(LeafExecute, begin_ice_arrow_actor_execute);
+    ADD_PRE(LeafExecute, prepare_lens_poe_execute);
+    ADD_POST(LeafExecute, reveal_lens_poe_after_execute);
     ADD_POST(LeafExecute, hold_ice_arrow_target_in_place);
     ADD_POST(LeafExecute, end_ice_arrow_actor_execute);
     ADD_PRE(CollisionSet, suppress_ice_frozen_enemy_attack);
+    ADD_PRE(SearchActorAngleY, hide_truth_masked_player_angle_from_enemy);
+    ADD_PRE(SearchActorDistance, hide_truth_masked_player_from_enemy);
+    ADD_PRE(SearchActorDistance2, hide_truth_masked_player_from_enemy);
+    ADD_PRE(SearchActorDistanceXZ, hide_truth_masked_player_from_enemy);
+    ADD_PRE(SearchActorDistanceXZ2, hide_truth_masked_player_from_enemy);
+    ADD_PRE(SeenActorAngleY, hide_truth_masked_player_seen_angle_from_enemy);
     ADD_PRE(DrawItemNum, hide_secondary_assigned_vanilla_ammo_count);
     ADD_POST(CollisionSet, restore_ice_frozen_enemy_attack);
     ADD_PRE(ProcCoLavaReturnInit, delay_goron_lava_return);
@@ -533,6 +565,8 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_manualJumpLeftBumperTriggered = false;
     stop_manual_glide_aura();
     g_iceArrowSelected = false;
+    g_lensOfTruthActive = false;
+    g_lensVisionActivated = false;
     g_iceArrowFrozenTargets.fill({});
     g_sitActionState = SitActionState::Inactive;
     g_sitMusicActiveTrack = 0;
@@ -823,6 +857,8 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_hawk_grass_resource();
     update_ice_keese_resource();
     update_spawned_hawk_cleanup();
+    update_lens_of_truth_poes();
+    update_truth_mask_resource();
     return MOD_OK;
 }
 
@@ -879,6 +915,14 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     if (g_iceKeesePhaseRequested) {
         dComIfG_resDelete(&g_iceKeesePhase, "E_ib");
     }
+    if (g_truthMaskHeap != nullptr) {
+        mDoExt_destroyExpHeap(g_truthMaskHeap);
+        g_truthMaskHeap = nullptr;
+        g_truthMaskModel = nullptr;
+    }
+    if (g_truthMaskPhaseRequested) {
+        dComIfG_resDelete(&g_truthMaskPhase, "N_gD_mskF");
+    }
     g_hawkGrassPhase = {};
     g_iceKeesePhase = {};
     g_hawkGrassPhaseRequested = false;
@@ -900,6 +944,9 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_darkLinkFormActive = false;
     g_darkLinkFormBlend = 0.0f;
     g_iceArrowSelected = false;
+    g_lensOfTruthActive = false;
+    g_truthMaskActive = false;
+    update_lens_of_truth_poes();
     g_iceArrowFrozenTargets.fill({});
     g_darkLinkDrawModelData = nullptr;
     g_secondaryItemInputHandled = false;

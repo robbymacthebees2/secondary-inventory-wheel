@@ -266,7 +266,9 @@ u8 secondaryDisplayItemForId(u8 itemId) {
     if (itemId == kGoronTunicItemId) {
         return kGoronTunicDisplayItem;
     }
-    if (itemId == kDarkLinkItem || itemId == kIceArrowItem) {
+    if (itemId == kDarkLinkItem || itemId == kIceArrowItem ||
+        itemId == kLensOfTruthItem || itemId == kTruthMaskItem)
+    {
         return dItemNo_WOOD_STICK_e;
     }
     if (itemId == kHawkGrassItem || itemId == kHoverBootsItem) {
@@ -312,6 +314,18 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
         g_secondarySlots[slotId - kSecondarySlotBase] == kIceArrowItem)
     {
         return SecondaryIconContext::IceArrow;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kLensOfTruthItem)
+    {
+        return SecondaryIconContext::LensOfTruth;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kTruthMaskItem)
+    {
+        return SecondaryIconContext::TruthMask;
     }
     return SecondaryIconContext::None;
 }
@@ -431,6 +445,12 @@ const char* secondaryItemNameForSlot(u8 slotId) {
         }
         if (item == kIceArrowItem) {
             return "Ice Arrow (Bow)";
+        }
+        if (item == kLensOfTruthItem) {
+            return "Lens of Truth";
+        }
+        if (item == kTruthMaskItem) {
+            return "Stone Mask";
         }
     }
 

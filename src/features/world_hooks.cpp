@@ -47,6 +47,17 @@ HookAction delay_goron_lava_return(ModContext*, void* args, void* retval, void*)
     return HOOK_CONTINUE;
 }
 
+void disable_hover_boots_after_scene_change(
+    ModContext*, void* args, void* retval, void*)
+{
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink != nullptr && *static_cast<int*>(retval) != 0 &&
+        g_hoverBootsEquipped)
+    {
+        disable_hover_boots();
+    }
+}
+
 void maintain_hover_height(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     if (alink != nullptr && alink->mLinkAcch.ChkGroundHit() &&
