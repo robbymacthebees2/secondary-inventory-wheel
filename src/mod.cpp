@@ -9,6 +9,7 @@
 
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DPacket.h"
+#include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
 #include "JSystem/J3DGraphBase/J3DShapeDraw.h"
 #include "JSystem/J3DGraphBase/J3DSys.h"
 #include "JSystem/J3DGraphBase/J3DTexture.h"
@@ -108,6 +109,7 @@ constexpr u8 kLensOfTruthItem = 0xF6;
 constexpr u8 kTruthMaskItem = 0xF5;
 constexpr u8 kGoronMaskItem = 0xF4;
 constexpr u8 kGiantMaskItem = 0xF3;
+constexpr u8 kArmosHammerItem = 0xF2;
 constexpr int kGiantMaskSwordDamageMultiplier = 11;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
@@ -129,6 +131,7 @@ constexpr char kLensOfTruthIconResource[] = "lens_of_truth.bti";
 constexpr char kTruthMaskIconResource[] = "truth_mask.bti";
 constexpr char kGoronMaskIconResource[] = "goron_mask.bti";
 constexpr char kGiantMaskIconResource[] = "giants_mask.bti";
+constexpr char kArmosHammerIconResource[] = "armos_hammer.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
 constexpr u8 kGoronTunicDisplayItem = dItemNo_WEAR_KOKIRI_e;
@@ -180,6 +183,7 @@ enum class SecondaryIconContext : u8 {
     TruthMask,
     GoronMask,
     GiantMask,
+    ArmosHammer,
 };
 
 enum class SitActionState : u8 {
@@ -354,6 +358,7 @@ std::array<u8, MAX_ITEM_SLOTS> g_secondarySlots = [] {
     slots[5] = kTruthMaskItem;
     slots[6] = kGoronMaskItem;
     slots[7] = kGiantMaskItem;
+    slots[8] = kArmosHammerItem;
     return slots;
 }();
 std::array<u8, MAX_SELECT_ITEM> g_secondarySelectedItems = [] {
@@ -410,6 +415,10 @@ bool g_giantMaskLoadFailed = false;
 request_of_phase_process_class g_giantMaskPhase{};
 JKRExpHeap* g_giantMaskHeap = nullptr;
 J3DModel* g_giantMaskModel = nullptr;
+bool g_armosHammerActive = false;
+J2DPicture* g_armosHammerWheelItemTex = nullptr;
+ResTIMG* g_armosHammerWheelItemBuf = nullptr;
+JKRExpHeap* g_armosHammerWheelItemHeap = nullptr;
 
 void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
@@ -423,6 +432,7 @@ void reset_manual_jump_input_state();
 #include "features/character_actions.cpp"
 #include "features/sit_music.cpp"
 #include "features/shield_surf.cpp"
+#include "features/armos_hammer.cpp"
 #include "features/manual_jump.cpp"
 #include "features/settings.cpp"
 #include "features/ice_arrow.cpp"
@@ -531,8 +541,13 @@ ModResult install_hooks() {
     ADD_POST(PlayerDraw, draw_truth_mask_on_player);
     ADD_POST(PlayerDraw, draw_goron_mask_model);
     ADD_POST(PlayerDraw, draw_giant_mask_on_player);
+    ADD_POST(PlayerDraw, draw_armos_hammer_on_player);
+    ADD_POST(PlayerExecute, record_armos_hammer_hand_matrix);
+    ADD_POST(PlayerExecute, hide_armos_hammer_sword);
+    ADD_POST(ArmosHammerGetSwordAtType, apply_armos_hammer_attack_type);
     ADD_POST(CheckSceneChange, disable_hover_boots_after_scene_change);
     ADD_POST(CheckSceneChange, deactivate_giant_mask_after_scene_change);
+    ADD_POST(CheckSceneChange, deactivate_armos_hammer_after_scene_change);
     ADD_PRE(OffWolfEyeUp, preserve_lens_of_truth_vision);
     ADD_PRE(ProcAutoJump, release_manual_cucco_glide_on_a);
     ADD_POST(BoardCommon, boost_shield_surf_speed);
@@ -917,11 +932,22 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_truth_mask_resource();
     update_goron_mask();
     update_giant_mask();
+    update_armos_hammer();
     return MOD_OK;
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_giantMaskActive = false;
+    if (g_armosHammerActive) {
+        auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
+        if (alink != nullptr && !alink->checkWolf()) {
+            set_armos_hammer_sword_visible(alink, true);
+        } else {
+            g_armosHammerSwordVisibility = {};
+        }
+        forget_armos_hammer_hand_matrix();
+        g_armosHammerActive = false;
+    }
     if (g_manualGlideArrowAimStatusAdded) {
         dComIfGp_clearPlayerStatus0(0, 0x200000);
         g_manualGlideArrowAimStatusAdded = false;

@@ -4,10 +4,10 @@ Made by RobinTheSoundsmith. This Dusklight code mod adds a second item wheel wit
 
 ## Repository contents
 
-- `src/mod.cpp` owns initialization, hook registration, and shared private state. Feature implementations are organized under `src/features/`: `core_helpers.cpp`, `secondary_wheel.cpp`, `hover_boots.cpp`, `world_hooks.cpp`, `goron_tunic.cpp`, `dark_link.cpp`, `character_actions.cpp`, `sit_music.cpp`, `shield_surf.cpp`, `manual_jump.cpp`, `settings.cpp`, `ice_arrow.cpp`, `lens_of_truth.cpp`, `truth_mask.cpp`, `goron_mask.cpp`, and `giant_mask.cpp`.
+- `src/mod.cpp` owns initialization, hook registration, and shared private state. Feature implementations are organized under `src/features/`: `core_helpers.cpp`, `secondary_wheel.cpp`, `hover_boots.cpp`, `world_hooks.cpp`, `goron_tunic.cpp`, `dark_link.cpp`, `character_actions.cpp`, `sit_music.cpp`, `shield_surf.cpp`, `manual_jump.cpp`, `settings.cpp`, `ice_arrow.cpp`, `lens_of_truth.cpp`, `truth_mask.cpp`, `goron_mask.cpp`, `giant_mask.cpp`, and `armos_hammer.cpp`.
 - `mod.json` contains the Dusklight mod manifest.
 - `CMakeLists.txt` defines the mod target for Dusklight's CMake build.
-- `res/` is the mod's resource directory. The wheel loads its presentation from Dusklight at runtime and includes custom winged Hover Boots, Dark Link, Ice Arrow, Lens of Truth, Stone Mask, Goron Mask, Giant's Mask, and text-based Sit icons.
+- `res/` is the mod's resource directory. The wheel loads its presentation from Dusklight at runtime and includes custom winged Hover Boots, Dark Link, Ice Arrow, Lens of Truth, Stone Mask, Goron Mask, Giant's Mask, Armos Hammer, and text-based Sit icons.
 
 The feature files are included by `src/mod.cpp` and built as one translation unit. This keeps the mod's existing private state and hook wiring intact while giving each feature a dedicated source file; do not add the feature files separately to the CMake source list.
 
@@ -64,6 +64,8 @@ The Stone Mask appears immediately after the Lens of Truth. Its original wheel/H
 The Goron Mask appears immediately after the Stone Mask and has an original, low-resolution mask wheel/HUD icon. When equipped, it renders the game's clown mask model on Link's face. While Link is standing or walking, holding B starts a fast native front roll and repeats it continuously until B is released. The roll attacks enemies with Link's native collision sphere, dealing two damage and applying the game's normal hit response. Other actions retain their native animations. Press the assigned X/Y button again to remove it. It is unavailable in Wolf form.
 
 The Giant's Mask appears immediately after the Goron Mask. Its original wheel/HUD icon is paired with the game's mask model from object archive `N_gD_mskF`, resource index 4. Assign it to X or Y and press that button to toggle it; Link's human model renders at twice its normal size while equipped, and sword attacks deal 11 times their normal attack power (1000% more), including Mortal Draw, Great Spin, Ending Blow, and Jump Strike. The multiplier is applied to active sword colliders immediately before the collision pass, covering the different collider setup paths used by hidden skills while preserving normal hit resolution. Unequipping it, changing areas, or entering Wolf form restores normal rendering and sword damage. The game has no safe actor-wide size API for Link, so his native movement and collision volumes are not enlarged.
+
+The Armos Hammer appears immediately after the Giant's Mask and uses an original hammer design with stone, brass, and teal details. Assign it to X or Y and press that button to equip or stow it. Equipping requires Link to have his sword; the mod keeps the game's native sword action and collision handling, hides the sword model, and draws the hammer on its live weapon matrix. Press B to swing it with Link's normal sword animations. While equipped, those attacks retain their normal sword type and also carry the bomb attack type, allowing destructible rocks and boulders that check `AT_TYPE_BOMB` to use their native break logic. It is unavailable in Wolf form.
 
 ## Sit While Hovering
 

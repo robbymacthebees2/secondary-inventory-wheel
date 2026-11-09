@@ -812,6 +812,26 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         svc_log->info(mod_ctx, g_giantMaskActive ? "Giant's Mask equipped" :
                                                    "Giant's Mask removed");
         break;
+    case kArmosHammerItem:
+        if (alink->checkWolf()) {
+            svc_log->warn(mod_ctx, "Armos Hammer is only available to human Link");
+            break;
+        }
+        if (!g_armosHammerActive && !alink->checkSwordGet()) {
+            svc_log->warn(mod_ctx, "Armos Hammer requires Link's sword to be available");
+            break;
+        }
+        g_armosHammerActive = !g_armosHammerActive;
+        if (g_armosHammerActive) {
+            alink->setSwordModel();
+            set_armos_hammer_sword_visible(alink, false);
+        } else {
+            set_armos_hammer_sword_visible(alink, true);
+            forget_armos_hammer_hand_matrix();
+        }
+        svc_log->info(mod_ctx, g_armosHammerActive ? "Armos Hammer equipped" :
+                                                     "Armos Hammer unequipped");
+        break;
     default:
         break;
     }

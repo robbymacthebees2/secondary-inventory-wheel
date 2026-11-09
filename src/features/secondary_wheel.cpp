@@ -103,6 +103,20 @@ void clear_giant_mask_wheel_texture() {
     g_giantMaskWheelItemHeap = nullptr;
 }
 
+void clear_armos_hammer_wheel_texture() {
+    if (g_armosHammerWheelItemTex != nullptr) {
+        JKR_DELETE(g_armosHammerWheelItemTex);
+        g_armosHammerWheelItemTex = nullptr;
+    }
+    if (g_armosHammerWheelItemHeap != nullptr &&
+        g_armosHammerWheelItemBuf != nullptr)
+    {
+        g_armosHammerWheelItemHeap->free(g_armosHammerWheelItemBuf);
+    }
+    g_armosHammerWheelItemBuf = nullptr;
+    g_armosHammerWheelItemHeap = nullptr;
+}
+
 void load_lens_of_truth_wheel_texture(dMenu_Ring_c* ring) {
     clear_lens_of_truth_wheel_texture();
     ResourceBuffer icon = RESOURCE_BUFFER_INIT;
@@ -221,6 +235,46 @@ void load_giant_mask_wheel_texture(dMenu_Ring_c* ring) {
         return;
     }
     g_giantMaskWheelItemTex->setBasePosition(J2DBasePosition_4);
+}
+
+void load_armos_hammer_wheel_texture(dMenu_Ring_c* ring) {
+    clear_armos_hammer_wheel_texture();
+    ResourceBuffer icon = RESOURCE_BUFFER_INIT;
+    const ModResult result =
+        svc_resource->load(mod_ctx, kArmosHammerIconResource, &icon);
+    if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
+        svc_log->error(mod_ctx, "failed to load the Armos Hammer wheel icon");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    if (icon.size < sizeof(ResTIMG) || icon.size > kItemTextureBufferSize) {
+        svc_log->error(mod_ctx, "Armos Hammer wheel icon has an invalid texture size");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+
+    g_armosHammerWheelItemHeap = ring->mpHeap;
+    g_armosHammerWheelItemBuf = static_cast<ResTIMG*>(
+        g_armosHammerWheelItemHeap->alloc(kItemTextureBufferSize, 0x20));
+    if (g_armosHammerWheelItemBuf == nullptr) {
+        g_armosHammerWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to allocate the Armos Hammer wheel icon buffer");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    std::memcpy(g_armosHammerWheelItemBuf, icon.data, icon.size);
+    svc_resource->free(mod_ctx, &icon);
+    DCStoreRangeNoSync(g_armosHammerWheelItemBuf, kItemTextureBufferSize);
+
+    g_armosHammerWheelItemTex = JKR_NEW J2DPicture(g_armosHammerWheelItemBuf);
+    if (g_armosHammerWheelItemTex == nullptr) {
+        g_armosHammerWheelItemHeap->free(g_armosHammerWheelItemBuf);
+        g_armosHammerWheelItemBuf = nullptr;
+        g_armosHammerWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to create the Armos Hammer wheel icon picture");
+        return;
+    }
+    g_armosHammerWheelItemTex->setBasePosition(J2DBasePosition_4);
 }
 
 void clear_shield_surf_wheel_textures() {
@@ -473,6 +527,7 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
     load_lens_of_truth_wheel_texture(ring);
     load_goron_mask_wheel_texture(ring);
     load_giant_mask_wheel_texture(ring);
+    load_armos_hammer_wheel_texture(ring);
     load_tunic_wheel_textures(ring);
 
     for (int button = 0; button < 2; ++button) {
@@ -972,6 +1027,20 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
             continue;
         }
 
+        if (secondaryItemIdForSlot(g_secondaryWheelSlotIds[index]) ==
+            kArmosHammerItem)
+        {
+            if (g_armosHammerWheelItemTex != nullptr) {
+                constexpr f32 iconSize = 36.0f;
+                g_armosHammerWheelItemTex->setAlpha(pose.alpha * 255.0f);
+                g_armosHammerWheelItemTex->draw(
+                    x + (48.0f - iconSize) * 0.5f,
+                    y + (48.0f - iconSize) * 0.5f,
+                    iconSize, iconSize, 0, 0, 0);
+            }
+            continue;
+        }
+
         for (int texture = 0; texture < 3; ++texture) {
             auto* picture = ring->mpItemTex[index][texture];
             if (picture == nullptr) {
@@ -1133,6 +1202,7 @@ HookAction prepare_ring_delete(ModContext*, void* args, void*, void*) {
         clear_lens_of_truth_wheel_texture();
         clear_goron_mask_wheel_texture();
         clear_giant_mask_wheel_texture();
+        clear_armos_hammer_wheel_texture();
         clear_tunic_wheel_textures();
     }
     return HOOK_CONTINUE;
@@ -1237,7 +1307,8 @@ void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
          g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
          g_secondaryIconContext != SecondaryIconContext::TruthMask &&
          g_secondaryIconContext != SecondaryIconContext::GoronMask &&
-         g_secondaryIconContext != SecondaryIconContext::GiantMask) ||
+         g_secondaryIconContext != SecondaryIconContext::GiantMask &&
+         g_secondaryIconContext != SecondaryIconContext::ArmosHammer) ||
         mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e)
     {
         return;
@@ -1309,6 +1380,8 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context) {
         return kGoronMaskIconResource;
     case SecondaryIconContext::GiantMask:
         return kGiantMaskIconResource;
+    case SecondaryIconContext::ArmosHammer:
+        return kArmosHammerIconResource;
     case SecondaryIconContext::DarkLink:
         return kDarkLinkIconResource;
     case SecondaryIconContext::HoverBoots:
@@ -1337,7 +1410,8 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
         g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
         g_secondaryIconContext != SecondaryIconContext::TruthMask &&
         g_secondaryIconContext != SecondaryIconContext::GoronMask &&
-        g_secondaryIconContext != SecondaryIconContext::GiantMask)
+        g_secondaryIconContext != SecondaryIconContext::GiantMask &&
+        g_secondaryIconContext != SecondaryIconContext::ArmosHammer)
     {
         mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
         return HOOK_CONTINUE;
