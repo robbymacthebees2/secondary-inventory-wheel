@@ -61,6 +61,60 @@ void clear_sit_wheel_texture() {
     g_sitWheelItemHeap = nullptr;
 }
 
+void clear_lens_of_truth_wheel_texture() {
+    if (g_lensOfTruthWheelItemTex != nullptr) {
+        JKR_DELETE(g_lensOfTruthWheelItemTex);
+        g_lensOfTruthWheelItemTex = nullptr;
+    }
+    if (g_lensOfTruthWheelItemHeap != nullptr &&
+        g_lensOfTruthWheelItemBuf != nullptr)
+    {
+        g_lensOfTruthWheelItemHeap->free(g_lensOfTruthWheelItemBuf);
+    }
+    g_lensOfTruthWheelItemBuf = nullptr;
+    g_lensOfTruthWheelItemHeap = nullptr;
+}
+
+void load_lens_of_truth_wheel_texture(dMenu_Ring_c* ring) {
+    clear_lens_of_truth_wheel_texture();
+    ResourceBuffer icon = RESOURCE_BUFFER_INIT;
+    const ModResult result =
+        svc_resource->load(mod_ctx, kLensOfTruthIconResource, &icon);
+    if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
+        svc_log->error(mod_ctx, "failed to load the Lens of Truth wheel icon");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    if (icon.size < sizeof(ResTIMG) || icon.size > kItemTextureBufferSize) {
+        svc_log->error(mod_ctx, "Lens of Truth wheel icon has an invalid texture size");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+
+    g_lensOfTruthWheelItemHeap = ring->mpHeap;
+    g_lensOfTruthWheelItemBuf = static_cast<ResTIMG*>(
+        g_lensOfTruthWheelItemHeap->alloc(kItemTextureBufferSize, 0x20));
+    if (g_lensOfTruthWheelItemBuf == nullptr) {
+        g_lensOfTruthWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to allocate the Lens of Truth wheel icon buffer");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    std::memcpy(g_lensOfTruthWheelItemBuf, icon.data, icon.size);
+    svc_resource->free(mod_ctx, &icon);
+    DCStoreRangeNoSync(g_lensOfTruthWheelItemBuf, kItemTextureBufferSize);
+
+    g_lensOfTruthWheelItemTex = JKR_NEW J2DPicture(g_lensOfTruthWheelItemBuf);
+    if (g_lensOfTruthWheelItemTex == nullptr) {
+        g_lensOfTruthWheelItemHeap->free(g_lensOfTruthWheelItemBuf);
+        g_lensOfTruthWheelItemBuf = nullptr;
+        g_lensOfTruthWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to create the Lens of Truth wheel icon picture");
+        return;
+    }
+    g_lensOfTruthWheelItemTex->setBasePosition(J2DBasePosition_4);
+}
+
 void clear_shield_surf_wheel_textures() {
     for (auto*& picture : g_shieldSurfWheelItemTex) {
         if (picture != nullptr) {
@@ -308,6 +362,7 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
     }
     load_shield_surf_wheel_textures(ring);
     load_sit_wheel_texture(ring);
+    load_lens_of_truth_wheel_texture(ring);
     load_tunic_wheel_textures(ring);
 
     for (int button = 0; button < 2; ++button) {
@@ -741,6 +796,20 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
             continue;
         }
 
+        if (secondaryItemIdForSlot(g_secondaryWheelSlotIds[index]) ==
+            kLensOfTruthItem)
+        {
+            if (g_lensOfTruthWheelItemTex != nullptr) {
+                constexpr f32 iconSize = 36.0f;
+                g_lensOfTruthWheelItemTex->setAlpha(pose.alpha * 255.0f);
+                g_lensOfTruthWheelItemTex->draw(
+                    x + (48.0f - iconSize) * 0.5f,
+                    y + (48.0f - iconSize) * 0.5f,
+                    iconSize, iconSize, 0, 0, 0);
+            }
+            continue;
+        }
+
         for (int texture = 0; texture < 3; ++texture) {
             auto* picture = ring->mpItemTex[index][texture];
             if (picture == nullptr) {
@@ -899,6 +968,7 @@ HookAction prepare_ring_delete(ModContext*, void* args, void*, void*) {
         forget_secondary_ring_pose(window->mpMenuRing);
         clear_shield_surf_wheel_textures();
         clear_sit_wheel_texture();
+        clear_lens_of_truth_wheel_texture();
         clear_tunic_wheel_textures();
     }
     return HOOK_CONTINUE;
@@ -993,24 +1063,22 @@ HookAction handle_secondary_ring_draw(ModContext*, void* args, void*, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
+const char* secondary_custom_icon_resource(SecondaryIconContext context);
+
 void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
     if ((g_secondaryIconContext != SecondaryIconContext::Sit &&
          g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
          g_secondaryIconContext != SecondaryIconContext::DarkLink &&
-         g_secondaryIconContext != SecondaryIconContext::IceArrow) ||
+         g_secondaryIconContext != SecondaryIconContext::IceArrow &&
+         g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
+         g_secondaryIconContext != SecondaryIconContext::TruthMask) ||
         mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e)
     {
         return;
     }
 
     const char* resourceName =
-        g_secondaryIconContext == SecondaryIconContext::Sit
-            ? kSitIconResource
-            : (g_secondaryIconContext == SecondaryIconContext::IceArrow
-                   ? kIceArrowIconResource
-                   : (g_secondaryIconContext == SecondaryIconContext::DarkLink
-                          ? kDarkLinkIconResource
-                          : kHoverBootsIconResource));
+        secondary_custom_icon_resource(g_secondaryIconContext);
     ResourceBuffer icon = RESOURCE_BUFFER_INIT;
     const ModResult result = svc_resource->load(mod_ctx, resourceName, &icon);
     if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
@@ -1061,6 +1129,25 @@ void finish_secondary_equip_icon(ModContext*, void*, void*, void*) {
     g_secondaryIconContext = SecondaryIconContext::None;
 }
 
+const char* secondary_custom_icon_resource(SecondaryIconContext context) {
+    switch (context) {
+    case SecondaryIconContext::Sit:
+        return kSitIconResource;
+    case SecondaryIconContext::IceArrow:
+        return kIceArrowIconResource;
+    case SecondaryIconContext::LensOfTruth:
+        return kLensOfTruthIconResource;
+    case SecondaryIconContext::TruthMask:
+        return kTruthMaskIconResource;
+    case SecondaryIconContext::DarkLink:
+        return kDarkLinkIconResource;
+    case SecondaryIconContext::HoverBoots:
+        return kHoverBootsIconResource;
+    default:
+        return nullptr;
+    }
+}
+
 HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
     const int button = mods::arg<int>(args, 1);
     auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
@@ -1076,7 +1163,9 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
     if (g_secondaryIconContext != SecondaryIconContext::Sit &&
         g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
         g_secondaryIconContext != SecondaryIconContext::DarkLink &&
-        g_secondaryIconContext != SecondaryIconContext::IceArrow)
+        g_secondaryIconContext != SecondaryIconContext::IceArrow &&
+        g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
+        g_secondaryIconContext != SecondaryIconContext::TruthMask)
     {
         mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
         return HOOK_CONTINUE;
@@ -1091,13 +1180,7 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
     }
 
     const char* resourceName =
-        g_secondaryIconContext == SecondaryIconContext::Sit
-            ? kSitIconResource
-            : (g_secondaryIconContext == SecondaryIconContext::IceArrow
-                   ? kIceArrowIconResource
-                   : (g_secondaryIconContext == SecondaryIconContext::DarkLink
-                          ? kDarkLinkIconResource
-                          : kHoverBootsIconResource));
+        secondary_custom_icon_resource(g_secondaryIconContext);
     ResourceBuffer icon = RESOURCE_BUFFER_INIT;
     const ModResult result = svc_resource->load(mod_ctx, resourceName, &icon);
     if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {

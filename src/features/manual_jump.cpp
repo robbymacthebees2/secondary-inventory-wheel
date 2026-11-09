@@ -745,6 +745,25 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         svc_log->info(mod_ctx, g_darkLinkFormActive ? "Dark Link Form activated" :
                                                      "Dark Link Form deactivated");
         break;
+    case kLensOfTruthItem:
+        if (alink->checkWolf()) {
+            svc_log->warn(mod_ctx, "Lens of Truth is only available to human Link");
+            break;
+        }
+        g_lensOfTruthActive = !g_lensOfTruthActive;
+        svc_log->info(
+            mod_ctx, g_lensOfTruthActive ? "Lens of Truth activated" :
+                                          "Lens of Truth deactivated");
+        break;
+    case kTruthMaskItem:
+        if (alink->checkWolf()) {
+            svc_log->warn(mod_ctx, "Stone Mask is only available to human Link");
+            break;
+        }
+        g_truthMaskActive = !g_truthMaskActive;
+        svc_log->info(mod_ctx, g_truthMaskActive ? "Stone Mask equipped" :
+                                                   "Stone Mask removed");
+        break;
     default:
         break;
     }
