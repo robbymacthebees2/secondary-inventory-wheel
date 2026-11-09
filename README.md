@@ -4,10 +4,10 @@ Made by RobinTheSoundsmith. This Dusklight code mod adds a second item wheel wit
 
 ## Repository contents
 
-- `src/mod.cpp` owns initialization, hook registration, and shared private state. Feature implementations are organized under `src/features/`: `core_helpers.cpp`, `secondary_wheel.cpp`, `hover_boots.cpp`, `world_hooks.cpp`, `goron_tunic.cpp`, `dark_link.cpp`, `character_actions.cpp`, `sit_music.cpp`, `shield_surf.cpp`, `manual_jump.cpp`, `settings.cpp`, and `ice_arrow.cpp`.
+- `src/mod.cpp` owns initialization, hook registration, and shared private state. Feature implementations are organized under `src/features/`: `core_helpers.cpp`, `secondary_wheel.cpp`, `hover_boots.cpp`, `world_hooks.cpp`, `goron_tunic.cpp`, `dark_link.cpp`, `character_actions.cpp`, `sit_music.cpp`, `shield_surf.cpp`, `manual_jump.cpp`, `settings.cpp`, `ice_arrow.cpp`, `lens_of_truth.cpp`, `truth_mask.cpp`, and `goron_mask.cpp`.
 - `mod.json` contains the Dusklight mod manifest.
 - `CMakeLists.txt` defines the mod target for Dusklight's CMake build.
-- `res/` is the mod's resource directory. The wheel loads its presentation from Dusklight at runtime and includes custom winged Hover Boots, Dark Link, Ice Arrow, and text-based Sit icons.
+- `res/` is the mod's resource directory. The wheel loads its presentation from Dusklight at runtime and includes custom winged Hover Boots, Dark Link, Ice Arrow, Lens of Truth, Stone Mask, Goron Mask, and text-based Sit icons.
 
 The feature files are included by `src/mod.cpp` and built as one translation unit. This keeps the mod's existing private state and hook wiring intact while giving each feature a dedicated source file; do not add the feature files separately to the CMake source list.
 
@@ -60,6 +60,8 @@ With a bow equipped, hover over the Ice Arrow wheel entry and press R to bind Ic
 The Lens of Truth appears in the secondary wheel directly after Ice Arrow and uses an original, custom icon in the wheel and X/Y HUD. Activate or deactivate it with its assigned X/Y button while in human form; it enables the game's native Wolf Sense vision state and audio, which applies the senses visual effect, and only turns that vision back off if the Lens itself enabled it. While active, it reveals Poes and enables their battle attention flag so Link can see and lock on to them. It does not change Poe damage handling, collision properties, or Link's attack properties.
 
 The Stone Mask appears immediately after the Lens of Truth. Its original wheel/HUD icon accompanies a mask model reused from the game's `N_gD_mskF` object archive and rendered on Link's head while the mask is active. The mask also applies best-effort stealth by suppressing the shared actor distance and facing-angle queries that enemy-group actors use to detect Link. Actors and bosses that use direct player-position checks, custom sensing, or other acquisition logic can still detect or attack Link; this is not universal invisibility. Remove the mask by pressing its assigned X/Y button again. It is unavailable in Wolf form.
+
+The Goron Mask appears immediately after the Stone Mask and has an original, low-resolution mask wheel/HUD icon. When equipped, it renders the game's clown mask model on Link's face. While Link is standing or walking, holding B starts a fast native front roll and repeats it continuously until B is released. The roll attacks enemies with Link's native collision sphere, dealing two damage and applying the game's normal hit response. Other actions retain their native animations. Press the assigned X/Y button again to remove it. It is unavailable in Wolf form.
 
 ## Sit While Hovering
 

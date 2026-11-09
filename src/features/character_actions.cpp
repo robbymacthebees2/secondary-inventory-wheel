@@ -38,12 +38,11 @@ void begin_hover_boots_toggle(daAlink_c* alink) {
 }
 
 void begin_secondary_hawk_grass_use(daAlink_c* alink, u8 button) {
-    alink->mSelectItemId = button;
-    if (g_hawkGrassArchiveLoaded) {
-        begin_hawk_grass_whistle(alink, button);
+    if (alink == nullptr) {
         return;
     }
 
+    alink->mSelectItemId = button;
     g_pendingHawkGrassUse = alink;
     g_pendingHawkGrassButton = button;
     g_hawkGrassPhaseRequested = true;

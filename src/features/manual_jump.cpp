@@ -620,6 +620,30 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         return;
     }
 
+    if (g_goronMaskInputBlockFrames > 0) {
+        const u8 goronButtonMask = static_cast<u8>(
+            (secondaryItemAssigned(0) &&
+                     secondaryItemIdForSlot(g_secondarySelectedItems[0]) == kGoronMaskItem
+                 ? daAlink_c::BTN_X : 0) |
+            (secondaryItemAssigned(1) &&
+                     secondaryItemIdForSlot(g_secondarySelectedItems[1]) == kGoronMaskItem
+                 ? daAlink_c::BTN_Y : 0));
+        if (goronButtonMask != 0) {
+            alink->mItemTrigger &= static_cast<u8>(~goronButtonMask);
+            alink->mItemButton &= static_cast<u8>(~goronButtonMask);
+            g_secondaryItemInputHandled = true;
+            return;
+        }
+    }
+
+    if (alink->checkWolf() && g_pendingHawkGrassUse == alink) {
+        g_pendingHawkGrassUse = nullptr;
+        svc_log->warn(mod_ctx, "Cancelled pending Hawk Grass use after Link transformed");
+    } else if (try_start_pending_hawk_grass_use(alink)) {
+        g_secondaryItemInputHandled = true;
+        return;
+    }
+
     recover_shield_surf_state(alink);
     const bool pendingRPress = g_manualJumpPendingR;
     g_manualJumpPendingR = false;
@@ -763,6 +787,15 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         g_truthMaskActive = !g_truthMaskActive;
         svc_log->info(mod_ctx, g_truthMaskActive ? "Stone Mask equipped" :
                                                    "Stone Mask removed");
+        break;
+    case kGoronMaskItem:
+        if (alink->checkWolf()) {
+            svc_log->warn(mod_ctx, "Goron Mask is only available to human Link");
+            break;
+        }
+        g_goronMaskActive = !g_goronMaskActive;
+        svc_log->info(mod_ctx, g_goronMaskActive ? "Goron Mask equipped" :
+                                                   "Goron Mask removed");
         break;
     default:
         break;

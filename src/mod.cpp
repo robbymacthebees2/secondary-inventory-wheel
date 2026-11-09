@@ -106,6 +106,7 @@ constexpr u8 kDarkLinkItem = 0xFA;
 constexpr u8 kIceArrowItem = 0xF8;
 constexpr u8 kLensOfTruthItem = 0xF6;
 constexpr u8 kTruthMaskItem = 0xF5;
+constexpr u8 kGoronMaskItem = 0xF4;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
 constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 3;
@@ -124,6 +125,7 @@ constexpr char kDarkLinkIconResource[] = "dark_link.bti";
 constexpr char kIceArrowIconResource[] = "ice_arrow.bti";
 constexpr char kLensOfTruthIconResource[] = "lens_of_truth.bti";
 constexpr char kTruthMaskIconResource[] = "truth_mask.bti";
+constexpr char kGoronMaskIconResource[] = "goron_mask.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
 constexpr u8 kGoronTunicDisplayItem = dItemNo_WEAR_KOKIRI_e;
@@ -173,6 +175,7 @@ enum class SecondaryIconContext : u8 {
     IceArrow,
     LensOfTruth,
     TruthMask,
+    GoronMask,
 };
 
 enum class SitActionState : u8 {
@@ -345,6 +348,7 @@ std::array<u8, MAX_ITEM_SLOTS> g_secondarySlots = [] {
     slots[3] = kIceArrowItem;
     slots[4] = kLensOfTruthItem;
     slots[5] = kTruthMaskItem;
+    slots[6] = kGoronMaskItem;
     return slots;
 }();
 std::array<u8, MAX_SELECT_ITEM> g_secondarySelectedItems = [] {
@@ -366,6 +370,13 @@ JKRExpHeap* g_sitWheelItemHeap = nullptr;
 J2DPicture* g_lensOfTruthWheelItemTex = nullptr;
 ResTIMG* g_lensOfTruthWheelItemBuf = nullptr;
 JKRExpHeap* g_lensOfTruthWheelItemHeap = nullptr;
+J2DPicture* g_goronMaskWheelItemTex = nullptr;
+ResTIMG* g_goronMaskWheelItemBuf = nullptr;
+JKRExpHeap* g_goronMaskWheelItemHeap = nullptr;
+ResTIMG* g_goronMaskHudIcon = nullptr;
+JKRExpHeap* g_goronMaskHudIconHeap = nullptr;
+bool g_goronMaskHudIconLoadFailed = false;
+bool g_goronMaskHudIconApplied = false;
 std::array<J2DPicture*, 3> g_shieldSurfWheelItemTex{};
 std::array<ResTIMG*, 3> g_shieldSurfWheelItemBuf{};
 JKRExpHeap* g_shieldSurfWheelItemHeap = nullptr;
@@ -376,6 +387,14 @@ bool g_truthMaskLoadFailed = false;
 request_of_phase_process_class g_truthMaskPhase{};
 JKRExpHeap* g_truthMaskHeap = nullptr;
 J3DModel* g_truthMaskModel = nullptr;
+bool g_goronMaskActive = false;
+bool g_goronMaskPhaseRequested = false;
+bool g_goronMaskArchiveLoaded = false;
+bool g_goronMaskLoadFailed = false;
+request_of_phase_process_class g_goronMaskPhase{};
+JKRExpHeap* g_goronMaskHeap = nullptr;
+J3DModel* g_goronMaskModel = nullptr;
+u8 g_goronMaskInputBlockFrames = 0;
 
 void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
@@ -394,6 +413,7 @@ void reset_manual_jump_input_state();
 #include "features/ice_arrow.cpp"
 #include "features/lens_of_truth.cpp"
 #include "features/truth_mask.cpp"
+#include "features/goron_mask.cpp"
 
 ModResult install_hooks() {
     ADD_PRE(OpenExplain, suppress_secondary_explain);
@@ -441,6 +461,7 @@ ModResult install_hooks() {
     ADD_PRE(ProcSwimDamageInit, suppress_twilight_ward_hit_stun);
     ADD_PRE(SetHeavyBoots, handle_hover_boots_heavy_toggle);
     ADD_POST(SetStickData, update_secondary_assigned_item_input);
+    ADD_POST(SetStickData, suppress_goron_mask_sword_item_input);
     ADD_PRE(CheckGrabRooster, emulate_manual_cucco_glide_check);
     ADD_PRE(ProcAutoJump, suspend_manual_glide_bow_movement_input);
     ADD_POST(ProcAutoJump, update_manual_glide_bow_aim);
@@ -479,9 +500,17 @@ ModResult install_hooks() {
     ADD_PRE(MapShow, begin_map_input);
     ADD_POST(MapShow, end_map_input);
     ADD_PRE(CheckRestartRoom, prevent_lava_return);
+    ADD_PRE(ItemTriggerCheck, suppress_goron_mask_sword_trigger);
+    ADD_PRE(ItemButtonCheck, suppress_goron_mask_sword_button);
+    ADD_PRE(DrawButtonB, set_goron_mask_roll_action);
+    ADD_POST(DrawButtonB, show_goron_mask_roll_prompt);
+    ADD_PRE(PlayerExecute, begin_goron_mask_roll);
+    ADD_POST(PlayerExecute, continue_goron_mask_roll);
+    ADD_POST(PlayerExecute, enable_goron_roll_attack);
     ADD_PRE(PlayerExecute, update_ice_arrow_freezes);
     ADD_POST(PlayerExecute, process_shield_surf_transition);
     ADD_POST(PlayerDraw, draw_truth_mask_on_player);
+    ADD_POST(PlayerDraw, draw_goron_mask_model);
     ADD_POST(CheckSceneChange, disable_hover_boots_after_scene_change);
     ADD_PRE(OffWolfEyeUp, preserve_lens_of_truth_vision);
     ADD_PRE(ProcAutoJump, release_manual_cucco_glide_on_a);
@@ -859,6 +888,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_spawned_hawk_cleanup();
     update_lens_of_truth_poes();
     update_truth_mask_resource();
+    update_goron_mask();
     return MOD_OK;
 }
 
@@ -923,6 +953,25 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     if (g_truthMaskPhaseRequested) {
         dComIfG_resDelete(&g_truthMaskPhase, "N_gD_mskF");
     }
+    if (g_goronMaskHeap != nullptr) {
+        mDoExt_destroyExpHeap(g_goronMaskHeap);
+        g_goronMaskHeap = nullptr;
+        g_goronMaskModel = nullptr;
+    }
+    if (g_goronMaskPhaseRequested) {
+        dComIfG_resDelete(&g_goronMaskPhase, "N_gD_mskT");
+    }
+    if (g_goronMaskHudIconHeap != nullptr) {
+        mDoExt_destroyExpHeap(g_goronMaskHudIconHeap);
+        g_goronMaskHudIconHeap = nullptr;
+        g_goronMaskHudIcon = nullptr;
+    }
+    g_goronMaskHudIconLoadFailed = false;
+    g_goronMaskHudIconApplied = false;
+    g_goronMaskPhase = {};
+    g_goronMaskPhaseRequested = false;
+    g_goronMaskArchiveLoaded = false;
+    g_goronMaskLoadFailed = false;
     g_hawkGrassPhase = {};
     g_iceKeesePhase = {};
     g_hawkGrassPhaseRequested = false;
@@ -946,6 +995,8 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_iceArrowSelected = false;
     g_lensOfTruthActive = false;
     g_truthMaskActive = false;
+    g_goronMaskActive = false;
+    g_goronMaskInputBlockFrames = 0;
     update_lens_of_truth_poes();
     g_iceArrowFrozenTargets.fill({});
     g_darkLinkDrawModelData = nullptr;

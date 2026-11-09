@@ -267,7 +267,8 @@ u8 secondaryDisplayItemForId(u8 itemId) {
         return kGoronTunicDisplayItem;
     }
     if (itemId == kDarkLinkItem || itemId == kIceArrowItem ||
-        itemId == kLensOfTruthItem || itemId == kTruthMaskItem)
+        itemId == kLensOfTruthItem || itemId == kTruthMaskItem ||
+        itemId == kGoronMaskItem)
     {
         return dItemNo_WOOD_STICK_e;
     }
@@ -327,6 +328,12 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
     {
         return SecondaryIconContext::TruthMask;
     }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kGoronMaskItem)
+    {
+        return SecondaryIconContext::GoronMask;
+    }
     return SecondaryIconContext::None;
 }
 
@@ -362,12 +369,6 @@ void update_hawk_grass_resource() {
     if (phase == cPhs_COMPLEATE_e) {
         g_hawkGrassArchiveLoaded = true;
         svc_log->info(mod_ctx, "Hawk Grass model archive loaded");
-        if (g_pendingHawkGrassUse != nullptr) {
-            auto* alink = g_pendingHawkGrassUse;
-            const u8 button = g_pendingHawkGrassButton;
-            g_pendingHawkGrassUse = nullptr;
-            begin_hawk_grass_whistle(alink, button);
-        }
     } else if (phase == cPhs_ERROR_e || phase == cPhs_UNK3_e) {
         g_pendingHawkGrassUse = nullptr;
         g_hawkGrassPhaseRequested = false;
@@ -375,9 +376,29 @@ void update_hawk_grass_resource() {
     }
 }
 
+bool try_start_pending_hawk_grass_use(daAlink_c* alink) {
+    if (alink == nullptr || g_pendingHawkGrassUse == nullptr ||
+        !g_hawkGrassArchiveLoaded)
+    {
+        return false;
+    }
+
+    if (alink != g_pendingHawkGrassUse || alink->checkWolf()) {
+        g_pendingHawkGrassUse = nullptr;
+        svc_log->warn(mod_ctx, "Cancelled pending Hawk Grass use after player form changed");
+        return false;
+    }
+
+    const u8 button = g_pendingHawkGrassButton;
+    g_pendingHawkGrassUse = nullptr;
+    begin_hawk_grass_whistle(alink, button);
+    return alink->mProcID == daAlink_c::PROC_GRASS_WHISTLE_WAIT;
+}
+
 void update_ice_keese_resource() {
     if ((!g_iceArrowSelected && !g_iceKeesePhaseRequested) ||
-        g_iceKeeseArchiveLoaded || g_iceKeeseLoadFailed)
+        g_iceKeeseArchiveLoaded || g_iceKeeseLoadFailed ||
+        g_iceKeeseHeap != nullptr || g_iceKeeseModel != nullptr)
     {
         return;
     }
@@ -451,6 +472,9 @@ const char* secondaryItemNameForSlot(u8 slotId) {
         }
         if (item == kTruthMaskItem) {
             return "Stone Mask";
+        }
+        if (item == kGoronMaskItem) {
+            return "Goron Mask";
         }
     }
 
