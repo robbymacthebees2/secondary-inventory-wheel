@@ -621,16 +621,22 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     }
 
     if (g_goronMaskInputBlockFrames > 0) {
-        const u8 goronButtonMask = static_cast<u8>(
+        const u8 maskButtonMask = static_cast<u8>(
             (secondaryItemAssigned(0) &&
-                     secondaryItemIdForSlot(g_secondarySelectedItems[0]) == kGoronMaskItem
+                     (secondaryItemIdForSlot(g_secondarySelectedItems[0]) ==
+                          kGoronMaskItem ||
+                      secondaryItemIdForSlot(g_secondarySelectedItems[0]) ==
+                          kGiantMaskItem)
                  ? daAlink_c::BTN_X : 0) |
             (secondaryItemAssigned(1) &&
-                     secondaryItemIdForSlot(g_secondarySelectedItems[1]) == kGoronMaskItem
+                     (secondaryItemIdForSlot(g_secondarySelectedItems[1]) ==
+                          kGoronMaskItem ||
+                      secondaryItemIdForSlot(g_secondarySelectedItems[1]) ==
+                          kGiantMaskItem)
                  ? daAlink_c::BTN_Y : 0));
-        if (goronButtonMask != 0) {
-            alink->mItemTrigger &= static_cast<u8>(~goronButtonMask);
-            alink->mItemButton &= static_cast<u8>(~goronButtonMask);
+        if (maskButtonMask != 0) {
+            alink->mItemTrigger &= static_cast<u8>(~maskButtonMask);
+            alink->mItemButton &= static_cast<u8>(~maskButtonMask);
             g_secondaryItemInputHandled = true;
             return;
         }
@@ -796,6 +802,15 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         g_goronMaskActive = !g_goronMaskActive;
         svc_log->info(mod_ctx, g_goronMaskActive ? "Goron Mask equipped" :
                                                    "Goron Mask removed");
+        break;
+    case kGiantMaskItem:
+        if (alink->checkWolf()) {
+            svc_log->warn(mod_ctx, "Giant's Mask is only available to human Link");
+            break;
+        }
+        g_giantMaskActive = !g_giantMaskActive;
+        svc_log->info(mod_ctx, g_giantMaskActive ? "Giant's Mask equipped" :
+                                                   "Giant's Mask removed");
         break;
     default:
         break;

@@ -483,26 +483,30 @@ void double_dark_link_incoming_damage(ModContext*, void* args, void* retval, voi
     *static_cast<f32*>(retval) *= 4.0f;
 }
 
-HookAction double_dark_link_sword_damage(ModContext*, void* args, void*, void*) {
+HookAction modify_active_form_sword_damage(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (!g_darkLinkFormActive || alink == nullptr || alink->checkWolf()) {
-        return HOOK_CONTINUE;
+    int& attackPower = mods::arg_ref<int>(args, 4);
+    if (g_darkLinkFormActive && alink != nullptr && !alink->checkWolf()) {
+        attackPower *= 4;
     }
-
-    mods::arg_ref<int>(args, 4) *= 4;
     return HOOK_CONTINUE;
 }
 
-HookAction double_dark_link_cylinder_sword_damage(ModContext*, void* args, void*, void*) {
+HookAction modify_active_form_cylinder_sword_damage(
+    ModContext*, void* args, void*, void*)
+{
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     constexpr u32 kSwordAttackTypes = AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD;
-    if (!g_darkLinkFormActive || alink == nullptr || alink->checkWolf() ||
+    if (alink == nullptr || alink->checkWolf() ||
         (mods::arg<u32>(args, 1) & kSwordAttackTypes) == 0)
     {
         return HOOK_CONTINUE;
     }
 
-    mods::arg_ref<int>(args, 5) *= 4;
+    int& attackPower = mods::arg_ref<int>(args, 5);
+    if (g_darkLinkFormActive) {
+        attackPower *= 4;
+    }
     return HOOK_CONTINUE;
 }
 
