@@ -268,7 +268,8 @@ u8 secondaryDisplayItemForId(u8 itemId) {
     }
     if (itemId == kDarkLinkItem || itemId == kIceArrowItem ||
         itemId == kLensOfTruthItem || itemId == kTruthMaskItem ||
-        itemId == kGoronMaskItem || itemId == kGiantMaskItem)
+        itemId == kGoronMaskItem || itemId == kGiantMaskItem ||
+        itemId == kArmosHammerItem)
     {
         return dItemNo_WOOD_STICK_e;
     }
@@ -339,6 +340,12 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
         g_secondarySlots[slotId - kSecondarySlotBase] == kGiantMaskItem)
     {
         return SecondaryIconContext::GiantMask;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kArmosHammerItem)
+    {
+        return SecondaryIconContext::ArmosHammer;
     }
     return SecondaryIconContext::None;
 }
@@ -484,6 +491,9 @@ const char* secondaryItemNameForSlot(u8 slotId) {
         }
         if (item == kGiantMaskItem) {
             return "Giant's Mask";
+        }
+        if (item == kArmosHammerItem) {
+            return "Armos Hammer";
         }
     }
 
