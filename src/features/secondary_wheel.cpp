@@ -1308,7 +1308,8 @@ void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
          g_secondaryIconContext != SecondaryIconContext::TruthMask &&
          g_secondaryIconContext != SecondaryIconContext::GoronMask &&
          g_secondaryIconContext != SecondaryIconContext::GiantMask &&
-         g_secondaryIconContext != SecondaryIconContext::ArmosHammer) ||
+         g_secondaryIconContext != SecondaryIconContext::ArmosHammer &&
+         g_secondaryIconContext != SecondaryIconContext::DekuNut) ||
         mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e)
     {
         return;
@@ -1382,6 +1383,8 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context) {
         return kGiantMaskIconResource;
     case SecondaryIconContext::ArmosHammer:
         return kArmosHammerIconResource;
+    case SecondaryIconContext::DekuNut:
+        return kDekuNutIconResource;
     case SecondaryIconContext::DarkLink:
         return kDarkLinkIconResource;
     case SecondaryIconContext::HoverBoots:
@@ -1411,7 +1414,8 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
         g_secondaryIconContext != SecondaryIconContext::TruthMask &&
         g_secondaryIconContext != SecondaryIconContext::GoronMask &&
         g_secondaryIconContext != SecondaryIconContext::GiantMask &&
-        g_secondaryIconContext != SecondaryIconContext::ArmosHammer)
+        g_secondaryIconContext != SecondaryIconContext::ArmosHammer &&
+        g_secondaryIconContext != SecondaryIconContext::DekuNut)
     {
         mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
         return HOOK_CONTINUE;

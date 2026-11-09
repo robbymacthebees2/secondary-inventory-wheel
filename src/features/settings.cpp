@@ -317,3 +317,42 @@ void open_robin_settings_window(ModContext* ctx, void*) {
         svc_log->error(ctx, "failed to open Robin's W&T settings");
     }
 }
+
+void dismiss_combined_info_dialog(ModContext*, UiDialogHandle, void*) {}
+
+void open_combined_info_dialog(
+    ModContext* ctx, const char* title, const char* body, UiDialogVariant variant) {
+    UiDialogAction action = UI_DIALOG_ACTION_INIT;
+    action.label = "Got it";
+    action.on_pressed = dismiss_combined_info_dialog;
+
+    UiDialogDesc desc = UI_DIALOG_DESC_INIT;
+    desc.title = title;
+    desc.body_rml = body;
+    desc.variant = variant;
+    desc.actions = &action;
+    desc.action_count = 1;
+    UiDialogHandle dialog = 0;
+    const ModResult result = svc_ui->dialog_push(ctx, &desc, &dialog);
+    if (result != MOD_OK) {
+        svc_log->error(ctx, "failed to open combined Wheel information");
+    }
+}
+
+void open_combined_credits(ModContext* ctx, void*) {
+    open_combined_info_dialog(
+        ctx, "Credits",
+        "<p><b>Third-party character models</b></p>"
+        "<p>Dark Link - LoadingError</p>"
+        "<p>Hero of Time, Hero of the Sky, Hero of the Wild, Hyrule Warriors, Ordon Warrior, and "
+        "Ordon Warrior (No Hat) - SkilarBabcock</p>"
+        "<p>Linkle - Ditrey; concept art by ThenMichael; modeling help from SkilarBabcock</p>"
+        "<p>Zora Link and Zora Link (Alt Eyes) - model and textures by SkilarBabcock; fixes by "
+        "Oxygno. Source: GameBanana mod 735675.</p>"
+        "<p>The Deku Nut uses the original in-game slingshot-nut asset.</p>"
+        "<p><b>Co-op source</b></p>"
+        "<p>Networking and remote puppet code from Crests of Courage by remiafterdark, licensed "
+        "under MIT. Contributions: Fimmel, thyherooftime, Dragonberri, and the Dusklight team. "
+        "Full source license and credits are included in the package.</p>",
+        UI_DIALOG_NORMAL);
+}

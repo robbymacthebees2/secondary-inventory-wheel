@@ -1,15 +1,18 @@
-# RobinWheelAndTweaks
+# Secondary Inventory Wheel
 
-Made by RobinTheSoundsmith. This Dusklight code mod adds a second item wheel with 24 mod-owned item slots, Shield Surf, a Sit action, and a separate Goron Tunic slot. It reuses the vanilla item-wheel presentation while handling slot identity, selection, movement, and rendering independently of vanilla inventory indexes. Hawk Grass is provided in the first secondary slot and Hover Boots in the second; both can be assigned to X or Y.
+Made by RobinTheSoundsmith. This Dusklight code mod adds a second item wheel with 24 mod-owned item slots, Shield Surf, a Sit action, and a separate Goron Tunic slot. The combined build also includes the Crests of Courage co-op runtime for player, pose, and actor synchronization. It reuses the vanilla item-wheel presentation while handling slot identity, selection, movement, and rendering independently of vanilla inventory indexes. Hawk Grass is provided in the first secondary slot and Hover Boots in the second; both can be assigned to X or Y.
 
 ## Repository contents
 
-- `src/mod.cpp` owns initialization, hook registration, and shared private state. Feature implementations are organized under `src/features/`: `core_helpers.cpp`, `secondary_wheel.cpp`, `hover_boots.cpp`, `world_hooks.cpp`, `goron_tunic.cpp`, `dark_link.cpp`, `character_actions.cpp`, `sit_music.cpp`, `shield_surf.cpp`, `manual_jump.cpp`, `settings.cpp`, `ice_arrow.cpp`, `lens_of_truth.cpp`, `truth_mask.cpp`, `goron_mask.cpp`, `giant_mask.cpp`, and `armos_hammer.cpp`.
+- `src/mod.cpp` owns initialization, hook registration, and shared private state. Feature implementations are organized under `src/features/`: `core_helpers.cpp`, `secondary_wheel.cpp`, `hover_boots.cpp`, `world_hooks.cpp`, `goron_tunic.cpp`, `dark_link.cpp`, `character_actions.cpp`, `sit_music.cpp`, `shield_surf.cpp`, `manual_jump.cpp`, `settings.cpp`, `ice_arrow.cpp`, `lens_of_truth.cpp`, `truth_mask.cpp`, `goron_mask.cpp`, `giant_mask.cpp`, `armos_hammer.cpp`, and `deku_nut.cpp`.
 - `mod.json` contains the Dusklight mod manifest.
 - `CMakeLists.txt` defines the mod target for Dusklight's CMake build.
-- `res/` is the mod's resource directory. The wheel loads its presentation from Dusklight at runtime and includes custom winged Hover Boots, Dark Link, Ice Arrow, Lens of Truth, Stone Mask, Goron Mask, Giant's Mask, Armos Hammer, and text-based Sit icons.
+- `src/coop/` contains the integrated Co-op runtime; its lifecycle is called by the single Wheel mod entry point.
+- `res/models/` contains shipped player-model resources, including two Zora Link variants. The game's models are unpacked into this mod's data directory for the existing skin loader.
+- `third_party/crests-of-courage/` preserves the Co-op source license and full source credits. Third-party models are not covered by that MIT license; in-game credits identify their authors.
+- `res/` is the mod's resource directory. The wheel loads its presentation from Dusklight at runtime and includes custom wheel icons and shipped player models. The Deku Nut itself renders the native slingshot nut model from the game's `Alink` archive.
 
-The feature files are included by `src/mod.cpp` and built as one translation unit. This keeps the mod's existing private state and hook wiring intact while giving each feature a dedicated source file; do not add the feature files separately to the CMake source list.
+Wheel feature files are included by `src/mod.cpp` and built as one translation unit to preserve private state and hook wiring. Co-op runtime files are separate translation units in `src/coop/` and are added to the same native plugin target; the combined package has one Wheel manifest and one mod entry point.
 
 ## Building
 
@@ -22,6 +25,8 @@ add_subdirectory(mods/secondary_inventory_wheel)
 Configure Dusklight as usual, then build the `secondary_inventory_wheel_package` target. The build produces `secondary_inventory_wheel.dusk`.
 
 ## Slot model
+
+The Deku Nut follows the Armos Hammer in the secondary wheel. It uses the game's native bomb actor for carrying and throwing, but renders at double size with a small upward offset using the native slingshot nut model from Link's already-loaded `Alink` archive. Each tracked nut has its own model instance so rapid throws cannot overwrite another nut's pending draw transform. Press its assigned X/Y button again to throw it; while manual Cucco gliding, pressing the assigned button drops a Deku Nut. The custom BMD model is not loaded at runtime because it caused crashes in the game's BMD loader. Its fuse is disabled so it only pops on enemy contact or a surface impact. On impact, it uses the standard sword-hit particle effect and freezes living enemies and bosses within 350 game units for five seconds without applying bomb damage. A custom Deku Nut icon is used on the wheel and X/Y HUD.
 
 Secondary X/Y assignments are saved per game file and only persisted when that file is saved. Assignments from earlier releases are not migrated; reassign items and save each file to record them.
 
@@ -40,6 +45,12 @@ Bow actions are suppressed while Shield Surfing because the vanilla bow process 
 When Goron Tunic lava walking is disabled, Link keeps the gradual lava sink and a five-second magma-return delay. The delay restarts if Link leaves the lava, so separate contacts do not accumulate time.
 
 The secondary wheel's close behavior matches the vanilla wheel, including restoring background music and sound-effect levels when the wheel closes.
+
+## Co-op compatibility
+
+The Co-op menu includes a warning: this combined build is not compatible with a separate standalone Crests of Courage installation. Disable standalone CoC manually before playing; the Wheel does not unload or modify other mods. All peers must use matching combined builds. The integrated snapshot and actor protocol is version 75.
+
+The menu bar's **Credits** tab lists the included third-party model creators and Co-op source contributors. The full Crests of Courage MIT license and source credits are included in the package under `credits/`; model assets are separately credited and are not covered by that source license.
 
 Manual jump works for Link and Wolf Link, using each form's native jump action. For Link, it preserves horizontal momentum at takeoff, including a zero-speed start, rather than applying the native auto-jump's forward launch speed. Its configurable height is 100% by default and scales peak height up to 300%. While airborne without Hover Boots, Link can press the configured jump button to enter the native Cucco glide, keeping the game's current glide animations and displaying a vanilla magical aura particle instead of a Cucco. While gliding, activating the bow enters first-person aim; aiming turns the camera and reticle without steering Link, and arrows follow the reticle. The configurable glide bow slow-time setting scales the game's simulation only while bow aiming during this glide, affecting Link and the world together; 100% pauses simulation. When Dusklight frame interpolation is enabled, it smooths rendering between the slower simulation updates. Releasing a held bomb with its assigned X/Y button drops it without ending the glide or automatically equipping another bomb. With airwalking Hover Boots active, pressing the configured jump button while airborne instead moves the active hover plane to Link's current elevation; at the hover plane it performs a normal manual jump. While Shield Surfing on the Hover Boots plane, the configured jump button starts a native board jump and raises the hover plane as Link rises; the lower-plane binding lowers the plane and lets Link descend without ending the surf. A separate configurable L1/L2/L3/R1/R2/R3 bind lowers the active hover plane by Link's vanilla standing-jump height; it defaults to R3 and lets Link descend to the new plane. Pressing the configured jump button again releases the glide.
 

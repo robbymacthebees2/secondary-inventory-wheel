@@ -14,6 +14,7 @@ void clear_ice_arrow_target(IceArrowFrozenTarget& target, fopAc_ac_c* actor) {
 
     target.active = false;
     target.shaderColorCaptured = false;
+    target.showIceEffect = false;
     target.model = nullptr;
     target.framesRemaining = 0;
 }
@@ -26,7 +27,9 @@ bool is_ice_arrow_enemy_dead(fopAc_ac_c* actor) {
     return actor->health <= 0 || enemy->checkDeadFlg();
 }
 
-void register_ice_arrow_target(fopAc_ac_c* actor) {
+void register_ice_arrow_target(
+    fopAc_ac_c* actor, u16 framesRemaining, bool showIceEffect)
+{
     if (actor == nullptr || fopAcM_GetGroup(actor) != fopAc_ENEMY_e ||
         is_ice_arrow_enemy_dead(actor))
     {
@@ -64,15 +67,19 @@ void register_ice_arrow_target(fopAc_ac_c* actor) {
         target->shaderColorCaptured = true;
         target->originalGravity = actor->gravity;
         target->originalMaxFallSpeed = actor->maxFallSpeed;
+        target->showIceEffect = showIceEffect;
     }
     target->actorId = fopAcM_GetID(actor);
     target->model = actor->model;
     target->frozenPosition = actor->current.pos;
     target->frozenAngle = actor->current.angle;
     target->frozenShapeAngle = actor->shape_angle;
-    target->framesRemaining = kIceArrowFreezeFrames;
+    target->framesRemaining = framesRemaining;
+    target->showIceEffect = target->showIceEffect || showIceEffect;
     target->active = true;
-    dComIfGp_particle_set(0, ID_AK_JN_ENEMYFREEZE00, &actor->current.pos, &actor->tevStr);
+    if (showIceEffect) {
+        dComIfGp_particle_set(0, ID_AK_JN_ENEMYFREEZE00, &actor->current.pos, &actor->tevStr);
+    }
 }
 
 bool is_ice_arrow_actor_frozen(const fopAc_ac_c* actor) {
@@ -316,7 +323,7 @@ HookAction register_ice_arrow_hit(ModContext*, void* args, void*, void*) {
         targetInfo != nullptr && !targetInfo->ChkTgShield() &&
         !targetInfo->ChkTgArrowThrough())
     {
-        register_ice_arrow_target(actor);
+        register_ice_arrow_target(actor, kIceArrowFreezeFrames, true);
     }
     return HOOK_CONTINUE;
 }
@@ -355,7 +362,7 @@ void apply_ice_arrow_shader_after_tev_setup(ModContext*, void* args, void*, void
         }
 
         fopAc_ac_c* actor = fopAcM_SearchByID(target.actorId);
-        if (actor == nullptr || &actor->tevStr != tevStr) {
+        if (!target.showIceEffect || actor == nullptr || &actor->tevStr != tevStr) {
             continue;
         }
 

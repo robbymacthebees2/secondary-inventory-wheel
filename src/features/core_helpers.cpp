@@ -273,6 +273,9 @@ u8 secondaryDisplayItemForId(u8 itemId) {
     {
         return dItemNo_WOOD_STICK_e;
     }
+    if (itemId == kDekuNutItem) {
+        return dItemNo_WOOD_STICK_e;
+    }
     if (itemId == kHawkGrassItem || itemId == kHoverBootsItem) {
         return dItemNo_WOOD_STICK_e;
     }
@@ -346,6 +349,12 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
         g_secondarySlots[slotId - kSecondarySlotBase] == kArmosHammerItem)
     {
         return SecondaryIconContext::ArmosHammer;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kDekuNutItem)
+    {
+        return SecondaryIconContext::DekuNut;
     }
     return SecondaryIconContext::None;
 }
@@ -494,6 +503,9 @@ const char* secondaryItemNameForSlot(u8 slotId) {
         }
         if (item == kArmosHammerItem) {
             return "Armos Hammer";
+        }
+        if (item == kDekuNutItem) {
+            return "Deku Nut";
         }
     }
 
