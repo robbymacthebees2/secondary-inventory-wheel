@@ -75,6 +75,20 @@ void clear_lens_of_truth_wheel_texture() {
     g_lensOfTruthWheelItemHeap = nullptr;
 }
 
+void clear_goron_mask_wheel_texture() {
+    if (g_goronMaskWheelItemTex != nullptr) {
+        JKR_DELETE(g_goronMaskWheelItemTex);
+        g_goronMaskWheelItemTex = nullptr;
+    }
+    if (g_goronMaskWheelItemHeap != nullptr &&
+        g_goronMaskWheelItemBuf != nullptr)
+    {
+        g_goronMaskWheelItemHeap->free(g_goronMaskWheelItemBuf);
+    }
+    g_goronMaskWheelItemBuf = nullptr;
+    g_goronMaskWheelItemHeap = nullptr;
+}
+
 void load_lens_of_truth_wheel_texture(dMenu_Ring_c* ring) {
     clear_lens_of_truth_wheel_texture();
     ResourceBuffer icon = RESOURCE_BUFFER_INIT;
@@ -113,6 +127,46 @@ void load_lens_of_truth_wheel_texture(dMenu_Ring_c* ring) {
         return;
     }
     g_lensOfTruthWheelItemTex->setBasePosition(J2DBasePosition_4);
+}
+
+void load_goron_mask_wheel_texture(dMenu_Ring_c* ring) {
+    clear_goron_mask_wheel_texture();
+    ResourceBuffer icon = RESOURCE_BUFFER_INIT;
+    const ModResult result =
+        svc_resource->load(mod_ctx, kGoronMaskIconResource, &icon);
+    if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
+        svc_log->error(mod_ctx, "failed to load the Goron Mask wheel icon");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    if (icon.size < sizeof(ResTIMG) || icon.size > kItemTextureBufferSize) {
+        svc_log->error(mod_ctx, "Goron Mask wheel icon has an invalid texture size");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+
+    g_goronMaskWheelItemHeap = ring->mpHeap;
+    g_goronMaskWheelItemBuf = static_cast<ResTIMG*>(
+        g_goronMaskWheelItemHeap->alloc(kItemTextureBufferSize, 0x20));
+    if (g_goronMaskWheelItemBuf == nullptr) {
+        g_goronMaskWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to allocate the Goron Mask wheel icon buffer");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    std::memcpy(g_goronMaskWheelItemBuf, icon.data, icon.size);
+    svc_resource->free(mod_ctx, &icon);
+    DCStoreRangeNoSync(g_goronMaskWheelItemBuf, kItemTextureBufferSize);
+
+    g_goronMaskWheelItemTex = JKR_NEW J2DPicture(g_goronMaskWheelItemBuf);
+    if (g_goronMaskWheelItemTex == nullptr) {
+        g_goronMaskWheelItemHeap->free(g_goronMaskWheelItemBuf);
+        g_goronMaskWheelItemBuf = nullptr;
+        g_goronMaskWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to create the Goron Mask wheel icon picture");
+        return;
+    }
+    g_goronMaskWheelItemTex->setBasePosition(J2DBasePosition_4);
 }
 
 void clear_shield_surf_wheel_textures() {
@@ -363,6 +417,7 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
     load_shield_surf_wheel_textures(ring);
     load_sit_wheel_texture(ring);
     load_lens_of_truth_wheel_texture(ring);
+    load_goron_mask_wheel_texture(ring);
     load_tunic_wheel_textures(ring);
 
     for (int button = 0; button < 2; ++button) {
@@ -555,11 +610,21 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
             g_secondarySelectedItems[0] = selected;
             ring->mXButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(0, secondaryDisplayItemForSlot(selected));
+            if (secondaryItemIdForSlot(selected) == kGoronMaskItem) {
+                g_goronMaskActive = false;
+                g_goronMaskInputBlockFrames = 2;
+                g_secondaryItemInputHandled = true;
+            }
         }
         if (!iceArrowSlot && mDoCPd_c::getTrigY(PAD_1) != 0) {
             g_secondarySelectedItems[1] = selected;
             ring->mYButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(1, secondaryDisplayItemForSlot(selected));
+            if (secondaryItemIdForSlot(selected) == kGoronMaskItem) {
+                g_goronMaskActive = false;
+                g_goronMaskInputBlockFrames = 2;
+                g_secondaryItemInputHandled = true;
+            }
         }
         for (int button = 0; button < 2; ++button) {
             if (secondaryTunicAssigned(button)) {
@@ -774,8 +839,8 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
                     x + (48.0f - iconSize) * 0.5f,
                     y + (48.0f - iconSize) * 0.5f,
                     iconSize, iconSize, 0, 0, 0);
+                continue;
             }
-            continue;
         }
         if (index == MAX_ITEM_SLOTS + 2) {
             if (g_tunicWheelItemBuf[0] == nullptr) {
@@ -803,6 +868,20 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
                 constexpr f32 iconSize = 36.0f;
                 g_lensOfTruthWheelItemTex->setAlpha(pose.alpha * 255.0f);
                 g_lensOfTruthWheelItemTex->draw(
+                    x + (48.0f - iconSize) * 0.5f,
+                    y + (48.0f - iconSize) * 0.5f,
+                    iconSize, iconSize, 0, 0, 0);
+            }
+            continue;
+        }
+
+        if (secondaryItemIdForSlot(g_secondaryWheelSlotIds[index]) ==
+            kGoronMaskItem)
+        {
+            if (g_goronMaskWheelItemTex != nullptr) {
+                constexpr f32 iconSize = 36.0f;
+                g_goronMaskWheelItemTex->setAlpha(pose.alpha * 255.0f);
+                g_goronMaskWheelItemTex->draw(
                     x + (48.0f - iconSize) * 0.5f,
                     y + (48.0f - iconSize) * 0.5f,
                     iconSize, iconSize, 0, 0, 0);
@@ -969,6 +1048,7 @@ HookAction prepare_ring_delete(ModContext*, void* args, void*, void*) {
         clear_shield_surf_wheel_textures();
         clear_sit_wheel_texture();
         clear_lens_of_truth_wheel_texture();
+        clear_goron_mask_wheel_texture();
         clear_tunic_wheel_textures();
     }
     return HOOK_CONTINUE;
@@ -1071,7 +1151,8 @@ void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
          g_secondaryIconContext != SecondaryIconContext::DarkLink &&
          g_secondaryIconContext != SecondaryIconContext::IceArrow &&
          g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
-         g_secondaryIconContext != SecondaryIconContext::TruthMask) ||
+         g_secondaryIconContext != SecondaryIconContext::TruthMask &&
+         g_secondaryIconContext != SecondaryIconContext::GoronMask) ||
         mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e)
     {
         return;
@@ -1139,6 +1220,8 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context) {
         return kLensOfTruthIconResource;
     case SecondaryIconContext::TruthMask:
         return kTruthMaskIconResource;
+    case SecondaryIconContext::GoronMask:
+        return kGoronMaskIconResource;
     case SecondaryIconContext::DarkLink:
         return kDarkLinkIconResource;
     case SecondaryIconContext::HoverBoots:
@@ -1165,7 +1248,8 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
         g_secondaryIconContext != SecondaryIconContext::DarkLink &&
         g_secondaryIconContext != SecondaryIconContext::IceArrow &&
         g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
-        g_secondaryIconContext != SecondaryIconContext::TruthMask)
+        g_secondaryIconContext != SecondaryIconContext::TruthMask &&
+        g_secondaryIconContext != SecondaryIconContext::GoronMask)
     {
         mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
         return HOOK_CONTINUE;
