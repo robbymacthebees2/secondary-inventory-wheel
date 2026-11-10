@@ -61,6 +61,7 @@ void push_id(fpc_ProcID* list, int& next, fpc_ProcID id) {
 }
 
 const int kArrowListMax = kCoopMaxPlayers * 4;
+const uint8_t kCoopIceArrowType = 3;
 
 struct ArrowList {
     daArrow_c* arrows[kArrowListMax];
@@ -302,7 +303,7 @@ void projectiles_on_message(const uint8_t* payload, size_t size) {
 
     if (alink->mpLinkModel == nullptr || dComIfGp_isEnableNextStage()) return;
     if (shot.type != daArrow_c::ARROW_TYPE_NORMAL && shot.type != daArrow_c::ARROW_TYPE_BOMB &&
-        shot.type != daArrow_c::ARROW_TYPE_SLING)
+        shot.type != daArrow_c::ARROW_TYPE_SLING && shot.type != kCoopIceArrowType)
     {
         return;
     }

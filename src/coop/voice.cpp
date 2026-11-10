@@ -498,23 +498,20 @@ void voice_draw_mute_hint(f32 minX, f32 minY, f32 width, f32 height) {
     const u8 alpha = static_cast<u8>(std::clamp(a, 0.0f, 1.0f) * 255.0f);
     JUTFont* font = mDoExt_getMesgFont();
 
-    const f32 size = height * 0.07f;
     const f32 cell = height * 0.034f;
     const char* word = s_hintMuted ? "Mic off" : "Mic on";
     const f32 textW = font != nullptr ? coop_text_width(font, word, cell) : 0.0f;
-    const f32 gap = size * 0.25f;
-    const f32 total = size + gap + textW;
-    const f32 x = minX + (width - total) * 0.5f;
+    const f32 x = minX + (width - textW) * 0.5f;
     const f32 baseline = minY + height * 0.78f;
-    coop_draw_voice_icon(x, baseline, size, alpha, s_hintMuted);
     if (font != nullptr) {
         if (J2DGrafContext* port = dComIfGp_getCurrentGrafPort()) port->setup2D();
+        font->setGX();
         const f32 shadow = cell * 0.07f;
-        const f32 ty = baseline - size * 0.82f + (size - cell) * 0.5f + cell * 0.85f;
+        const f32 ty = baseline - cell * 0.31f;
         font->setCharColor(JUtility::TColor(0, 0, 0, static_cast<u8>(alpha * 0.8f)));
-        font->drawString_scale(x + size + gap + shadow, ty + shadow, cell, cell, word, true);
+        font->drawString_scale(x + shadow, ty + shadow, cell, cell, word, true);
         font->setCharColor(s_hintMuted ? JUtility::TColor(255, 120, 110, alpha) : JUtility::TColor(255, 255, 255, alpha));
-        font->drawString_scale(x + size + gap, ty, cell, cell, word, true);
+        font->drawString_scale(x, ty, cell, cell, word, true);
     }
     if (J2DGrafContext* port = dComIfGp_getCurrentGrafPort()) port->setup2D();
 }

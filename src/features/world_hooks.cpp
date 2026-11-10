@@ -1,5 +1,19 @@
 HookAction prevent_lava_return(ModContext*, void* args, void* retval, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink != nullptr && alink->checkMagicArmorWearAbility()) {
+        const f32 lavaSurfaceY = get_lava_surface_y(alink);
+        const bool sinkingInLava =
+            is_lava_polygon_contact(alink) &&
+            lavaSurfaceY != -G_CM3D_F_INF &&
+            alink->current.pos.y < lavaSurfaceY;
+        const bool sinkingInSand =
+            alink->mLinkAcch.ChkGroundHit() && alink->mGndPolyAtt1 == 2;
+        if (sinkingInLava || sinkingInSand) {
+            dComIfGs_setSelectEquipClothes(dItemNo_WEAR_KOKIRI_e);
+            alink->setClothesChange(0);
+        }
+    }
+
     if (alink != nullptr && hoverBootsAirwalkingEnabled() && g_hoverBootsEquipped &&
         g_hoverGroundHeightValid &&
         !alink->mLinkAcch.ChkGroundHit() && !alink->checkEventRun() &&
@@ -22,12 +36,6 @@ HookAction prevent_lava_return(ModContext*, void* args, void* retval, void*) {
     {
         *static_cast<BOOL*>(retval) = TRUE;
         return HOOK_SKIP_ORIGINAL;
-    }
-
-    if (alink->mLinkAcch.ChkGroundHit() && alink->mGndPolyAtt1 == 2) {
-        // Heavy armor promotes lava's sink attribute to quicksand's value,
-        // whose return initializer assumes a sand-only transform buffer.
-        alink->mGndPolyAtt1 = 1;
     }
 
     return HOOK_CONTINUE;
@@ -474,14 +482,8 @@ void maintain_lava_ground(ModContext*, void* args, void*, void*) {
     if (infiniteLavaWalkEnabled() && g_goronTunicEquipped) {
         stabilize_lava_surface_contact(alink, true);
     } else if (g_goronTunicEquipped &&
-               g_goronLavaContactFrames < kGoronLavaReturnDelayFrames &&
-               stabilize_lava_surface_contact(alink, false))
-    {
-        if (alink->mGndPolyAtt1 == 2) {
-            alink->mGndPolyAtt1 = 1;
-        }
-    } else if (alink->mLinkAcch.ChkGroundHit() && alink->mGndPolyAtt1 == 2) {
-        alink->mGndPolyAtt1 = 1;
+               g_goronLavaContactFrames < kGoronLavaReturnDelayFrames) {
+        stabilize_lava_surface_contact(alink, false);
     }
 }
 

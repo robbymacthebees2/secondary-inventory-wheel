@@ -1670,7 +1670,8 @@ void send_local_snapshot() {
                     : 0;
             }
         }
-        snapshot.swordVisible = daAlink_c::checkSwordGet() ? 1 : 0;
+        snapshot.swordVisible =
+            daAlink_c::checkSwordGet() && !wheel_is_armos_hammer_active() ? 1 : 0;
         snapshot.shieldVisible = daAlink_c::checkShieldGet() ? 1 : 0;
         snapshot.swordJoint = alink->mLeftItemJntNo;
         snapshot.sheathJoint = alink->field_0x30b6;
@@ -1748,6 +1749,20 @@ void send_local_snapshot() {
                 }
             }
         };
+
+        if (!modelsUnsafe && wheel_is_armos_hammer_active() && alink->mSwordModel != nullptr &&
+            body != nullptr && snapshot.swordJoint < bodyData->getJointNum()) {
+            Mtx inverse;
+            Mtx local;
+            mDoMtx_inverse(standin_local_joint_mtx(body, snapshot.swordJoint), inverse);
+            mDoMtx_concat(inverse, alink->mSwordModel->getBaseTRMtx(), local);
+            snapshot.wheelFlags |= kPuppetWheelArmosHammer;
+            for (int r = 0; r < 3; ++r) {
+                for (int c = 0; c < 4; ++c) {
+                    snapshot.armosHammerMtx[r * 4 + c] = local[r][c];
+                }
+            }
+        }
 
         auto nearest_hand_joint = [&](J3DModel* model) -> uint16_t {
             if (model == nullptr || bodyData == nullptr || !looks_like_live_data(model)) {

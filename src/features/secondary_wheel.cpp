@@ -758,7 +758,7 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
             }
         }
         if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1)) {
-            g_goronTunicEquipped = false;
+            set_goron_tunic_active(false);
             g_goronLavaContactFrames = 0;
         }
         if (!secondaryHoverBootsAssigned(0) && !secondaryHoverBootsAssigned(1)) {
@@ -1549,7 +1549,7 @@ void clear_secondary_assignment_for_vanilla_ring(ModContext*, void* args, void*,
     g_secondarySelectedItems[button] = dItemNo_NONE_e;
 
     if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1)) {
-        g_goronTunicEquipped = false;
+        set_goron_tunic_active(false);
     }
     if (!secondaryHoverBootsAssigned(0) && !secondaryHoverBootsAssigned(1)) {
         disable_hover_boots();

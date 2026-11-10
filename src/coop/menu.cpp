@@ -52,6 +52,10 @@ struct SurfaceHandles {
     std::string lastPlayersCard;
     UiElementHandle voiceKey = 0;
     std::string lastVoiceKey;
+    UiListHandle voicePeers = 0;
+    std::vector<std::string> voicePeerLabels;
+    std::string lastVoicePeers;
+    bool voicePeersPushed = false;
     std::string lastGlobalStatus;
     UiListHandle blockList = 0;
     std::string lastBlockList;
@@ -406,6 +410,55 @@ void push_players(SurfaceHandles& h) {
     svc_ui->list_set_items(mod_ctx, h.catchUp, catchUp.data(), catchUp.size());
 }
 
+void push_voice_peers(SurfaceHandles& h) {
+    if (h.voicePeers == 0) return;
+
+    std::vector<uint8_t> ids;
+    std::vector<std::string> labels;
+    if (coop_net_connected()) {
+        for (int i = 0; i < kCoopMaxPlayers; ++i) {
+            const uint8_t id = static_cast<uint8_t>(i);
+            if (id == coop_net_local_id() || !coop_net_player_present(id)) continue;
+            const std::string name = features_peer_name(id);
+            if (name.empty()) continue;
+            ids.push_back(id);
+            labels.push_back(name + (voice_peer_muted(id) ? " (muted)" : " (audible)"));
+        }
+    } else if (global_active()) {
+        for (const GlobalPlayer& peer : global_players()) {
+            if (peer.id == global_my_id()) continue;
+            const uint8_t slot = global_peer_slot(peer.id);
+            if (slot == 0) continue;
+            ids.push_back(slot);
+            labels.push_back(peer.name + (voice_peer_muted(slot) ? " (muted)" : " (audible)"));
+        }
+    }
+
+    std::string joined;
+    for (const std::string& label : labels) joined += label + "\n";
+    if (h.voicePeersPushed && joined == h.lastVoicePeers) return;
+    h.voicePeersPushed = true;
+    h.lastVoicePeers = joined;
+    h.voicePeerLabels = std::move(labels);
+    std::vector<UiListItem> items;
+    items.reserve(ids.size());
+    for (size_t i = 0; i < ids.size(); ++i) {
+        UiListItem item = UI_LIST_ITEM_INIT;
+        item.key = ids[i];
+        item.label = h.voicePeerLabels[i].c_str();
+        items.push_back(item);
+    }
+    svc_ui->list_set_items(mod_ctx, h.voicePeers, items.empty() ? nullptr : items.data(), items.size());
+    size_list(h.voicePeers, items.size());
+}
+
+void on_voice_peer_pressed(ModContext*, UiListHandle, uint64_t key, void*) {
+    if (key >= kCoopMaxPlayers) return;
+    const uint8_t id = static_cast<uint8_t>(key);
+    voice_set_peer_muted(id, !voice_peer_muted(id));
+    s_window.voicePeersPushed = false;
+}
+
 void sort_presets(SurfaceHandles& h);
 
 struct NetRates {
@@ -596,6 +649,7 @@ void refresh(SurfaceHandles& h) {
         }
     }
     push_players(h);
+    push_voice_peers(h);
 }
 
 void on_player_pressed(ModContext*, UiListHandle, uint64_t key, void*) {
@@ -779,6 +833,16 @@ ModResult group_global_voice(ModContext*, UiElementHandle pane, void*, ModError*
     add_toggle(pane, "Fade with distance in co-op", voice_proximity_var(),
         "Off: everyone in your co-op room is heard at full volume. Hyrule Online always fades.",
         voice_enabled_var());
+    svc_ui->pane_add_section(mod_ctx, pane, "Player voice");
+    svc_ui->pane_add_text(mod_ctx, pane, "Select a player to mute or unmute their voice.", nullptr);
+    UiListDesc peers = UI_LIST_DESC_INIT;
+    peers.on_pressed = on_voice_peer_pressed;
+    s_window.voicePeersPushed = false;
+    if (svc_ui->pane_add_list(mod_ctx, pane, &peers, &s_window.voicePeers) != MOD_OK) {
+        s_window.voicePeers = 0;
+    } else {
+        push_voice_peers(s_window);
+    }
     return MOD_OK;
 }
 

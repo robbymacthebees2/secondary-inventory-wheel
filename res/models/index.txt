@@ -71,6 +71,7 @@ Hero of Time/magic/head.bmd
 Hero of Time/model.txt
 Hero of Time/ordon/body.bmd
 Hero of Time/ordon/head.bmd
+Hero of Time/voices.bin
 Hero of Time/wolf/body.bmd
 Hero of Time/zora/body.bmd
 Hero of Time/zora/face.bmd

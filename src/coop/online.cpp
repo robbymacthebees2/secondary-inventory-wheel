@@ -20,7 +20,8 @@
 
 namespace {
 
-const char* const kDefaultRoomServer = "wss://crests-rooms.crestsofcourage.workers.dev";
+const char* const kDefaultRoomServer =
+    "wss://secondary-inventory-wheel-rooms.scp173musicsalt.workers.dev";
 
 const char* const kTailscaleHint =
     "Your networks are too strict to connect directly. Use Tailscale instead. See How to play "

@@ -624,6 +624,10 @@ void update_spawned_hawk_cleanup() {
 
 }
 
+bool is_spawned_hawk_internal(uint32_t id) {
+    return static_cast<uint32_t>(g_spawnedHawkId) == id;
+}
+
 bool secondaryItemAssigned(int button) {
     if (button < 0 || button > 1) {
         return false;

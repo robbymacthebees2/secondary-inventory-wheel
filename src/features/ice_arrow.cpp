@@ -296,7 +296,8 @@ void set_ice_arrow_actor_type_after_creation(ModContext*, void* args, void*, voi
 
 void draw_ice_keese_on_held_arrow(ModContext*, void* args, void*, void*) {
     auto* arrow = mods::arg<daArrow_c*>(args, 0);
-    if (!g_iceArrowSelected || g_iceKeeseModel == nullptr || arrow == nullptr ||
+    const bool remoteIceArrow = arrow != nullptr && projectiles_is_remote(arrow);
+    if ((!g_iceArrowSelected && !remoteIceArrow) || g_iceKeeseModel == nullptr || arrow == nullptr ||
         arrow->mpModel == nullptr || arrow->mArrowType != kIceArrowType ||
         !arrow->checkWait() || arrow->field_0x93f != 0 || arrow->field_0x942 != 0)
     {
@@ -400,6 +401,7 @@ DEFINE_HOOK(&dMenu_Ring_c::setSelectItem, RingSetSelectItem);
 DEFINE_HOOK(&dMenu_Ring_c::setJumpItem, RingSetJumpItem);
 DEFINE_HOOK(&dMenu_Ring_c::isMixItemOn, RingIsMixItemOn);
 DEFINE_HOOK(&dMenu_Ring_c::isMixItemOff, RingIsMixItemOff);
+DEFINE_HOOK(&dMenu_Collect2D_c::changeClothe, CollectChangeClothe);
 DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemXY, ChangeTextureItemXY);
 DEFINE_HOOK(&dMeter2Draw_c::drawItemNum, DrawItemNum);
 DEFINE_HOOK(&dMeter2_c::moveButtonXY, MeterMoveButtonXY);
