@@ -260,7 +260,7 @@ void disable_hover_boots() {
 }
 
 void reset_secondary_items_for_save_change() {
-    g_goronTunicEquipped = false;
+    set_goron_tunic_active(false);
     reset_shield_surf_state_for_save_change();
     disable_hover_boots();
     g_secondaryHudAssignmentsInitialized = false;

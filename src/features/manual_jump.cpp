@@ -755,10 +755,20 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         }
         break;
     case kGoronTunicItemId:
-        g_goronTunicEquipped = !g_goronTunicEquipped;
-        g_goronLavaContactFrames = 0;
-        svc_log->info(mod_ctx, g_goronTunicEquipped ? "Goron Tunic equipped" :
-                                                     "Goron Tunic unequipped");
+        if (g_goronTunicEquipped) {
+            set_goron_tunic_active(false);
+            svc_log->info(mod_ctx, "Goron Tunic unequipped");
+        } else if (!goron_tunic_can_activate(alink)) {
+            if (alink != nullptr &&
+                dComIfGs_getSelectEquipClothes() != dItemNo_WEAR_KOKIRI_e)
+            {
+                alink->seStartSystem(Z2SE_SYS_ERROR);
+            }
+            svc_log->warn(mod_ctx, "Goron Tunic requires the Hero's Tunic");
+        } else {
+            set_goron_tunic_active(true);
+            svc_log->info(mod_ctx, "Goron Tunic equipped");
+        }
         break;
     case kShieldSurfItemId:
         request_shield_surf_toggle(alink);

@@ -81,7 +81,7 @@ void push(Line line) {
 }
 
 bool chat_live() {
-    return global_active() || coop_net_connected();
+    return global_chat_active() || coop_net_connected();
 }
 
 void send(std::string text) {

@@ -12,9 +12,9 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
         "the Goron Tunic or Hover Boots to equip or unequip it. Hover Boots hold Link at the "
         "height where he left the ground and emit a ripple while airborne. Optional water "
         "walking is available in this settings panel. Secondary X/Y assignments are private "
-        "and take precedence over vanilla items on that button. The tunic color override is applied after "
-        "game-level model color updates; integration with Crests' remote-player color "
-        "replication is experimental.";
+        "and take precedence over vanilla items on that button. Goron Tunic can only be "
+        "activated while wearing the Hero's Tunic; while active, it keeps that tunic equipped "
+        "and temporarily colors its cap, body, and skirt bright red.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_wheelOpenDirection;
     control.options = kWheelDirectionOptions;
@@ -346,6 +346,7 @@ void open_combined_credits(ModContext* ctx, void*) {
         "<p>Dark Link - LoadingError</p>"
         "<p>Hero of Time, Hero of the Sky, Hero of the Wild, Hyrule Warriors, Ordon Warrior, and "
         "Ordon Warrior (No Hat) - SkilarBabcock</p>"
+        "<p>Hero of Time voice pack - SkilarBabcock</p>"
         "<p>Linkle - Ditrey; concept art by ThenMichael; modeling help from SkilarBabcock</p>"
         "<p>Zora Link and Zora Link (Alt Eyes) - model and textures by SkilarBabcock; fixes by "
         "Oxygno. Source: GameBanana mod 735675.</p>"

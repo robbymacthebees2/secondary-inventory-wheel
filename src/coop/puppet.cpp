@@ -12,8 +12,10 @@
 #include "JSystem/J3DGraphBase/J3DSys.h"
 #include "JSystem/J3DGraphBase/J3DTransform.h"
 #include "JSystem/J2DGraph/J2DOrthoGraph.h"
+#include "JSystem/J2DGraph/J2DPicture.h"
 #include "JSystem/JParticle/JPAEmitter.h"
 #include "JSystem/JUtility/JUTFont.h"
+#include "JSystem/JUtility/JUTTexture.h"
 #include "JSystem/JUtility/TColor.h"
 #include "JSystem/JKernel/JKRArchive.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
@@ -267,6 +269,8 @@ struct Puppet {
     u8 poseFlags = 0;
     f32 sinkShapeOffset = 0.0f;
     f32 shieldSurfMtx[12] = {};
+    u8 wheelFlags = 0;
+    f32 armosHammerMtx[12] = {};
     u8 swordInHand = 0;
     u8 shieldInHand = 0;
     char wantShieldArc[16] = {};
@@ -886,6 +890,8 @@ void release_puppet() {
     pup().poseFlags = 0;
     pup().sinkShapeOffset = 0.0f;
     std::memset(pup().shieldSurfMtx, 0, sizeof(pup().shieldSurfMtx));
+    pup().wheelFlags = 0;
+    std::memset(pup().armosHammerMtx, 0, sizeof(pup().armosHammerMtx));
     for (int i = 0; i < 4; ++i) {
         for (int a = 0; a < 3; ++a) pup().footAngles[i][a] = 0;
     }
@@ -2827,6 +2833,30 @@ void draw_puppet_attachments(daAlink_c* alink) {
         if (visGuarded) shape_vis_restore(vis);
         if (guarded) puppet_guard_end(guard);
     }
+
+    if ((pup().wheelFlags & kPuppetWheelArmosHammer) != 0) {
+        Mtx parent;
+        if (pup().swordJoint < bodyData->getJointNum()) {
+            mDoMtx_copy(pup().model->getAnmMtx(pup().swordJoint), parent);
+        } else {
+            mDoMtx_copy(pup().model->getBaseTRMtx(), parent);
+        }
+        Mtx local;
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 4; ++c) {
+                local[r][c] = pup().armosHammerMtx[r * 4 + c];
+            }
+        }
+        Mtx world;
+        mDoMtx_concat(parent, local, world);
+        float matrix[12];
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 4; ++c) {
+                matrix[r * 4 + c] = world[r][c];
+            }
+        }
+        features_draw_remote_armos_hammer(s_pupId, matrix);
+    }
 }
 
 void load_puppet_bck(daAlink_c* alink) {
@@ -3481,46 +3511,44 @@ void update_puppet_vfx(daAlink_c* alink) {
     }
 }
 
-void draw_voice_icon(f32 x, f32 baseline, f32 size, u8 alpha, bool muted) {
-    GXTexObj tex{};
-    GXInitTexObj(&tex, const_cast<unsigned char*>(muted ? kVoiceIconMuted : kVoiceIconSpeaking), kVoiceIconSize, kVoiceIconSize,
-        GX_TF_RGBA8, GX_CLAMP, GX_CLAMP, GX_FALSE);
-    GXInitTexObjLOD(&tex, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
-    GXLoadTexObj(&tex, GX_TEXMAP0);
-    GXClearVtxDesc();
-    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
-    GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
-    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0A0, GX_DISABLE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetNumTexGens(1);
-    GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY, GX_FALSE, GX_PTIDENTITY);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_MODULATE);
-    GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET);
-    GXSetAlphaCompare(GX_GREATER, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetCullMode(GX_CULL_NONE);
+struct alignas(32) VoiceIconTexture {
+    ResTIMG image{};
+    unsigned char pixels[kVoiceIconSize * kVoiceIconSize * 4]{};
+};
 
-    const f32 left = x, right = x + size, top = baseline - size * 0.82f, bottom = top + size;
-    GXBegin(GX_QUADS, GX_VTXFMT0, 4);
-    GXPosition3f32(left, top, 0.0f);
-    GXColor4u8(255, 255, 255, alpha);
-    GXTexCoord2f32(0.0f, 0.0f);
-    GXPosition3f32(right, top, 0.0f);
-    GXColor4u8(255, 255, 255, alpha);
-    GXTexCoord2f32(1.0f, 0.0f);
-    GXPosition3f32(right, bottom, 0.0f);
-    GXColor4u8(255, 255, 255, alpha);
-    GXTexCoord2f32(1.0f, 1.0f);
-    GXPosition3f32(left, bottom, 0.0f);
-    GXColor4u8(255, 255, 255, alpha);
-    GXTexCoord2f32(0.0f, 1.0f);
-    GXEnd();
+void init_voice_icon_texture(VoiceIconTexture& texture, const unsigned char* pixels) {
+    texture.image.format = GX_TF_RGBA8;
+    texture.image.alphaEnabled = 1;
+    texture.image.width = kVoiceIconSize;
+    texture.image.height = kVoiceIconSize;
+    texture.image.wrapS = GX_CLAMP;
+    texture.image.wrapT = GX_CLAMP;
+    texture.image.minFilter = GX_LINEAR;
+    texture.image.magFilter = GX_LINEAR;
+    texture.image.mipmapCount = 1;
+    std::memcpy(texture.pixels, pixels, sizeof(texture.pixels));
+}
+
+void draw_voice_icon(f32 x, f32 baseline, f32 size, u8 alpha, bool muted) {
+    static VoiceIconTexture speakingTexture{};
+    static VoiceIconTexture mutedTexture{};
+    static J2DPicture* speakingPicture = nullptr;
+    static J2DPicture* mutedPicture = nullptr;
+    static bool texturesReady = false;
+    if (!texturesReady) {
+        init_voice_icon_texture(speakingTexture, kVoiceIconSpeaking);
+        init_voice_icon_texture(mutedTexture, kVoiceIconMuted);
+        texturesReady = true;
+    }
+
+    J2DPicture*& picture = muted ? mutedPicture : speakingPicture;
+    if (picture == nullptr) {
+        picture = JKR_NEW J2DPicture(muted ? &mutedTexture.image : &speakingTexture.image);
+    }
+    if (picture == nullptr) return;
+
+    picture->setAlpha(alpha);
+    picture->draw(x, baseline - size * 0.82f, size, size, false, false, false);
 }
 
 class PuppetNametagDlst : public dDlst_base_c {
@@ -4236,6 +4264,8 @@ void puppet_hook_on_network_snapshot(uint8_t playerId, float x, float y, float z
     pup().poseFlags = equipment.poseFlags;
     pup().sinkShapeOffset = equipment.sinkShapeOffset;
     std::memcpy(pup().shieldSurfMtx, equipment.shieldSurfMtx, sizeof(pup().shieldSurfMtx));
+    pup().wheelFlags = equipment.wheelFlags;
+    std::memcpy(pup().armosHammerMtx, equipment.armosHammerMtx, sizeof(pup().armosHammerMtx));
 }
 
 uint8_t nearest_to_local() {

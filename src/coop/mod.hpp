@@ -19,8 +19,11 @@ ModResult coop_mod_shutdown(ModError* error);
 
 class daAlink_c;
 class fopAc_ac_c;
+struct MsgColorEntry;
 bool wheel_is_sit_seated();
 bool wheel_is_shield_surf_board(daAlink_c* alink, fopAc_ac_c* ride);
+bool wheel_is_armos_hammer_active();
+void features_draw_remote_armos_hammer(uint8_t playerId, const float matrix[12]);
 
 bool coop_net_connected();
 bool coop_net_connecting();
@@ -314,7 +317,7 @@ void skins_outfit_list(int index, std::vector<std::string>& out);
 
 std::string skins_folder_path();
 
-const char* const kCoopShippedModelsVersion = "1.9.0";
+const char* const kCoopShippedModelsVersion = "2.0.0";
 
 void skins_cycle_update();
 
@@ -501,6 +504,7 @@ const char* colors_slot_label(int slot);
 const char* colors_slot_group(int slot);
 ConfigVarHandle colors_slot_var(int slot);
 void colors_reset_mine();
+void colors_set_goron_tunic_active(bool active);
 
 void colors_attach_puppet_model(J3DModel* model, uint8_t owner);
 void colors_protect_puppet_model(J3DModel* model, uint8_t owner);
@@ -828,6 +832,7 @@ ConfigVarHandle global_nametag_distance_var();
 void global_update();
 void global_shutdown();
 bool global_active();
+bool global_chat_active();
 bool global_slot_present(uint8_t slot);
 ConfigVarHandle global_pvp_var();
 ConfigVarHandle global_pvp_only_var();
@@ -842,6 +847,7 @@ bool global_connecting();
 void global_on_ws_event(const mods::ws::Event& event);
 bool global_on_datagram(const std::string& from, const uint8_t* data, size_t size);
 void global_send_snapshot(const PlayerSnapshot& snapshot);
+void global_send_colors(const MsgColorEntry* entries);
 bool global_send_chat(const std::string& text);
 uint32_t global_my_id();
 
@@ -853,6 +859,7 @@ struct GlobalPlayer {
 bool global_blocked(const std::string& tag);
 void global_set_blocked(const GlobalPlayer& who, bool on);
 std::vector<GlobalPlayer> global_players();
+uint8_t global_peer_slot(uint32_t id);
 std::vector<GlobalPlayer> global_blocked_list();
 std::vector<GlobalPlayer> chat_recent_speakers();
 void chat_forget_player(const std::string& tag);

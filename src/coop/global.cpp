@@ -141,12 +141,15 @@ std::vector<GlobalPlayer> s_userBlocked;
 
 std::vector<GlobalPlayer> s_seen;
 
-void remember_seen(uint32_t id, const std::string& tag) {
+void remember_seen(uint32_t id, const std::string& tag, const std::string& name = "") {
     if (id == 0 || tag.empty()) return;
-    for (const GlobalPlayer& s : s_seen) {
-        if (s.id == id) return;
+    for (GlobalPlayer& s : s_seen) {
+        if (s.id != id) continue;
+        if (s.tag != tag) s.tag = tag;
+        if (!name.empty()) s.name = name;
+        return;
     }
-    s_seen.push_back(GlobalPlayer{id, "", tag});
+    s_seen.push_back(GlobalPlayer{id, name, tag});
     if (s_seen.size() > 256) s_seen.erase(s_seen.begin());
 }
 
@@ -406,6 +409,9 @@ bool clean_snapshot(PlayerSnapshot& s) {
     for (float v : s.shieldSurfMtx) {
         if (!sane_float(v)) return false;
     }
+    for (float v : s.armosHammerMtx) {
+        if (!sane_float(v)) return false;
+    }
     for (const AnmSlotSnapshot* half : {s.under, s.upper}) {
         for (int i = 0; i < 3; ++i) {
             if (!sane_float(half[i].frame, 1.0e5f) || !sane_float(half[i].rate, 1.0e3f)) return false;
@@ -433,6 +439,7 @@ bool clean_snapshot(PlayerSnapshot& s) {
     if (s.chainKind > kPuppetChainRodLure) s.chainKind = kPuppetChainNone;
     if (s.chainCount > kPuppetChainPts) s.chainCount = kPuppetChainPts;
     s.poseFlags &= kPuppetPoseSeated | kPuppetPoseShieldSurf;
+    s.wheelFlags &= kPuppetWheelArmosHammer;
     for (AttachedModelSnapshot& a : s.attached) {
         if (a.kind >= kPuppetHeldCount) a.kind = kPuppetHeldNone;
     }
@@ -667,26 +674,40 @@ void on_server_message(const std::string& text) {
         return;
     }
     if (op == "chat") {
+        const uint32_t from = static_cast<uint32_t>(
+            std::strtoul(msg.str("id").c_str(), nullptr, 10));
+        if (from == 0) return;
         const std::string tag = msg.str("tag");
-        const uint32_t from = static_cast<uint32_t>(std::strtoul(msg.str("id").c_str(), nullptr, 10));
-        remember_seen(from, is_tag(tag) ? tag : "");
-
-        if (from != s_myId) coop_log::info("coop_mod: [CHAT] from {} slot {}", from, slot_of_id(from));
-        chat_on_message(static_cast<uint32_t>(std::strtoul(msg.str("id").c_str(), nullptr, 10)),
-            is_tag(tag) ? tag : "", msg.str("name"), msg.str("text"));
+        const std::string cleanTag = is_tag(tag) ? tag : "";
+        const std::string name = msg.str("name");
+        const std::string text = msg.str("text");
+        if (cleanTag.empty() || name.empty() || text.empty() || text.size() > 100) return;
+        if (from != s_myId) remember_seen(from, cleanTag, name);
+        chat_on_message(from, cleanTag, name, text);
         return;
     }
     if (op == "rename") {
-        chat_on_rename(static_cast<uint32_t>(std::strtoul(msg.str("id").c_str(), nullptr, 10)),
-            msg.str("name"));
+        const uint32_t from = static_cast<uint32_t>(
+            std::strtoul(msg.str("id").c_str(), nullptr, 10));
+        const std::string name = msg.str("name");
+        if (from != 0 && from != s_myId && !name.empty()) {
+            for (GlobalPlayer& player : s_seen) {
+                if (player.id == from) player.name = name;
+            }
+            chat_on_rename(from, name);
+        }
         return;
     }
     if (op == "chat_slow") {
         chat_note("Slow down a little.");
         return;
     }
+    if (op == "chat_unavailable") {
+        chat_note("Hyrule Online chat is only available after entering an area.");
+        return;
+    }
     if (op == "chat_banned") {
-        chat_note("You can't use chat.");
+        chat_note("You can't use Hyrule Online chat.");
         return;
     }
     if (op == "count") {
@@ -771,6 +792,7 @@ void disconnect(const char* why) {
     s_total = 0;
     s_here = 0;
     s_area = "\x01";
+    s_seen.clear();
     coop_global_udp_close();
 }
 
@@ -831,6 +853,10 @@ bool global_active() {
     return s_phase == Phase::Live;
 }
 
+bool global_chat_active() {
+    return s_phase == Phase::Live;
+}
+
 bool global_blocked(const std::string& tag) {
     return tag_blocked(tag);
 }
@@ -870,6 +896,11 @@ std::vector<GlobalPlayer> global_players() {
         if (p.used && p.reached && !p.name.empty() && is_tag(p.tag)) out.push_back(GlobalPlayer{p.id, p.name, p.tag});
     }
     return out;
+}
+
+uint8_t global_peer_slot(uint32_t id) {
+    const int slot = slot_of_id(id);
+    return slot > 0 ? static_cast<uint8_t>(slot) : 0;
 }
 
 std::vector<GlobalPlayer> global_blocked_list() {
@@ -1058,6 +1089,10 @@ int send_interval(const Peer& p, float x, float y, float z, int8_t room) {
 
 bool global_send_chat(const std::string& text) {
     if (s_phase != Phase::Live || !s_ws) return false;
+    if (s_area.empty() || s_area == "\x01") {
+        chat_note("Enter an area before sending Hyrule Online chat.");
+        return true;
+    }
     static uint64_t s_lastMs = 0;
     const uint64_t now = now_ms();
     if (s_lastMs != 0 && now - s_lastMs < 2000) {
@@ -1118,6 +1153,16 @@ void global_send_snapshot(const PlayerSnapshot& snapshot) {
     }
 }
 
+void global_send_colors(const MsgColorEntry* entries) {
+    if (s_phase != Phase::Live || entries == nullptr) return;
+    for (int i = 1; i < kCoopMaxPlayers; ++i) {
+        Peer& p = s_peers[i];
+        if (p.reached) {
+            send_to(p, kGlobalColors, entries, sizeof(MsgColorEntry) * kCoopColorSlots);
+        }
+    }
+}
+
 void global_send_horse(const HorseSnapshot& snap) {
     if (s_phase != Phase::Live) return;
     const float hx = snap.baseMtx[3];
@@ -1157,7 +1202,9 @@ void global_update() {
     ++s_tick;
     const bool want = enabled() && !coop_net_connected() && !coop_net_connecting();
     if (!want) {
-        if (s_phase != Phase::Off || s_ws) disconnect(enabled() ? "co-op started" : "turned off");
+        if (s_phase != Phase::Off || s_ws) {
+            disconnect(enabled() ? "co-op started" : "turned off");
+        }
         s_status = enabled() ? "Paused while in co-op" : "Off";
         s_retryAtMs = 0;
         return;

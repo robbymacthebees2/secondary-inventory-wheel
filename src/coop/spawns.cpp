@@ -24,6 +24,8 @@
 #include <cmath>
 #include <cstring>
 
+bool features_is_spawned_hawk(uint32_t id);
+
 DEFINE_HOOK((static_cast<fopAc_ac_c* (*)(s16, u32, const cXyz*, int, const csXyz*, const cXyz*, s8,
                 createFunc, void*, u32, u8)>(&fopAcM_fastCreate)),
     FastCreateHook);
@@ -37,6 +39,7 @@ namespace {
 const int kMaxSpawns = kCoopMaxPlayers * 6;
 const int kSendEveryTicks = 2;
 const int kNoId = -1;
+const uint8_t kActorFlagHawkGrass = 1 << 4;
 
 void delete_replica(fopAc_ac_c* actor) {
     if (actor == nullptr) return;
@@ -166,11 +169,15 @@ void log_bomb_res_once() {
 }
 
 bool procname_is_replicated(s16 name) {
-    return name == fpcNm_NBOMB_e || name == fpcNm_BOOMERANG_e;
+    return name == fpcNm_NBOMB_e || name == fpcNm_BOOMERANG_e ||
+           name == fpcNm_NPC_TK_e;
 }
 
 bool should_replicate(s16 name, u32 bornParam, u32 liveParam) {
     if (!procname_is_replicated(name)) return false;
+    if (name == fpcNm_NPC_TK_e) {
+        return bornParam == 0xFFFFFFFFu && liveParam == 0xFFFFFFFFu;
+    }
     if (name == fpcNm_BOOMERANG_e) return liveParam != 0;
     const u32 param = bornParam;
     if (name == fpcNm_NBOMB_e && param == static_cast<u32>(dBomb_c::PRM_ENEMY_BOMB_BOOMERANG)) {
@@ -404,6 +411,10 @@ bool is_still_held(fopAc_ac_c* actor) {
 }
 
 void announce(fpc_ProcID id, fopAc_ac_c* actor, s16 procName, u32 bornParam) {
+    const u32 livePrm = fopAcM_GetParam(actor);
+    if (!should_replicate(procName, bornParam, livePrm)) return;
+    if (procName == fpcNm_NPC_TK_e && !features_is_spawned_hawk(id)) return;
+
     int slot = -1;
     for (int i = 0; i < kMaxSpawns; ++i) {
         if (!s_owned[i].used) { slot = i; break; }
@@ -423,8 +434,6 @@ void announce(fpc_ProcID id, fopAc_ac_c* actor, s16 procName, u32 bornParam) {
     msg.netId = netId;
     msg.procName = procName;
 
-    const u32 livePrm = fopAcM_GetParam(actor);
-    if (!should_replicate(procName, bornParam, livePrm)) return;
     msg.param = param_needs_grabber(procName, livePrm)
                     ? static_cast<uint32_t>(dBomb_c::PRM_BOMB_WAIT)
                     : livePrm;
@@ -441,6 +450,7 @@ void announce(fpc_ProcID id, fopAc_ac_c* actor, s16 procName, u32 bornParam) {
         (static_cast<daNbomb_c*>(actor)->mStateFlg0 & kDekuNutActorStateFlag) != 0) {
         msg.flags |= kActorFlagDekuNut;
     }
+    if (procName == fpcNm_NPC_TK_e) msg.flags |= kActorFlagHawkGrass;
     coop_net_send(kMsgActorSpawn, &msg, sizeof(msg));
     coop_log::info("coop_mod: [SPAWN] local netId={} name={:#x} released, sent",
         netId, static_cast<int>(procName));
@@ -1045,6 +1055,7 @@ void spawns_on_message(uint8_t type, const uint8_t* payload, size_t size, uint8_
         std::memcpy(&msg, payload, sizeof(msg));
         if (find_replica(msg.netId) != nullptr) return;
         if (!should_replicate(msg.procName, msg.param, msg.param)) return;
+        if (msg.procName == fpcNm_NPC_TK_e && (msg.flags & kActorFlagHawkGrass) == 0) return;
         log_bomb_res_once();
         if (msg.procName == fpcNm_BOOMERANG_e && !alink_arc_resident()) {
             coop_log::info("coop_mod: [SPAWN] refused netId={}, boomerang needs Alink archive", msg.netId);

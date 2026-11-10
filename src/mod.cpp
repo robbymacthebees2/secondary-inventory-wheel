@@ -44,6 +44,7 @@
 #include "d/d_particle_name.h"
 #include "d/d_meter2_draw.h"
 #include "d/d_menu_ring.h"
+#include "d/d_menu_collect.h"
 #include "d/d_menu_window.h"
 #include "d/d_meter_map.h"
 #include "d/d_meter2_info.h"
@@ -434,6 +435,7 @@ JKRExpHeap* g_armosHammerWheelItemHeap = nullptr;
 void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
 void begin_deku_nut_use(daAlink_c* alink);
+void set_goron_tunic_active(bool active);
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
 #include "features/hover_boots.cpp"
@@ -474,6 +476,8 @@ ModResult install_hooks() {
     ADD_POST(SetRoomInfo, maintain_hover_water_surface);
     ADD_POST(AutoGroundHit, maintain_hover_height);
     ADD_POST(PlayerExecute, disable_hover_boots_for_wolf);
+    ADD_POST(PlayerExecute, enforce_goron_tunic_clothing);
+    ADD_PRE(CollectChangeClothe, prevent_goron_tunic_clothing_change);
     ADD_PRE(GetGroundAngle, flatten_hover_water_ground_angle);
     ADD_PRE(GetSlidePolygon, suppress_submerged_water_slide_polygon);
     ADD_PRE(CheckSlope, suppress_submerged_water_slope);
@@ -598,10 +602,8 @@ ModResult install_hooks() {
     ADD_PRE(ProcCoLavaReturnInit, delay_goron_lava_return);
     ADD_PRE(CheckRestartRoom, suppress_water_surface_restart);
     ADD_PRE(CheckSceneChange, suppress_submerged_water_exit);
-    ADD_POST(ModelCalc, reapply_tunic_override_after_model_calc);
     ADD_PRE(ModelCalc, offset_sit_model_forward_before_calc);
     ADD_PRE(ModelDraw, mark_dark_link_model_for_draw);
-    ADD_POST(LightTevColorTypeMaji, reapply_tunic_override_after_lighting);
     ADD_POST(LightTevColorTypeMaji, apply_dark_link_after_lighting);
     ADD_POST(SettingTevStruct, apply_ice_arrow_shader_after_tev_setup);
     ADD_PRE(MaterialMakeDisplayList, apply_dark_link_material_before_display);
@@ -612,7 +614,6 @@ ModResult install_hooks() {
     ADD_PRE(CylinderAtParam, modify_active_form_cylinder_sword_damage);
     ADD_POST(ModelDraw, restore_dark_link_model_after_draw);
     ADD_POST(ModelCalc, update_hover_magic_after_model_calc);
-    ADD_POST(SetWaterDropColor, tint_goron_tunic);
     ADD_POST(ItemExecute, collect_nearby_rupees);
     ADD_PRE(GlowSphereExecute, collect_nearby_clawshot_orbs);
     return MOD_OK;
@@ -630,6 +631,18 @@ bool wheel_is_sit_seated() {
 bool wheel_is_shield_surf_board(daAlink_c* alink, fopAc_ac_c* ride) {
     return g_shieldSurfActive && alink != nullptr && alink->checkBoardRide() &&
            ride != nullptr && fopAcM_GetID(ride) == g_shieldSurfBoardId;
+}
+
+bool wheel_is_armos_hammer_active() {
+    return wheel_is_armos_hammer_active_internal();
+}
+
+void features_draw_remote_armos_hammer(uint8_t playerId, const float matrix[12]) {
+    draw_remote_armos_hammer_internal(playerId, matrix);
+}
+
+bool features_is_spawned_hawk(uint32_t id) {
+    return is_spawned_hawk_internal(id);
 }
 
 extern "C" {
@@ -1101,7 +1114,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_secondaryHudOwner = nullptr;
     g_secondaryHudAssignmentsInitialized = false;
     g_secondaryHudRefreshPending.fill(false);
-    g_goronTunicEquipped = false;
+    set_goron_tunic_active(false);
     g_goronLavaContactFrames = 0;
     g_hoverBootsEquipped = false;
     g_darkLinkFormActive = false;

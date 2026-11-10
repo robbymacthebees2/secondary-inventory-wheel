@@ -120,6 +120,7 @@ ConfigVarHandle s_vars[kSlotCount] = {};
 SlotColor s_cosmetics[kSlotCount];
 SlotColor s_lastSent[kSlotCount];
 bool s_needSend = false;
+bool s_goronTunicColorActive = false;
 
 SlotColor s_peer[kCoopMaxPlayers][kSlotCount];
 
@@ -161,8 +162,22 @@ SlotColor mine_from_var(int slot) {
 }
 
 SlotColor effective_local(int slot) {
+    if (s_goronTunicColorActive &&
+        (slot == kSlotHeroCap || slot == kSlotHeroBody || slot == kSlotHeroSkirt))
+    {
+        return SlotColor{true, 255, 0, 0};
+    }
     SlotColor mine = mine_from_var(slot);
     return mine.set ? mine : s_cosmetics[slot];
+}
+
+SlotColor self_texture_color(int slot) {
+    if (s_goronTunicColorActive &&
+        (slot == kSlotHeroCap || slot == kSlotHeroBody || slot == kSlotHeroSkirt))
+    {
+        return SlotColor{true, 255, 0, 0};
+    }
+    return mine_from_var(slot);
 }
 
 std::filesystem::path s_configJsonPath;
@@ -613,7 +628,7 @@ void update_self_colors() {
     if (svc_texture == nullptr) return;
     for (SelfTexture& t : s_self) {
         if (!t.loaded) continue;
-        const SlotColor want = mine_from_var(t.slot);
+        const SlotColor want = self_texture_color(t.slot);
         if (want == t.applied && (want.set == (t.handle != 0))) continue;
         if (!want.set) {
             if (t.handle != 0) svc_texture->unregister(mod_ctx, t.handle);
@@ -837,6 +852,24 @@ void colors_reset_mine() {
     }
 }
 
+void colors_set_goron_tunic_active(bool active) {
+    if (s_goronTunicColorActive == active) return;
+    s_goronTunicColorActive = active;
+    s_needSend = true;
+    for (SelfTexture& texture : s_self) texture.applied = SlotColor{};
+    for (PuppetModelColors& model : s_models) {
+        if (model.model == nullptr || model.mine) continue;
+        for (int i = 0; i < model.count; ++i) {
+            if (model.tex[i].slot == kSlotHeroCap ||
+                model.tex[i].slot == kSlotHeroBody ||
+                model.tex[i].slot == kSlotHeroSkirt)
+            {
+                model.tex[i].registered = false;
+            }
+        }
+    }
+}
+
 void colors_update() {
     static uint32_t tick = 0;
     ++tick;
@@ -845,7 +878,7 @@ void colors_update() {
     if (tick % 180 == 1) read_cosmetics_colors();
     if (tick % 10 == 0) update_self_colors();
 
-    if (coop_net_connected() && tick % 15 == 0) {
+    if ((coop_net_connected() || global_active()) && tick % 15 == 0) {
         bool changed = s_needSend;
         SlotColor current[kSlotCount];
         for (int i = 0; i < kSlotCount; ++i) {
@@ -860,7 +893,12 @@ void colors_update() {
             colors_build_local(entries);
             for (int i = 0; i < kSlotCount; ++i) s_lastSent[i] = current[i];
             s_nameLastSent = name;
-            coop_net_send(kMsgColors, entries, sizeof(entries));
+            if (coop_net_connected()) {
+                coop_net_send(kMsgColors, entries, sizeof(entries));
+            }
+            if (global_active()) {
+                global_send_colors(entries);
+            }
             s_needSend = false;
         }
     }

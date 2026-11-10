@@ -143,6 +143,10 @@ enum PuppetPoseFlags : uint8_t {
     kPuppetPoseShieldSurf = 1 << 1,
 };
 
+enum PuppetWheelFlags : uint8_t {
+    kPuppetWheelArmosHammer = 1 << 0,
+};
+
 struct PlayerSnapshot {
     uint32_t seq;
 
@@ -219,6 +223,9 @@ struct PlayerSnapshot {
     uint8_t poseFlags;
     float sinkShapeOffset;
     float shieldSurfMtx[12];
+
+    uint8_t wheelFlags;
+    float armosHammerMtx[12];
 };
 const float kMagneRotFixed = 8192.0f;
 
@@ -325,7 +332,7 @@ static_assert(sizeof(PlayerSnapshot) ==
             16 + 16 + (kPuppetAttachSlots * 61) + 6 + 1 + 1 + 1 + 2 +
             (kPuppetChainPts * 3 * 4) + 1 + 12 + 24 + 2 + 1 + 2 + 12 + 1 + 4 + 4 +
             4   + 1   + 18   + 18   + 6   + 4   +
-            2   + 1 + 1 + 4 + 48,
+            2   + 1 + 1 + 4 + 48 + 1 + 48,
     "PlayerSnapshot must stay tightly packed");
 
 static_assert(sizeof(MidnaSnapshot) != sizeof(PlayerSnapshot),

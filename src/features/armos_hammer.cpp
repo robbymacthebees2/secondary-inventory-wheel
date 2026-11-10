@@ -32,6 +32,8 @@ public:
     {}
 
     Mtx mLocalMatrix{};
+    Mtx mHandMatrix{};
+    bool mUseInterpolation = true;
 
     void draw() override {
         GXSetNumChans(1);
@@ -61,8 +63,12 @@ public:
 
 #if TARGET_PC
         Mtx handMatrix;
-        if (!svc_interp->lookup_replacement_mtx(&g_armosHammerHandMatrix, handMatrix)) {
-            cMtx_copy(g_armosHammerHandMatrix, handMatrix);
+        if (mUseInterpolation) {
+            if (!svc_interp->lookup_replacement_mtx(&g_armosHammerHandMatrix, handMatrix)) {
+                cMtx_copy(g_armosHammerHandMatrix, handMatrix);
+            }
+        } else {
+            cMtx_copy(mHandMatrix, handMatrix);
         }
         Mtx worldMatrix;
         Mtx modelViewMtx;
@@ -94,6 +100,24 @@ static ArmosHammerCylinderPacket g_armosHammerPackets[] = {
     {g_armosHammerIdentityMatrix, g_armosHammerBrass},
     {g_armosHammerIdentityMatrix, g_armosHammerRune},
 };
+
+struct ArmosHammerPacketSet {
+    ArmosHammerCylinderPacket packets[6];
+
+    ArmosHammerPacketSet()
+        : packets{
+              {g_armosHammerIdentityMatrix, g_armosHammerDarkSteel},
+              {g_armosHammerIdentityMatrix, g_armosHammerBrass},
+              {g_armosHammerIdentityMatrix, g_armosHammerBrass},
+              {g_armosHammerIdentityMatrix, g_armosHammerStone},
+              {g_armosHammerIdentityMatrix, g_armosHammerBrass},
+              {g_armosHammerIdentityMatrix, g_armosHammerRune},
+          }
+    {}
+};
+
+constexpr int kRemoteArmosHammerSlots = 16;
+static ArmosHammerPacketSet g_remoteArmosHammerPackets[kRemoteArmosHammerSlots];
 
 void record_armos_hammer_hand_matrix(ModContext*, void* args, void*, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
@@ -198,6 +222,37 @@ void draw_armos_hammer_cylinder(
     dComIfGd_getOpaList()->entryImm(&packet, 0);
 }
 
+void draw_armos_hammer_geometry(
+    ArmosHammerCylinderPacket* packets, const Mtx handMatrix, bool useInterpolation)
+{
+    for (int i = 0; i < 6; ++i) {
+        packets[i].mUseInterpolation = useInterpolation;
+        if (!useInterpolation) cMtx_copy(handMatrix, packets[i].mHandMatrix);
+    }
+    draw_armos_hammer_cylinder(packets[0], 33.0f, 0.0f, 0.0f, 6.0f, 48.0f, 6.0f, 0x4000);
+    draw_armos_hammer_cylinder(packets[1], 8.0f, 0.0f, 0.0f, 7.5f, 10.0f, 7.5f, 0x4000);
+    draw_armos_hammer_cylinder(packets[2], 75.0f, 0.0f, 0.0f, 7.5f, 8.0f, 7.5f, 0x4000);
+    draw_armos_hammer_cylinder(packets[3], 98.0f, 0.0f, 0.0f, 25.0f, 24.0f, 23.0f, 0);
+    draw_armos_hammer_cylinder(packets[4], 98.0f, 0.0f, 0.0f, 27.0f, 4.0f, 25.0f, 0);
+    draw_armos_hammer_cylinder(packets[5], 98.0f, 0.0f, 0.0f, 26.0f, 2.0f, 24.0f, 0);
+}
+
+bool wheel_is_armos_hammer_active_internal() {
+    return g_armosHammerActive;
+}
+
+void draw_remote_armos_hammer_internal(uint8_t playerId, const float matrix[12]) {
+    if (playerId >= kRemoteArmosHammerSlots || matrix == nullptr) return;
+    Mtx handMatrix;
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            handMatrix[r][c] = matrix[r * 4 + c];
+        }
+    }
+    ArmosHammerPacketSet& set = g_remoteArmosHammerPackets[playerId];
+    draw_armos_hammer_geometry(set.packets, handMatrix, false);
+}
+
 void hide_armos_hammer_sword(ModContext*, void* args, void*, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     if (g_armosHammerActive && player != nullptr && !player->checkWolf()) {
@@ -217,25 +272,7 @@ void draw_armos_hammer_on_player(ModContext*, void* args, void*, void*) {
         return;
     }
 
-    draw_armos_hammer_cylinder(
-        g_armosHammerPackets[0], 33.0f, 0.0f, 0.0f, 6.0f,
-        48.0f, 6.0f, 0x4000);
-    draw_armos_hammer_cylinder(
-        g_armosHammerPackets[1], 8.0f, 0.0f, 0.0f, 7.5f,
-        10.0f, 7.5f, 0x4000);
-    draw_armos_hammer_cylinder(
-        g_armosHammerPackets[2], 75.0f, 0.0f, 0.0f, 7.5f,
-        8.0f, 7.5f, 0x4000);
-
-    draw_armos_hammer_cylinder(
-        g_armosHammerPackets[3], 98.0f, 0.0f, 0.0f, 25.0f,
-        24.0f, 23.0f, 0);
-    draw_armos_hammer_cylinder(
-        g_armosHammerPackets[4], 98.0f, 0.0f, 0.0f, 27.0f,
-        4.0f, 25.0f, 0);
-    draw_armos_hammer_cylinder(
-        g_armosHammerPackets[5], 98.0f, 0.0f, 0.0f, 26.0f,
-        2.0f, 24.0f, 0);
+    draw_armos_hammer_geometry(g_armosHammerPackets, g_armosHammerHandMatrix, true);
 }
 
 void update_armos_hammer() {
