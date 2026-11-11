@@ -407,6 +407,9 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
     ring->mCurrentSlot = 0;
     ring->mXButtonSlot = dItemNo_NONE_e;
     ring->mYButtonSlot = dItemNo_NONE_e;
+    ring->field_0x6ac = dItemNo_NONE_e;
+    ring->field_0x6b4[kZItemSelectIndex] = dItemNo_NONE_e;
+    ring->field_0x6b8[kZItemSelectIndex] = dItemNo_NONE_e;
     ring->mStatus = dMenu_Ring_c::STATUS_WAIT;
     ring->mOldStatus = dMenu_Ring_c::STATUS_WAIT;
     ring->mWaitFrames = std::max<s16>(g_ringHIO.mCursorChangeWaitFrames, 0);
@@ -554,6 +557,23 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
             }
         }
     }
+    if (zItemSlotEnabled() && secondaryItemAssigned(kZItemSelectIndex)) {
+        const u8 assignedSlot = g_secondarySelectedItems[kZItemSelectIndex];
+        ring->field_0x6b3 = kZItemSelectIndex;
+        ring->field_0x6b4[kZItemSelectIndex] = dItemNo_NONE_e;
+        ring->field_0x6b8[kZItemSelectIndex] = dItemNo_NONE_e;
+        ring->field_0x674[kZItemSelectIndex] = 0;
+        for (u8 index = 0; index < kSecondaryWheelSlotCount; ++index) {
+            if (g_secondaryWheelSlotIds[index] == assignedSlot) {
+                ring->field_0x6ac = index;
+                ring->field_0x6b4[kZItemSelectIndex] =
+                    secondaryDisplayItemForSlot(assignedSlot);
+                ring->setSelectItem(
+                    kZItemSelectIndex, secondaryDisplayItemForSlot(assignedSlot));
+                break;
+            }
+        }
+    }
     ring->mpDrawCursor->setPos(
         g_secondaryWheelSlotPosX[0], g_secondaryWheelSlotPosY[0]);
     ring->mpDrawCursor->setParam(
@@ -677,6 +697,12 @@ void set_ice_arrow_selected(daAlink_c* player, bool selected) {
     }
 }
 
+void begin_z_slot_assignment_animation(
+    dMenu_Ring_c* ring, u8 sourceSlot, u8 savedSelection, u8 displayItem);
+void clear_secondary_assignment(int button);
+void clear_duplicate_z_assignment_for_item(
+    dMenu_Ring_c* ring, int button, u8 slot, u8 item);
+
 void move_secondary_ring(dMenu_Ring_c* ring) {
     if (ring->mStatus == dMenu_Ring_c::STATUS_WAIT) {
         if (ring->mWaitFrames > 0) {
@@ -721,6 +747,8 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
             ring->mXButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(0, secondaryDisplayItemForSlot(selected));
             const u8 selectedItem = secondaryItemIdForSlot(selected);
+            clear_duplicate_z_assignment_for_item(
+                ring, 0, selected, selectedItem);
             if (selectedItem == kGoronMaskItem ||
                 selectedItem == kGiantMaskItem)
             {
@@ -738,6 +766,8 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
             ring->mYButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(1, secondaryDisplayItemForSlot(selected));
             const u8 selectedItem = secondaryItemIdForSlot(selected);
+            clear_duplicate_z_assignment_for_item(
+                ring, 1, selected, selectedItem);
             if (selectedItem == kGoronMaskItem ||
                 selectedItem == kGiantMaskItem)
             {
@@ -750,6 +780,27 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
                 g_secondaryItemInputHandled = true;
             }
         }
+        if (!iceArrowSlot && zItemSlotEnabled() &&
+            mDoCPd_c::getTrigZ(PAD_1) != 0)
+        {
+            g_secondarySelectedItems[kZItemSelectIndex] = selected;
+            for (int button = 0; button < kZItemSelectIndex; ++button) {
+                if (g_secondarySelectedItems[button] != selected) {
+                    continue;
+                }
+                clear_secondary_assignment(button);
+                ring->setSelectItem(button, dItemNo_NONE_e);
+                if (button == 0) {
+                    ring->mXButtonSlot = dItemNo_NONE_e;
+                } else {
+                    ring->mYButtonSlot = dItemNo_NONE_e;
+                }
+            }
+            begin_z_slot_assignment_animation(
+                ring, ring->mCurrentSlot,
+                secondaryDisplayItemForSlot(selected),
+                secondaryDisplayItemForSlot(selected));
+        }
         for (int button = 0; button < 2; ++button) {
             if (secondaryTunicAssigned(button)) {
                 for (auto* icon : ring->mpSelectItemTex[button]) {
@@ -757,11 +808,15 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
                 }
             }
         }
-        if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1)) {
+        if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1) &&
+            !secondaryTunicAssigned(kZItemSelectIndex))
+        {
             set_goron_tunic_active(false);
             g_goronLavaContactFrames = 0;
         }
-        if (!secondaryHoverBootsAssigned(0) && !secondaryHoverBootsAssigned(1)) {
+        if (!secondaryHoverBootsAssigned(0) && !secondaryHoverBootsAssigned(1) &&
+            !secondaryHoverBootsAssigned(kZItemSelectIndex))
+        {
             clear_hover_water_ground_plane();
             g_hoverBootsEquipped = false;
             g_hoverGroundHeightValid = false;
@@ -1080,6 +1135,10 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
         }
     }
 
+    if (ring->field_0x674[kZItemSelectIndex] != 0) {
+        ring->drawSelectItem();
+    }
+
     if (ring->mCurrentSlot < kSecondaryWheelSlotCount) {
         ring->mpDrawCursor->setPos(
             g_secondaryWheelSlotPosX[ring->mCurrentSlot] + pose.centerX,
@@ -1257,6 +1316,28 @@ HookAction handle_secondary_ring_move_end(ModContext*, void* args, void* retval,
 
 HookAction show_ice_arrow_combo_on_prompt(ModContext*, void* args, void* retval, void*) {
     auto* ring = mods::arg<dMenu_Ring_c*>(args, 0);
+    if (ring != nullptr && !isSecondaryRing(ring) && retval != nullptr &&
+        zItemSlotEnabled() && !secondaryItemAssigned(kZItemSelectIndex) &&
+        !ring->mPlayerIsWolf && ring->mCurrentSlot < MAX_ITEM_SLOTS &&
+        ring->mItemSlots[ring->mCurrentSlot] < MAX_ITEM_SLOTS)
+    {
+        const u8 cursorItem =
+            dComIfGs_getItem(ring->mItemSlots[ring->mCurrentSlot], false);
+        const u8 zSlot = dComIfGs_getSelectItemIndex(kZItemSelectIndex);
+        const u8 zMixSlot = dComIfGs_getMixItemIndex(kZItemSelectIndex);
+        const bool bowComboItem =
+            cursorItem == dItemNo_HAWK_EYE_e ||
+            cursorItem == dItemNo_NORMAL_BOMB_e ||
+            cursorItem == dItemNo_WATER_BOMB_e ||
+            cursorItem == dItemNo_POKE_BOMB_e;
+        if (bowComboItem &&
+            ((zSlot == SLOT_4 && zMixSlot != ring->mItemSlots[ring->mCurrentSlot]) ||
+             (zMixSlot == SLOT_4 && zSlot != ring->mItemSlots[ring->mCurrentSlot])))
+        {
+            *static_cast<bool*>(retval) = true;
+            return HOOK_SKIP_ORIGINAL;
+        }
+    }
     if (!isSecondaryRing(ring)) {
         return HOOK_CONTINUE;
     }
@@ -1269,6 +1350,28 @@ HookAction show_ice_arrow_combo_on_prompt(ModContext*, void* args, void* retval,
 
 HookAction show_ice_arrow_combo_off_prompt(ModContext*, void* args, void* retval, void*) {
     auto* ring = mods::arg<dMenu_Ring_c*>(args, 0);
+    if (ring != nullptr && !isSecondaryRing(ring) && retval != nullptr &&
+        zItemSlotEnabled() && !secondaryItemAssigned(kZItemSelectIndex) &&
+        !ring->mPlayerIsWolf && ring->mCurrentSlot < MAX_ITEM_SLOTS &&
+        ring->mItemSlots[ring->mCurrentSlot] < MAX_ITEM_SLOTS)
+    {
+        const u8 cursorSlot = ring->mItemSlots[ring->mCurrentSlot];
+        const u8 cursorItem = dComIfGs_getItem(cursorSlot, false);
+        const u8 zSlot = dComIfGs_getSelectItemIndex(kZItemSelectIndex);
+        const u8 zMixSlot = dComIfGs_getMixItemIndex(kZItemSelectIndex);
+        const bool bowComboItem =
+            cursorItem == dItemNo_HAWK_EYE_e ||
+            cursorItem == dItemNo_NORMAL_BOMB_e ||
+            cursorItem == dItemNo_WATER_BOMB_e ||
+            cursorItem == dItemNo_POKE_BOMB_e;
+        if (bowComboItem &&
+            ((zSlot == cursorSlot && zMixSlot == SLOT_4) ||
+             (zSlot == SLOT_4 && zMixSlot == cursorSlot)))
+        {
+            *static_cast<bool*>(retval) = true;
+            return HOOK_SKIP_ORIGINAL;
+        }
+    }
     if (!isSecondaryRing(ring)) {
         return HOOK_CONTINUE;
     }
@@ -1277,6 +1380,104 @@ HookAction show_ice_arrow_combo_off_prompt(ModContext*, void* args, void* retval
         ring->mStatus == dMenu_Ring_c::STATUS_WAIT && is_ice_arrow_slot(ring) &&
         g_iceArrowSelected && can_use_ice_arrow_combo(ring);
     return HOOK_SKIP_ORIGINAL;
+}
+
+bool is_bow_combo_item(u8 item) {
+    return item == dItemNo_HAWK_EYE_e ||
+           item == dItemNo_NORMAL_BOMB_e ||
+           item == dItemNo_WATER_BOMB_e ||
+           item == dItemNo_POKE_BOMB_e;
+}
+
+u8 ring_cursor_for_inventory_slot(dMenu_Ring_c* ring, u8 inventorySlot) {
+    if (ring == nullptr || inventorySlot == dItemNo_NONE_e) {
+        return dItemNo_NONE_e;
+    }
+    for (u8 cursor = 0; cursor < MAX_ITEM_SLOTS; ++cursor) {
+        if (ring->mItemSlots[cursor] == inventorySlot) {
+            return cursor;
+        }
+    }
+    return dItemNo_NONE_e;
+}
+
+void sync_primary_ring_item_selection(dMenu_Ring_c* ring) {
+    ring->mXButtonSlot =
+        ring_cursor_for_inventory_slot(ring, dComIfGs_getSelectItemIndex(0));
+    ring->mYButtonSlot =
+        ring_cursor_for_inventory_slot(ring, dComIfGs_getSelectItemIndex(1));
+    ring->field_0x6ac = ring_cursor_for_inventory_slot(
+        ring, dComIfGs_getSelectItemIndex(kZItemSelectIndex));
+    for (int button = 0; button <= kZItemSelectIndex; ++button) {
+        ring->field_0x6b4[button] = dComIfGs_getSelectItemIndex(button);
+        ring->field_0x6b8[button] = dComIfGs_getMixItemIndex(button);
+    }
+}
+
+bool toggle_z_bow_combo(dMenu_Ring_c* ring, u8 cursorSlot, u8 cursorItem) {
+    if (ring == nullptr || !zItemSlotEnabled() ||
+        secondaryItemAssigned(kZItemSelectIndex) ||
+        dComIfGs_getItem(SLOT_4, false) != dItemNo_BOW_e ||
+        !is_bow_combo_item(cursorItem))
+    {
+        return false;
+    }
+
+    const u8 zSlot = dComIfGs_getSelectItemIndex(kZItemSelectIndex);
+    const u8 zMixSlot = dComIfGs_getMixItemIndex(kZItemSelectIndex);
+    const bool turnOff =
+        (zSlot == cursorSlot && zMixSlot == SLOT_4) ||
+        (zSlot == SLOT_4 && zMixSlot == cursorSlot);
+    const bool canTurnOn =
+        (zSlot == SLOT_4 && zMixSlot != cursorSlot) || zMixSlot == SLOT_4;
+    if (!turnOff && !canTurnOn) {
+        return false;
+    }
+
+    for (int button = 0; button <= kZItemSelectIndex; ++button) {
+        ring->setSelectItemForce(button);
+    }
+
+    if (turnOff) {
+        Z2GetAudioMgr()->seStart(
+            Z2SE_SY_ITEM_COMBINE_OFF, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        dComIfGs_setSelectItemIndex(kZItemSelectIndex, SLOT_4);
+        dComIfGs_setMixItemIndex(kZItemSelectIndex, dItemNo_NONE_e);
+        ring->field_0x6cb = zSlot == SLOT_4 ? zMixSlot : zSlot;
+        ring->field_0x6cd = kZItemSelectIndex;
+    } else {
+        Z2GetAudioMgr()->seStart(
+            Z2SE_SY_ITEM_COMBINE_ON, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        dComIfGs_setSelectItemIndex(kZItemSelectIndex, cursorSlot);
+        dComIfGs_setMixItemIndex(kZItemSelectIndex, SLOT_4);
+        ring->field_0x6cd = dItemNo_NONE_e;
+
+        for (int button = 0; button < kZItemSelectIndex; ++button) {
+            if (dComIfGs_getSelectItemIndex(button) == cursorSlot) {
+                dComIfGs_setSelectItemIndex(button, dItemNo_NONE_e);
+                dComIfGs_setMixItemIndex(button, dItemNo_NONE_e);
+            }
+        }
+    }
+
+    sync_primary_ring_item_selection(ring);
+    ring->field_0x6b3 = kZItemSelectIndex;
+    ring->field_0x674[kZItemSelectIndex] = 1;
+    ring->setJumpItem(false);
+    ring->setSelectItem(kZItemSelectIndex, selected_item_for_button(kZItemSelectIndex));
+
+    const u8 animationInventorySlot =
+        ring->field_0x6cd == kZItemSelectIndex
+            ? ring->field_0x6cb
+            : ring->field_0x6b4[kZItemSelectIndex];
+    const u8 animationSlot =
+        ring_cursor_for_inventory_slot(ring, animationInventorySlot);
+    if (animationSlot != dItemNo_NONE_e) {
+        ring->field_0x518[kZItemSelectIndex] = ring->mItemSlotPosX[animationSlot];
+        ring->field_0x528[kZItemSelectIndex] = ring->mItemSlotPosY[animationSlot];
+    }
+    ring->field_0x538[kZItemSelectIndex] = g_ringHIO.mSelectItemScale;
+    return true;
 }
 
 HookAction handle_secondary_ring_move(ModContext*, void* args, void*, void*) {
@@ -1298,6 +1499,39 @@ HookAction handle_secondary_ring_draw(ModContext*, void* args, void*, void*) {
 }
 
 const char* secondary_custom_icon_resource(SecondaryIconContext context);
+
+DEFINE_HOOK(&dComIfGp_getSelectItem, ZSelectItemAccessorHook);
+DEFINE_HOOK(&daAlink_c::checkItemSetButton, CheckItemSetButtonHook);
+
+bool g_dispatchingVanillaZItemChange = false;
+
+void resolve_z_selected_item(ModContext*, void* args, void* retval, void*) {
+    const int button = mods::arg<int>(args, 0);
+    if (!zItemSlotEnabled() || retval == nullptr) {
+        return;
+    }
+
+    if (button == kZItemSelectIndex || (g_dispatchingVanillaZItemChange && button == 0)) {
+        *static_cast<u8*>(retval) = selected_item_for_button(kZItemSelectIndex);
+    }
+}
+
+void count_z_item_as_assigned(ModContext*, void* args, void* retval, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    auto* result = static_cast<int*>(retval);
+    const int itemNo = mods::arg<int>(args, 1);
+    if (!zItemSlotEnabled() || alink == nullptr || result == nullptr ||
+        *result != 2 || alink->checkWolf())
+    {
+        return;
+    }
+
+    const u8 zItem = selected_item_for_button(kZItemSelectIndex);
+    if (zItem != dItemNo_NONE_e && alink->checkGroupItem(itemNo, zItem)) {
+        // checkItemSetButton reserves 2 as "not assigned" and only scans X/Y.
+        *result = 0;
+    }
+}
 
 void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
     if ((g_secondaryIconContext != SecondaryIconContext::Sit &&
@@ -1351,7 +1585,9 @@ HookAction apply_hawk_grass_equip_icon(ModContext*, void* args, void*, void*) {
 HookAction prepare_secondary_equip_icon(ModContext*, void* args, void*, void*) {
     auto* ring = mods::arg<dMenu_Ring_c*>(args, 0);
     const int button = mods::arg<int>(args, 1);
-    if (!isSecondaryRing(ring) || button < 0 || button > 1) {
+    if (!isSecondaryRing(ring) || button < 0 || button >= kSecondaryAssignmentCount ||
+        (button == kZItemSelectIndex && !zItemSlotEnabled()))
+    {
         return HOOK_CONTINUE;
     }
 
@@ -1397,7 +1633,9 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context) {
 HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
     const int button = mods::arg<int>(args, 1);
     auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
-    if (button < 0 || button > 1 || !secondaryItemAssigned(button) ||
+    if (button < 0 || button >= kSecondaryAssignmentCount ||
+        (button == kZItemSelectIndex && !zItemSlotEnabled()) ||
+        !secondaryItemAssigned(button) ||
         (alink != nullptr && alink->checkWolf()))
     {
         g_secondaryIconContext = SecondaryIconContext::None;
@@ -1406,6 +1644,10 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
 
     const u8 slot = g_secondarySelectedItems[button];
     g_secondaryIconContext = secondaryIconContextForSlot(slot);
+    if (button == kZItemSelectIndex) {
+        mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
+        return HOOK_CONTINUE;
+    }
     if (g_secondaryIconContext != SecondaryIconContext::Sit &&
         g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
         g_secondaryIconContext != SecondaryIconContext::DarkLink &&
@@ -1493,11 +1735,377 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
+bool z_slot_item_ammo_count(u8 item, int& count) {
+    switch (item) {
+    case dItemNo_BOW_e:
+    case dItemNo_LIGHT_ARROW_e:
+    case dItemNo_ARROW_LV1_e:
+    case dItemNo_ARROW_LV2_e:
+    case dItemNo_ARROW_LV3_e:
+    case dItemNo_HAWK_ARROW_e:
+        count = dComIfGs_getArrowNum();
+        return true;
+    case dItemNo_BOMB_ARROW_e:
+        count = dComIfGp_getSelectItemNum(kZItemSelectIndex);
+        return true;
+    case dItemNo_PACHINKO_e:
+        count = dComIfGs_getPachinkoNum();
+        return true;
+    case dItemNo_NORMAL_BOMB_e:
+        count = dComIfGs_getBombNum(0);
+        return true;
+    case dItemNo_WATER_BOMB_e:
+        count = dComIfGs_getBombNum(1);
+        return true;
+    case dItemNo_POKE_BOMB_e:
+        count = dComIfGs_getBombNum(2);
+        return true;
+    default:
+        return false;
+    }
+}
+
+void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
+    g_secondaryZHudAmmoVisible = false;
+    g_secondaryZHudLanternVisible = item == dItemNo_KANTERA_e;
+    if (meter == nullptr || meter->mpScreen == nullptr ||
+        meter->mpItemR == nullptr)
+    {
+        g_secondaryZHudAmmoVisible = false;
+        return;
+    }
+
+    int count = 0;
+    if (!z_slot_item_ammo_count(item, count)) {
+        g_secondaryZHudAmmoVisible = false;
+        return;
+    }
+
+    count = std::clamp(count, 0, 9999);
+    const int digitCount = count >= 1000 ? 4 : count >= 100 ? 3 : 2;
+    ResTIMG* zeroTexture = meter->getNumberTexture(0);
+    if (zeroTexture == nullptr) {
+        svc_log->error(mod_ctx, "failed to access the Z-slot ammo number texture");
+        return;
+    }
+
+    for (auto*& digit : g_secondaryZHudAmmoDigits) {
+        if (digit != nullptr) {
+            continue;
+        }
+        digit = JKR_NEW J2DPicture(zeroTexture);
+        if (digit == nullptr) {
+            svc_log->error(mod_ctx, "failed to allocate a Z-slot ammo digit");
+            g_secondaryZHudAmmoVisible = false;
+            return;
+        }
+        digit->setBlackWhite(
+            JUtility::TColor(0, 0, 0, 0),
+            JUtility::TColor(255, 255, 255, 255));
+    }
+
+    J2DPane* itemPane = meter->mpItemR->getPanePtr();
+    const Vec topLeft = itemPane->getGlbVtx(0);
+    const Vec bottomRight = itemPane->getGlbVtx(3);
+    const auto& numberParams =
+        meter->mItemParams[dMeter2Draw_c::SELECT_Z_e];
+    f32 numberOffsetX = numberParams.num_pos_x;
+    f32 numberOffsetY = numberParams.num_pos_y;
+    f32 numberScale = numberParams.num_scale;
+    switch (item) {
+    case dItemNo_PACHINKO_e:
+    case dItemNo_NORMAL_BOMB_e:
+    case dItemNo_WATER_BOMB_e:
+    case dItemNo_POKE_BOMB_e:
+    case dItemNo_BOMB_ARROW_e:
+    case dItemNo_HAWK_ARROW_e:
+        numberOffsetX = 14.0f;
+        numberOffsetY = -30.0f;
+        numberScale = 0.75f;
+        break;
+    default:
+        break;
+    }
+    const f32 digitSize = numberScale * 16.0f;
+    const f32 left = numberOffsetX +
+        ((topLeft.x + bottomRight.x) * 0.5f);
+    const f32 top = numberOffsetY +
+        ((topLeft.y + bottomRight.y) * 0.5f) + meter->mpItemR->getSizeY();
+    int remaining = count;
+    for (int i = digitCount - 1; i >= 0; --i) {
+        J2DPicture* digit = g_secondaryZHudAmmoDigits[i];
+        const int value = remaining % 10;
+        remaining /= 10;
+        if (digit->changeTexture(meter->getNumberTexture(value), 0) == nullptr) {
+            svc_log->error(mod_ctx, "failed to update a Z-slot ammo digit");
+            g_secondaryZHudAmmoVisible = false;
+            return;
+        }
+        digit->show();
+        digit->setAlpha(255);
+    }
+    g_secondaryZHudAmmoOwner = meter;
+    g_secondaryZHudAmmoX = left;
+    g_secondaryZHudAmmoY = top;
+    g_secondaryZHudAmmoDigitSize = digitSize;
+    g_secondaryZHudAmmoDigitCount = digitCount;
+    g_secondaryZHudAmmoVisible = true;
+}
+
+DEFINE_HOOK(&dMeter2Draw_c::draw, ZSlotAmmoDraw);
+
+void draw_z_slot_ammo_numbers(ModContext*, void* args, void*, void*) {
+    auto* meter = mods::arg<dMeter2Draw_c*>(args, 0);
+    if (meter == nullptr || meter->mpItemR == nullptr) {
+        return;
+    }
+
+    J2DPane* itemPane = meter->mpItemR->getPanePtr();
+    const f32 alpha = meter->mpItemR->getAlphaRate();
+    if (itemPane == nullptr || !itemPane->isVisible() || alpha <= 0.0f) {
+        return;
+    }
+
+    if (g_secondaryZHudLanternVisible) {
+        if (g_secondaryZHudLanternMeter == nullptr) {
+            g_secondaryZHudLanternMeter = JKR_NEW dKantera_icon_c();
+            if (g_secondaryZHudLanternMeter == nullptr) {
+                svc_log->error(mod_ctx, "failed to allocate the Z-slot Lantern meter");
+                return;
+            }
+        }
+        const Vec topLeft = itemPane->getGlbVtx(0);
+        const Vec bottomRight = itemPane->getGlbVtx(3);
+        g_secondaryZHudLanternMeter->setPos(
+            ((topLeft.x + bottomRight.x) * 0.5f) + 9.0f,
+            bottomRight.y);
+        g_secondaryZHudLanternMeter->setScale(0.6f, 0.6f);
+        g_secondaryZHudLanternMeter->setNowGauge(
+            dComIfGs_getMaxOil(), dComIfGs_getOil());
+        g_secondaryZHudLanternMeter->setAlphaRate(alpha);
+        g_secondaryZHudLanternMeter->drawSelf();
+        return;
+    }
+
+    if (!g_secondaryZHudAmmoVisible || meter != g_secondaryZHudAmmoOwner) {
+        return;
+    }
+    const u8 digitAlpha = static_cast<u8>(
+        std::clamp(alpha, 0.0f, 1.0f) * 255.0f);
+    for (int i = 0; i < g_secondaryZHudAmmoDigitCount; ++i) {
+        J2DPicture* digit = g_secondaryZHudAmmoDigits[i];
+        if (digit == nullptr) {
+            continue;
+        }
+        digit->setAlpha(digitAlpha);
+        digit->draw(
+            g_secondaryZHudAmmoX + g_secondaryZHudAmmoDigitSize * i,
+            g_secondaryZHudAmmoY,
+            g_secondaryZHudAmmoDigitSize,
+            g_secondaryZHudAmmoDigitSize,
+            false, false, false);
+    }
+}
+
+void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
+    if (meter == nullptr || meter->mpScreen == nullptr) {
+        return;
+    }
+
+    auto* zItemRoot = meter->mpScreen->search(MULTI_CHAR('item_r_n'));
+    auto* midnaPane = meter->mpScreen->search(MULTI_CHAR('midona_n'));
+    auto* dpadPane = meter->mpScreen->search(MULTI_CHAR('juji_n'));
+    if (midnaPane != nullptr && g_zSlotMidnaScreen != meter->mpScreen) {
+        g_zSlotMidnaScreen = meter->mpScreen;
+        g_zSlotMidnaOriginalParent = midnaPane->getParentPane();
+        g_zSlotMidnaOriginalScaleX = midnaPane->getScaleX();
+        g_zSlotMidnaOriginalScaleY = midnaPane->getScaleY();
+        g_zSlotMidnaOriginalTranslateX = midnaPane->getTranslateX();
+        g_zSlotMidnaOriginalTranslateY = midnaPane->getTranslateY();
+    }
+    if (midnaPane != nullptr && zItemSlotEnabled() && dpadPane != nullptr) {
+        if (midnaPane->getParentPane() != dpadPane) {
+            dpadPane->appendChild(midnaPane);
+            midnaPane->scale(g_drawHIO.mMidnaIconScale, g_drawHIO.mMidnaIconScale);
+        }
+        const f32 midnaWidth = midnaPane->getWidth() * midnaPane->getScaleX();
+        const f32 midnaHeight = midnaPane->getHeight() * midnaPane->getScaleY();
+        const f32 dpadWidth = dpadPane->getWidth() * dpadPane->getScaleX();
+        const f32 dpadHeight = dpadPane->getHeight() * dpadPane->getScaleY();
+        midnaPane->move(
+            (dpadWidth - midnaWidth) * 0.5f - midnaWidth - 8.0f,
+            (dpadHeight - midnaHeight) * 0.5f);
+    } else if (midnaPane != nullptr && !zItemSlotEnabled() &&
+               g_zSlotMidnaOriginalParent != nullptr &&
+               midnaPane->getParentPane() != g_zSlotMidnaOriginalParent)
+    {
+        g_zSlotMidnaOriginalParent->appendChild(midnaPane);
+        midnaPane->scale(g_zSlotMidnaOriginalScaleX, g_zSlotMidnaOriginalScaleY);
+        midnaPane->translate(
+            g_zSlotMidnaOriginalTranslateX, g_zSlotMidnaOriginalTranslateY);
+    }
+
+    auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
+    const bool assigned = zItemSlotEnabled() &&
+        secondaryItemAssigned(kZItemSelectIndex);
+    const u8 assignedSlot = assigned
+        ? g_secondarySelectedItems[kZItemSelectIndex] : dItemNo_NONE_e;
+    if (meter->mpItemR == nullptr || meter->mpItemXYPane[2] == nullptr ||
+        meter->mpLightXY[2] == nullptr)
+    {
+        return;
+    }
+    if (alink != nullptr && alink->checkWolf()) {
+        update_z_slot_ammo_display(meter, dItemNo_NONE_e);
+        if (assigned) {
+            meter->mpItemR->hide();
+            meter->mpLightXY[2]->hide();
+            if (zItemRoot != nullptr) {
+                zItemRoot->hide();
+            }
+        }
+        g_secondaryZHudOwner = meter;
+        g_secondaryZHudPicture = nullptr;
+        g_secondaryZHudSlot = dItemNo_NONE_e;
+        g_secondaryZHudItem = dItemNo_NONE_e;
+        return;
+    }
+
+    auto* picture = static_cast<J2DPicture*>(meter->mpItemR->getPanePtr());
+    if (picture == nullptr) {
+        return;
+    }
+    if (g_secondaryZHudOwner != meter) {
+        g_secondaryZHudOwner = meter;
+        g_secondaryZHudPicture = nullptr;
+        g_secondaryZHudSlot = dItemNo_NONE_e;
+        g_secondaryZHudItem = dItemNo_NONE_e;
+    }
+    const u8 displayItem = assigned
+        ? secondaryDisplayItemForSlot(assignedSlot)
+        : selected_item_for_button(kZItemSelectIndex);
+    if (displayItem != dItemNo_NONE_e) {
+        meter->setItemParamZ(displayItem);
+    }
+    if (displayItem != dItemNo_NONE_e && zItemRoot != nullptr) {
+        zItemRoot->show();
+    }
+    if (g_secondaryZHudSlot == assignedSlot &&
+        g_secondaryZHudItem == displayItem && g_secondaryZHudPicture == picture)
+    {
+        update_z_slot_ammo_display(meter, displayItem);
+        return;
+    }
+
+    if (displayItem == dItemNo_NONE_e) {
+        update_z_slot_ammo_display(meter, displayItem);
+        meter->mpItemR->hide();
+        meter->mpLightXY[2]->hide();
+        if (zItemRoot != nullptr) {
+            zItemRoot->hide();
+        }
+        g_secondaryZHudPicture = picture;
+        g_secondaryZHudSlot = dItemNo_NONE_e;
+        g_secondaryZHudItem = displayItem;
+        return;
+    }
+
+    const SecondaryIconContext previousIconContext = g_secondaryIconContext;
+    g_secondaryIconContext = assigned
+        ? secondaryIconContextForSlot(assignedSlot) : SecondaryIconContext::None;
+    const char* customIconResource =
+        secondary_custom_icon_resource(g_secondaryIconContext);
+    int textureCount = 0;
+    ResTIMG* texture =
+        reinterpret_cast<ResTIMG*>(g_secondaryZHudTextureBuffers[0].data());
+    if (customIconResource != nullptr) {
+        ResourceBuffer icon = RESOURCE_BUFFER_INIT;
+        const ModResult result =
+            svc_resource->load(mod_ctx, customIconResource, &icon);
+        if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
+            svc_log->error(mod_ctx, "failed to load a custom Z HUD icon");
+            svc_resource->free(mod_ctx, &icon);
+            g_secondaryIconContext = previousIconContext;
+            return;
+        }
+        if (icon.size < sizeof(ResTIMG) || icon.size > kItemTextureBufferSize) {
+            svc_log->error(mod_ctx, "custom Z HUD icon has an invalid texture size");
+            svc_resource->free(mod_ctx, &icon);
+            g_secondaryIconContext = previousIconContext;
+            return;
+        }
+        std::memcpy(texture, icon.data, icon.size);
+        svc_resource->free(mod_ctx, &icon);
+        DCStoreRangeNoSync(texture, kItemTextureBufferSize);
+        if (picture->changeTexture(texture, 0) == nullptr) {
+            svc_log->error(mod_ctx, "failed to apply a custom Z HUD icon");
+            g_secondaryIconContext = previousIconContext;
+            return;
+        }
+        meter->mpItemXYPane[2]->hide();
+        textureCount = 1;
+    } else {
+        textureCount = dMeter2Info_readItemTexture(
+            displayItem, g_secondaryZHudTextureBuffers[0].data(), picture,
+            g_secondaryZHudTextureBuffers[1].data(), meter->mpItemXYPane[2],
+            nullptr, nullptr, nullptr, nullptr, -1);
+    }
+    g_secondaryIconContext = previousIconContext;
+    if (textureCount <= 0) {
+        svc_log->error(mod_ctx, "failed to update the Z item HUD icon");
+        return;
+    }
+
+    if (texture->width == 0 || texture->height == 0) {
+        svc_log->error(mod_ctx, "Z item HUD icon has invalid dimensions");
+        return;
+    }
+    if (assigned) {
+        picture->setBlackWhite(
+            JUtility::TColor(0, 0, 0, 0),
+            JUtility::TColor(255, 255, 255, 255));
+    }
+    if (textureCount <= 1) {
+        meter->mpItemXYPane[2]->hide();
+    } else {
+        meter->mpItemXYPane[2]->show();
+    }
+
+    const f32 scale = g_drawHIO.mItemScaleAdjustON
+        ? g_drawHIO.mItemScalePercent / 100.0f
+        : dItem_data::getTexScale(displayItem) / 100.0f;
+    meter->field_0x6c4[2] =
+        scale * ((texture->width * meter->mpItemR->getInitSizeX()) / 48.0f);
+    meter->field_0x6d0[2] =
+        scale * ((texture->height * meter->mpItemR->getInitSizeY()) / 48.0f);
+    meter->field_0x6ac[2] =
+        (meter->mpItemR->getInitSizeX() - meter->field_0x6c4[2]) * 0.5f;
+    meter->field_0x6b8[2] =
+        (meter->mpItemR->getInitSizeY() - meter->field_0x6d0[2]) * 0.5f;
+    meter->mpItemR->resize(meter->field_0x6c4[2], meter->field_0x6d0[2]);
+    meter->mpItemR->paneTrans(
+        g_drawHIO.mButtonZItemPosX + meter->field_0x6ac[2],
+        g_drawHIO.mButtonZItemPosY + meter->field_0x6b8[2]);
+    meter->mpItemXYPane[2]->resize(
+        meter->field_0x6c4[2], meter->field_0x6d0[2]);
+    update_z_slot_ammo_display(meter, displayItem);
+    meter->mpItemR->show();
+    meter->mpLightXY[2]->show();
+    g_secondaryZHudPicture = picture;
+    g_secondaryZHudSlot = assignedSlot;
+    g_secondaryZHudItem = displayItem;
+}
+
+void update_z_slot_hud(ModContext*, void* args, void*, void*) {
+    update_z_slot_hud_for_meter(mods::arg<dMeter2Draw_c*>(args, 0));
+}
+
 void refresh_secondary_hud_assignments(ModContext*, void* args, void*, void*) {
     auto* meter = mods::arg<dMeter2_c*>(args, 0);
     if (meter == nullptr || meter->mpMeterDraw == nullptr) {
         return;
     }
+    update_z_slot_hud_for_meter(meter->mpMeterDraw);
 
     if (g_secondaryHudOwner != meter) {
         g_secondaryHudOwner = meter;
@@ -1513,7 +2121,7 @@ void refresh_secondary_hud_assignments(ModContext*, void* args, void*, void*) {
         return;
     }
 
-    for (int button = 0; button < MAX_SELECT_ITEM; ++button) {
+    for (int button = 0; button < 2; ++button) {
         const u8 slot = g_secondarySelectedItems[button];
         if (g_secondaryHudAssignments[button] != slot) {
             g_secondaryHudAssignments[button] = slot;
@@ -1534,6 +2142,251 @@ void refresh_secondary_hud_assignments(ModContext*, void* args, void*, void*) {
             button, item, status, true, false);
         g_secondaryHudRefreshPending[button] = false;
     }
+    g_secondaryHudAssignments[kZItemSelectIndex] =
+        g_secondarySelectedItems[kZItemSelectIndex];
+    g_secondaryHudRefreshPending[kZItemSelectIndex] = false;
+}
+
+HookAction assign_secondary_z_from_ring(ModContext*, void* args, void*, void*) {
+    auto* ring = mods::arg<dMenu_Ring_c*>(args, 0);
+    if (ring == nullptr || isSecondaryRing(ring)) {
+        return HOOK_CONTINUE;
+    }
+
+    if (ring->mStatus != dMenu_Ring_c::STATUS_WAIT ||
+        ring->mOldStatus == dMenu_Ring_c::STATUS_EXPLAIN_FORCE ||
+        ring->mOldStatus == dMenu_Ring_c::STATUS_EXPLAIN ||
+        ring->mpItemExplain == nullptr || ring->mpItemExplain->getStatus() != 0 ||
+        ring->mPlayerIsWolf || ring->mCurrentSlot >= MAX_ITEM_SLOTS)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    const u8 selectedSlot = ring->mItemSlots[ring->mCurrentSlot];
+    if (selectedSlot == dItemNo_NONE_e || selectedSlot >= MAX_ITEM_SLOTS) {
+        return HOOK_CONTINUE;
+    }
+    const u8 selectedItem = dComIfGs_getItem(selectedSlot, false);
+    if (selectedItem == dItemNo_NONE_e) {
+        return HOOK_CONTINUE;
+    }
+
+    const bool zTriggered = zItemSlotEnabled() &&
+                            mDoCPd_c::getTrigZ(PAD_1) != 0;
+    const bool rTriggered = zItemSlotEnabled() &&
+                            mDoCPd_c::getTrigR(PAD_1) != 0;
+    if ((zTriggered || rTriggered) &&
+        toggle_z_bow_combo(ring, selectedSlot, selectedItem))
+    {
+        return HOOK_SKIP_ORIGINAL;
+    }
+
+    if (!zTriggered) {
+        return HOOK_CONTINUE;
+    }
+
+    u8 mixItemSlot = dItemNo_NONE_e;
+    for (int button = 0; button < 2; ++button) {
+        if (dComIfGs_getSelectItemIndex(button) == selectedSlot) {
+            mixItemSlot = dComIfGs_getMixItemIndex(button);
+            break;
+        }
+    }
+
+    dComIfGs_setSelectItemIndex(kZItemSelectIndex, selectedSlot);
+    dComIfGs_setMixItemIndex(kZItemSelectIndex, mixItemSlot);
+    for (int button = 0; button < kZItemSelectIndex; ++button) {
+        const u8 assignedSlot = dComIfGs_getSelectItemIndex(button);
+        const u8 assignedMixSlot = dComIfGs_getMixItemIndex(button);
+        if (assignedSlot == selectedSlot) {
+            dComIfGs_setSelectItemIndex(button, dItemNo_NONE_e);
+            dComIfGs_setMixItemIndex(button, dItemNo_NONE_e);
+            ring->setSelectItem(button, dItemNo_NONE_e);
+        } else if (assignedMixSlot == selectedSlot) {
+            dComIfGs_setMixItemIndex(button, dItemNo_NONE_e);
+            ring->setSelectItem(button, selected_item_for_button(button));
+        }
+    }
+    const u8 displayItem = selected_item_for_button(kZItemSelectIndex);
+    clear_secondary_assignment(kZItemSelectIndex);
+    sync_primary_ring_item_selection(ring);
+    begin_z_slot_assignment_animation(
+        ring, ring->mCurrentSlot, selectedSlot, displayItem);
+    if (ring->mpItemExplain->getStatus() == 0) {
+        ring->mStatus = dMenu_Ring_c::STATUS_WAIT;
+        ring->stick_wait_init();
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
+void begin_z_slot_assignment_animation(
+    dMenu_Ring_c* ring, u8 sourceSlot, u8 savedSelection, u8 displayItem)
+{
+    ring->field_0x6ac = sourceSlot;
+    ring->field_0x6b3 = kZItemSelectIndex;
+    ring->field_0x6b4[kZItemSelectIndex] = displayItem;
+    ring->field_0x6b8[kZItemSelectIndex] = dItemNo_NONE_e;
+    ring->field_0x674[kZItemSelectIndex] = 1;
+    ring->field_0x538[kZItemSelectIndex] = g_ringHIO.mSelectItemScale;
+
+    if (isSecondaryRing(ring)) {
+        ring->field_0x518[kZItemSelectIndex] =
+            g_secondaryWheelSlotPosX[sourceSlot];
+        ring->field_0x528[kZItemSelectIndex] =
+            g_secondaryWheelSlotPosY[sourceSlot];
+        ring->setSelectItem(kZItemSelectIndex, displayItem);
+        dMeter2Info_set2DVibrationM();
+        Z2GetAudioMgr()->seStart(
+            Z2SE_SY_ITEM_SET_X, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    } else {
+        ring->setJumpItem(true);
+    }
+    if (!isSecondaryRing(ring)) {
+        ring->field_0x6b4[kZItemSelectIndex] = savedSelection;
+        ring->setSelectItem(kZItemSelectIndex, displayItem);
+    }
+}
+
+HookAction preserve_secondary_z_assignment(
+    ModContext*, void* args, void*, void*)
+{
+    auto* ring = mods::arg<dMenu_Ring_c*>(args, 0);
+    const int button = mods::arg<int>(args, 1);
+    if (!isSecondaryRing(ring) || button != kZItemSelectIndex) {
+        return HOOK_CONTINUE;
+    }
+
+    ring->field_0x674[kZItemSelectIndex] = 0;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+HookAction activate_vanilla_z_slot_item(ModContext*, void* args, void* retval, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    auto* result = static_cast<int*>(retval);
+    if (!zItemSlotEnabled() || alink == nullptr || alink->checkWolf() ||
+        secondaryItemAssigned(kZItemSelectIndex) || result == nullptr ||
+        mDoCPd_c::getTrigZ(PAD_1) == 0)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    const int itemNo = mods::arg<int>(args, 1);
+    const u8 zItem = selected_item_for_button(kZItemSelectIndex);
+    if (zItem == dItemNo_NONE_e || !alink->checkGroupItem(itemNo, zItem))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    alink->mSelectItemId = kZItemSelectIndex;
+    *result = 1;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+void handle_vanilla_z_item_change(ModContext*, void* args, void* retval, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    auto* result = static_cast<BOOL*>(retval);
+    if (!zItemSlotEnabled() || alink == nullptr || alink->checkWolf() ||
+        secondaryItemAssigned(kZItemSelectIndex) || result == nullptr ||
+        *result != 0 || g_secondaryRing != nullptr || g_primaryRingOpen ||
+        mDoCPd_c::getTrigZ(PAD_1) == 0 ||
+        mDoCPd_c::getTrigX(PAD_1) != 0 ||
+        mDoCPd_c::getTrigY(PAD_1) != 0)
+    {
+        return;
+    }
+
+    if (!alink->checkModeFlg(4) || alink->checkEquipAnime() ||
+        alink->checkBoomerangThrowAnime() || alink->checkCopyRodThrowAnime() ||
+        alink->checkKandelaarSwingAnime() || alink->checkKandelaarSwingAnime() ||
+        alink->swordTrigger())
+    {
+        return;
+    }
+
+    const u8 selectedSlot = dComIfGs_getSelectItemIndex(kZItemSelectIndex);
+    if (selectedSlot == dItemNo_NONE_e) {
+        return;
+    }
+
+    const u8 selectedItem = dComIfGs_getItem(selectedSlot, false);
+    if (selectedItem == dItemNo_NONE_e) {
+        return;
+    }
+
+    g_dispatchingVanillaZItemChange = true;
+    const int procType = alink->checkNewItemChange(0);
+    if (procType != 0) {
+        *result = alink->changeItemTriggerKeepProc(0, procType);
+    }
+    g_dispatchingVanillaZItemChange = false;
+    alink->mSelectItemId = kZItemSelectIndex;
+}
+
+void clear_secondary_assignment(int button) {
+    if (!secondaryItemAssigned(button)) {
+        return;
+    }
+
+    g_secondarySelectedItems[button] = dItemNo_NONE_e;
+    if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1) &&
+        !secondaryTunicAssigned(kZItemSelectIndex))
+    {
+        set_goron_tunic_active(false);
+    }
+    if (!secondaryHoverBootsAssigned(0) && !secondaryHoverBootsAssigned(1) &&
+        !secondaryHoverBootsAssigned(kZItemSelectIndex))
+    {
+        disable_hover_boots();
+    }
+}
+
+void clear_duplicate_z_assignment_for_item(
+    dMenu_Ring_c* ring, int button, u8 slot, u8 item)
+{
+    if (ring == nullptr || button < 0 || button >= kZItemSelectIndex ||
+        item == dItemNo_NONE_e || !zItemSlotEnabled())
+    {
+        return;
+    }
+
+    auto* player = daAlink_getAlinkActorClass();
+    const auto sameItemGroup = [player, item](u8 assignedItem) {
+        return assignedItem != dItemNo_NONE_e &&
+            (assignedItem == item ||
+             (player != nullptr && player->checkGroupItem(item, assignedItem)));
+    };
+
+    const bool duplicateSecondary =
+        secondaryItemAssigned(kZItemSelectIndex) &&
+        (g_secondarySelectedItems[kZItemSelectIndex] == slot ||
+         sameItemGroup(secondaryItemIdForSlot(
+             g_secondarySelectedItems[kZItemSelectIndex])));
+    const bool duplicateVanilla =
+        sameItemGroup(selected_item_for_button(kZItemSelectIndex));
+    if (!duplicateSecondary && !duplicateVanilla) {
+        return;
+    }
+
+    if (duplicateSecondary) {
+        clear_secondary_assignment(kZItemSelectIndex);
+    }
+    if (duplicateVanilla) {
+        dComIfGs_setSelectItemIndex(kZItemSelectIndex, dItemNo_NONE_e);
+        dComIfGs_setMixItemIndex(kZItemSelectIndex, dItemNo_NONE_e);
+    }
+
+    if (isSecondaryRing(ring)) {
+        const u8 zItem = selected_item_for_button(kZItemSelectIndex);
+        ring->field_0x6ac = dItemNo_NONE_e;
+        ring->field_0x6b8[kZItemSelectIndex] = dItemNo_NONE_e;
+        ring->field_0x6b4[kZItemSelectIndex] = zItem;
+        ring->field_0x674[kZItemSelectIndex] = 0;
+        ring->setSelectItem(kZItemSelectIndex, zItem);
+    } else {
+        sync_primary_ring_item_selection(ring);
+        ring->setSelectItem(
+            kZItemSelectIndex, selected_item_for_button(kZItemSelectIndex));
+    }
 }
 
 void clear_secondary_assignment_for_vanilla_ring(ModContext*, void* args, void*, void*) {
@@ -1543,16 +2396,17 @@ void clear_secondary_assignment_for_vanilla_ring(ModContext*, void* args, void*,
     }
 
     const int button = ring->field_0x6b3;
-    if (button < 0 || button > 1 || !secondaryItemAssigned(button)) {
+    if (button < 0 || button >= kSecondaryAssignmentCount ||
+        (button == kZItemSelectIndex && !zItemSlotEnabled()))
+    {
         return;
     }
-    g_secondarySelectedItems[button] = dItemNo_NONE_e;
-
-    if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1)) {
-        set_goron_tunic_active(false);
+    if (secondaryItemAssigned(button)) {
+        clear_secondary_assignment(button);
     }
-    if (!secondaryHoverBootsAssigned(0) && !secondaryHoverBootsAssigned(1)) {
-        disable_hover_boots();
+    if (button < kZItemSelectIndex) {
+        clear_duplicate_z_assignment_for_item(
+            ring, button, dItemNo_NONE_e, selected_item_for_button(button));
     }
 }
 

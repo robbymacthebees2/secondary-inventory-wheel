@@ -2938,15 +2938,18 @@ struct PuppetModelLoadScope {
 };
 
 bool skin_data_looks_sane(J3DModelData* data) {
-    if (data == nullptr) return false;
+    if (!coop_ptr_looks_live(data)) return false;
     const u16 joints = data->getJointNum();
     if (joints == 0 || joints > kPuppetMaxJoints) return false;
-    if (data->getJointNodePointer(0) == nullptr) return false;
+    if (!coop_ptr_looks_live(data->getJointNodePointer(0))) return false;
     return true;
 }
 
 bool skin_fits_original(J3DModelData* mine, J3DModelData* theirs, const char* what) {
-    if (mine == nullptr || theirs == nullptr) return false;
+    if (!coop_ptr_looks_live(mine) || !coop_ptr_looks_live(theirs)) {
+        breadcrumb2("local: REFUSED invalid model pointer", what);
+        return false;
+    }
     return skin_fits_counts(mine, theirs->getJointNum(), theirs->getMaterialNum(), what);
 }
 
@@ -5123,7 +5126,9 @@ void render_puppet_body(J3DModel* model, const cXyz& pos, const csXyz& angle,
         mDoMtx_stack_c::concat(magne);
     }
     mDoMtx_stack_c::ZXYrotM(angle.x, angle.y, angle.z);
-    model->setBaseScale(cXyz(1.0f, 1.0f, 1.0f));
+    const f32 bodyScale =
+        (pup().poseFlags & kPuppetPoseGiantMask) != 0 ? 2.0f : 1.0f;
+    model->setBaseScale(cXyz(bodyScale, bodyScale, bodyScale));
     model->setBaseTRMtx(mDoMtx_stack_c::get());
     model->calc();
 
@@ -5135,7 +5140,12 @@ void render_puppet_body(J3DModel* model, const cXyz& pos, const csXyz& angle,
     MaterialGuard matGuard;
     const bool matGuarded = material_guard_begin(model, matGuard);
 
-    if (!s_bodyNotDrawn) mDoExt_modelUpdateDL(model);
+    if (!s_bodyNotDrawn) {
+        wheel_dark_link_remote_draw_begin(
+            model, (pup().poseFlags & kPuppetPoseDarkLink) != 0);
+        mDoExt_modelUpdateDL(model);
+        wheel_dark_link_remote_draw_end();
+    }
 
     if (matGuarded) material_guard_end(matGuard);
 

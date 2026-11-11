@@ -128,6 +128,10 @@ bool shade_skin_ships(const char* file);
 
 class J3DModel;
 class dKy_tevstr_c;
+bool wheel_is_dark_link_active();
+bool wheel_is_giant_mask_active();
+void wheel_dark_link_remote_draw_begin(J3DModel* model, bool active);
+void wheel_dark_link_remote_draw_end();
 int standin_body(const char* skin);
 bool standin_puppet_ready(int pupId, int body);
 void standin_puppet_draw(int pupId, J3DModel* body, uint8_t handL, uint8_t handR, dKy_tevstr_c* tev);
@@ -859,6 +863,7 @@ struct GlobalPlayer {
 bool global_blocked(const std::string& tag);
 void global_set_blocked(const GlobalPlayer& who, bool on);
 std::vector<GlobalPlayer> global_players();
+std::vector<GlobalPlayer> global_online_players();
 uint8_t global_peer_slot(uint32_t id);
 std::vector<GlobalPlayer> global_blocked_list();
 std::vector<GlobalPlayer> chat_recent_speakers();

@@ -27,7 +27,7 @@ if (COOP_VOICE)
     endblock()
 endif ()
 
-if (COOP_VOICE_SDL)
+if (COOP_VOICE_SDL OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     file(GLOB COOP_SDL3_HINTS "${DUSK_DIR}/build/*/_deps/sdl3_prebuilt-src/include"
                               "${DUSK_DIR}/build/*/_deps/sdl3-src/include")
     find_path(COOP_SDL3_INCLUDE_DIR SDL3/SDL_audio.h HINTS ${COOP_SDL3_HINTS} NO_DEFAULT_PATH)
@@ -51,12 +51,13 @@ if (COOP_VOICE_SDL)
 endif ()
 
 add_mod(secondary_inventory_wheel
-    FEATURES game fmt
+    FEATURES game fmt webgpu
     # Feature .cpp modules are included by mod.cpp to share its private runtime state.
     SOURCES  src/mod.cpp ${COOP_SOURCES}
     MOD_JSON mod.json
     RES_DIR  res
 )
+target_include_directories(secondary_inventory_wheel PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/mod.json" WHEEL_MOD_JSON)
 string(JSON WHEEL_MOD_VERSION GET "${WHEEL_MOD_JSON}" version)
@@ -67,8 +68,10 @@ if (COOP_VOICE)
     target_link_libraries(secondary_inventory_wheel PRIVATE opus)
     target_compile_definitions(secondary_inventory_wheel PRIVATE COOP_VOICE=1)
 endif ()
-if (COOP_VOICE_SDL)
+if (COOP_VOICE_SDL OR CMAKE_SYSTEM_NAME STREQUAL "Android")
     target_include_directories(secondary_inventory_wheel PRIVATE "${COOP_SDL3_INCLUDE_DIR}")
+endif ()
+if (COOP_VOICE_SDL)
     target_compile_definitions(secondary_inventory_wheel PRIVATE COOP_VOICE_SDL=1)
 elseif (APPLE)
     target_link_libraries(secondary_inventory_wheel PRIVATE "-framework AudioToolbox" "-framework CoreFoundation")

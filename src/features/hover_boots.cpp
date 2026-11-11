@@ -161,61 +161,6 @@ void update_hover_magic_effect(daAlink_c* alink) {
     }
 }
 
-void stop_manual_glide_aura() {
-    for (auto& footEmitters : g_manualGlideAuraEmitters) {
-        for (u32& emitterId : footEmitters) {
-            if (emitterId != 0) {
-                dComIfGp_particle_setStopContinue(emitterId);
-                emitterId = 0;
-            }
-        }
-    }
-}
-
-void update_manual_glide_aura(daAlink_c* alink) {
-    if (!g_manualCuccoGlideActive || alink == nullptr ||
-        alink->mpLinkModel == nullptr || alink->checkWolf() ||
-        alink->checkPlayerNoDraw())
-    {
-        stop_manual_glide_aura();
-        return;
-    }
-
-    static const u16 effectIds[] = {
-        ID_ZI_J_HB_MAGNE_A,
-        ID_ZI_J_HB_MAGNE_B,
-        ID_ZI_J_HB_MAGNE_C,
-    };
-    const u16 footJoints[] = {alink->field_0x30bc, alink->field_0x30be};
-
-    for (int foot = 0; foot < 2; ++foot) {
-        MtxP footMatrix = alink->mpLinkModel->getAnmMtx(footJoints[foot]);
-        if (footMatrix == nullptr) {
-            for (u32& emitterId : g_manualGlideAuraEmitters[foot]) {
-                if (emitterId != 0) {
-                    dComIfGp_particle_setStopContinue(emitterId);
-                    emitterId = 0;
-                }
-            }
-            continue;
-        }
-
-        for (int effect = 0; effect < 3; ++effect) {
-            u32& emitterId = g_manualGlideAuraEmitters[foot][effect];
-            emitterId = dComIfGp_particle_set(
-                emitterId, effectIds[effect], &alink->current.pos, &alink->tevStr);
-            if (emitterId == 0) {
-                continue;
-            }
-            dComIfGp_particle_levelEmitterOnEventMove(emitterId);
-            JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(emitterId);
-            if (emitter != nullptr) {
-                emitter->setGlobalRTMatrix(footMatrix);
-            }
-        }
-    }
-}
-
 void update_hover_boots() {
     auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
     if (hoverBootsWaterWalkingEnabled()) {

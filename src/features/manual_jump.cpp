@@ -1,292 +1,576 @@
-bool g_manualJumpPendingR = false;
+DEFINE_HOOK(&daAlink_c::procFallInit, DisableAutoJumpFallInit);
+DEFINE_HOOK(&daAlink_c::procWolfFallInit, DisableAutoJumpWolfFallInit);
+DEFINE_HOOK(&daNbomb_c::procExplodeInit, DeferGlideBomblingExplode);
+DEFINE_HOOK(&daNbomb_c::procWait, GlideBomblingWait);
+
+#if TARGET_PC
+#include <SDL3/SDL_gamepad.h>
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+#endif
+
+struct AutoJumpFlagScope {
+    daAlink_c* link = nullptr;
+    bool added = false;
+    f32 forwardSpeed = 0.0f;
+    s16 moveAngle = 0;
+};
+
+thread_local std::vector<AutoJumpFlagScope> g_autoJumpFlagScopes;
+
+bool disable_auto_jump_ground_movement_proc(daAlink_c* link) {
+    switch (link->mProcID) {
+    case daAlink_c::PROC_GRAB_WAIT:
+        return !link->checkWolf() && link->checkGrabAnime() &&
+            link->mGrabItemAcKeep.getActor() != nullptr;
+    case daAlink_c::PROC_WAIT:
+    case daAlink_c::PROC_MOVE:
+    case daAlink_c::PROC_ATN_MOVE:
+    case daAlink_c::PROC_ATN_ACTOR_WAIT:
+    case daAlink_c::PROC_ATN_ACTOR_MOVE:
+    case daAlink_c::PROC_WAIT_TURN:
+    case daAlink_c::PROC_MOVE_TURN:
+    case daAlink_c::PROC_WOLF_WAIT:
+    case daAlink_c::PROC_WOLF_MOVE:
+    case daAlink_c::PROC_WOLF_DASH:
+    case daAlink_c::PROC_WOLF_WAIT_TURN:
+    case daAlink_c::PROC_WOLF_ATN_AC_MOVE:
+        return true;
+    default:
+        return false;
+    }
+}
+
+HookAction before_check_auto_jump_action(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    g_autoJumpFlagScopes.push_back({link});
+    if (!vanillaAutoJumpDisabled() || link == nullptr ||
+        link->mMode == daPy_py_c::SMODE_WOLF_PUZZLE ||
+        link->mProcID == daAlink_c::PROC_WOLF_GIANT_PUZZLE ||
+        link->checkPlayerDemoMode() || link->checkEventRun() ||
+        dComIfGp_event_runCheck() ||
+        link->checkEndResetFlg0(daPy_py_c::ERFLG0_FORCE_AUTO_JUMP) ||
+        link->checkEndResetFlg0(daPy_py_c::ERFLG0_NOT_AUTO_JUMP))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    link->onEndResetFlg0(daPy_py_c::ERFLG0_NOT_AUTO_JUMP);
+    AutoJumpFlagScope& scope = g_autoJumpFlagScopes.back();
+    scope.added = true;
+    scope.forwardSpeed = link->speedF;
+    scope.moveAngle = link->current.angle.y;
+    return HOOK_CONTINUE;
+}
+
+void after_check_auto_jump_action(ModContext*, void*, void*, void*) {
+    if (g_autoJumpFlagScopes.empty()) {
+        return;
+    }
+    const AutoJumpFlagScope scope = g_autoJumpFlagScopes.back();
+    g_autoJumpFlagScopes.pop_back();
+    if (scope.added && scope.link != nullptr) {
+        scope.link->mEndResetFlg0 &= ~daPy_py_c::ERFLG0_NOT_AUTO_JUMP;
+    }
+}
+
+HookAction preserve_sprint_speed_on_ledge_fall(
+    ModContext*, void* args, void*, void*)
+{
+    if (g_autoJumpFlagScopes.empty()) {
+        return HOOK_CONTINUE;
+    }
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    const AutoJumpFlagScope& scope = g_autoJumpFlagScopes.back();
+    if (link == nullptr || !scope.added || scope.link != link ||
+        mods::arg<int>(args, 1) != 1 || link->mLinkAcch.ChkGroundHit() ||
+        !disable_auto_jump_ground_movement_proc(link))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    mods::arg_ref<int>(args, 1) = 2;
+    link->mNormalSpeed = scope.forwardSpeed;
+    link->current.angle.y = scope.moveAngle;
+    link->speed.y = 0.0f;
+    return HOOK_CONTINUE;
+}
+
+bool g_manualJumpPendingPress = false;
 bool g_manualJumpLeftStickWasHeld = false;
 bool g_manualJumpRightStickWasHeld = false;
 bool g_manualJumpLeftStickTriggered = false;
 bool g_manualJumpRightStickTriggered = false;
 bool g_manualJumpLeftBumperWasHeld = false;
 bool g_manualJumpLeftBumperTriggered = false;
-bool g_manualJumpUiVisibilityFailureReported = false;
+bool g_droppingBomblingFromGlide = false;
+bool g_warnedMissingNativeButtonPoller = false;
+
+bool native_left_bumper_held() {
+#if TARGET_PC
+    using GetGamepadButton = bool (*)(SDL_Gamepad*, SDL_GamepadButton);
+    static GetGamepadButton getGamepadButton = [] {
+#if defined(_WIN32)
+        HMODULE module = GetModuleHandleA("SDL3.dll");
+        return module != nullptr
+            ? reinterpret_cast<GetGamepadButton>(
+                  GetProcAddress(module, "SDL_GetGamepadButton"))
+            : nullptr;
+#else
+        return reinterpret_cast<GetGamepadButton>(
+            dlsym(RTLD_DEFAULT, "SDL_GetGamepadButton"));
+#endif
+    }();
+    const s32 controllerIndex = PADGetIndexForPort(PAD_1);
+    SDL_Gamepad* controller = controllerIndex >= 0
+        ? PADGetSDLGamepadForIndex(static_cast<u32>(controllerIndex))
+        : nullptr;
+    if (getGamepadButton != nullptr && controller != nullptr) {
+        return getGamepadButton(controller, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    }
+    if (!g_warnedMissingNativeButtonPoller) {
+        svc_log->warn(mod_ctx, "could not poll the native left-shoulder button");
+        g_warnedMissingNativeButtonPoller = true;
+    }
+#endif
+    return false;
+}
+
+struct FallingBombling {
+    daNbomb_c* actor = nullptr;
+    u32 actorId = 0;
+};
+
+std::array<FallingBombling, 2> g_fallingBomblings{};
+daAlink_c* g_manualJumpOwner = nullptr;
+bool g_zSlotMidnaLeftTriggered = false;
+daAlink_c* g_midnaZTriggerOwner = nullptr;
+u8 g_midnaZTriggerPrevious = 0;
 
 void reset_manual_jump_input_state() {
-    g_manualJumpPendingR = false;
+    g_manualJumpPendingPress = false;
     g_manualJumpLeftStickWasHeld = false;
     g_manualJumpRightStickWasHeld = false;
     g_manualJumpLeftStickTriggered = false;
     g_manualJumpRightStickTriggered = false;
     g_manualJumpLeftBumperWasHeld = false;
     g_manualJumpLeftBumperTriggered = false;
+    g_manualJumpOwner = nullptr;
+    bow_aim::clear_manual_jump(nullptr);
 }
 
-bool manual_jump_l1_ui_blocked() {
-    bool documentVisible = false;
-    if (svc_ui->is_any_document_visible(mod_ctx, &documentVisible) != MOD_OK) {
-        if (!g_manualJumpUiVisibilityFailureReported) {
-            svc_log->warn(mod_ctx, "could not check Dusklight UI visibility for L1 manual jump");
-            g_manualJumpUiVisibilityFailureReported = true;
-        }
-        return true;
-    }
-
-    g_manualJumpUiVisibilityFailureReported = false;
-    return documentVisible;
+void capture_z_slot_midna_input(ModContext*, void*, void*, void*) {
+    g_zSlotMidnaLeftTriggered =
+        zItemSlotEnabled() && mDoCPd_c::getTrigLeft(PAD_1) != 0;
 }
 
-bool start_manual_cucco_glide(daAlink_c* alink) {
-    if (alink->mProcID == daAlink_c::PROC_FALL) {
-        if (!alink->procAutoJumpInit(1)) {
-            return false;
-        }
-        alink->speed.y = 0.0f;
-    } else if (alink->mProcID != daAlink_c::PROC_AUTO_JUMP) {
-        return false;
+HookAction route_midna_to_dpad_left(ModContext*, void* args, void*, void*) {
+    g_midnaZTriggerOwner = nullptr;
+    g_midnaZTriggerPrevious = 0;
+    if (!zItemSlotEnabled()) {
+        return HOOK_CONTINUE;
     }
 
-    auto* cucco = alink->mGrabItemAcKeep.getActor();
-    const bool isGoldCucco =
-        cucco != nullptr && fopAcM_GetName(cucco) == fpcNm_NI_e &&
-        static_cast<ni_class*>(cucco)->checkGold();
-    if (isGoldCucco) {
-        alink->mMaxSpeed = 30.0f;
-        alink->field_0x3478 = -10.0f;
-    } else if (alink->checkStageName("F_SP115")) {
-        alink->mMaxSpeed = 27.0f;
-        alink->field_0x3478 = -10.0f;
-    } else {
-        alink->mMaxSpeed = alink->mpHIO->mAutoJump.m.mCuccoJumpMaxSpeed;
-        alink->field_0x3478 = alink->mpHIO->mAutoJump.m.mCuccoFallMaxSpeed;
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink == nullptr || !g_zSlotMidnaLeftTriggered) {
+        return HOOK_SKIP_ORIGINAL;
     }
 
-    alink->mProcVar2.field_0x300c = 1;
-    alink->field_0x30a0 = 0x1800;
-    alink->setSpecialGravity(-1.0f, alink->field_0x3478, FALSE);
-    return true;
+    g_midnaZTriggerOwner = alink;
+    g_midnaZTriggerPrevious = alink->mItemTrigger & daAlink_c::BTN_Z;
+    alink->mItemTrigger |= daAlink_c::BTN_Z;
+    return HOOK_CONTINUE;
 }
 
-void restore_manual_glide_bow_slow_time();
-
-void clear_manual_glide_bow_aim(daAlink_c* alink) {
-    if (!g_manualGlideBowAiming) {
+void restore_midna_z_trigger(ModContext*, void* args, void*, void*) {
+    if (g_midnaZTriggerOwner == nullptr) {
         return;
     }
 
-    if (alink != nullptr) {
-        dComIfGp_offCameraAttentionStatus(alink->field_0x317c, 0x10);
-        alink->mBodyAngle.y = g_manualGlideBowBodyAngleY;
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink == g_midnaZTriggerOwner && g_midnaZTriggerPrevious == 0) {
+        alink->mItemTrigger &= static_cast<u8>(~daAlink_c::BTN_Z);
     }
-    dComIfGp_clearPlayerStatus0(0, 0x2000);
-    g_manualGlideBowAiming = false;
-    restore_manual_glide_bow_slow_time();
-    if (alink != nullptr) {
-        alink->setBowSight();
+    g_midnaZTriggerOwner = nullptr;
+    g_midnaZTriggerPrevious = 0;
+}
+
+void update_manual_jump_button_input(ModContext*, void*, void*, void*) {
+    const u32 extendedButtons = JUTGamePad::mPadStatus[PAD_1].extButton;
+    const bool leftStickHeld = (extendedButtons & PAD_BUTTON_LEFT_STICK) != 0;
+    const bool rightStickHeld = (extendedButtons & PAD_BUTTON_RIGHT_STICK) != 0;
+    const bool rPressed = mDoCPd_c::getTrigLockR(PAD_1) != 0;
+    const bool nativeLeftBumperHeld = native_left_bumper_held();
+    const bool leftBumperHeld = nativeLeftBumperHeld;
+    const bool leftBumperPressed =
+        nativeLeftBumperHeld && !g_manualJumpLeftBumperWasHeld;
+    bool documentVisible = false;
+    if (svc_ui->is_any_document_visible(mod_ctx, &documentVisible) != MOD_OK) {
+        if (!g_jumpInputVisibilityFailureReported) {
+            svc_log->warn(mod_ctx, "could not check Dusklight UI visibility for manual jump input");
+            g_jumpInputVisibilityFailureReported = true;
+        }
+        documentVisible = true;
+    } else {
+        g_jumpInputVisibilityFailureReported = false;
+    }
+
+    const bool blocked = dComIfGp_isPauseFlag() || documentVisible;
+    if (blocked) {
+        g_manualJumpPendingPress = false;
+        g_manualJumpLeftStickWasHeld = leftStickHeld;
+        g_manualJumpRightStickWasHeld = rightStickHeld;
+        g_manualJumpLeftBumperWasHeld = leftBumperHeld;
+        g_manualJumpLeftStickTriggered = false;
+        g_manualJumpRightStickTriggered = false;
+        g_manualJumpLeftBumperTriggered = false;
+        return;
+    }
+
+    g_manualJumpLeftStickTriggered = leftStickHeld && !g_manualJumpLeftStickWasHeld;
+    g_manualJumpRightStickTriggered = rightStickHeld && !g_manualJumpRightStickWasHeld;
+    g_manualJumpLeftBumperTriggered = leftBumperPressed;
+    bool selectedBindingPressed = false;
+    switch (manualJumpBinding()) {
+    case 0:
+        selectedBindingPressed = rPressed;
+        break;
+    case 1:
+        selectedBindingPressed = g_manualJumpLeftBumperTriggered;
+        break;
+    case 2:
+        selectedBindingPressed = g_manualJumpRightStickTriggered;
+        break;
+    case 3:
+        selectedBindingPressed = g_manualJumpLeftStickTriggered;
+        break;
+    default:
+        break;
+    }
+    g_manualJumpPendingPress = g_manualJumpPendingPress || selectedBindingPressed;
+    g_manualJumpLeftStickWasHeld = leftStickHeld;
+    g_manualJumpRightStickWasHeld = rightStickHeld;
+    g_manualJumpLeftBumperWasHeld = leftBumperHeld;
+}
+
+bool request_manual_glide(daAlink_c* alink) {
+    if (alink == nullptr || !glideEnabled() || g_manualGlideRetiring ||
+        g_manualGlideActorId != fpcM_ERROR_PROCESS_ID_e ||
+        alink->mGrabItemAcKeep.getActor() != nullptr)
+    {
+        return false;
+    }
+    if (s_manualJumpActorService == nullptr) {
+        svc_log->error(mod_ctx, "actor service is unavailable for the manual glide");
+        return false;
+    }
+
+    ActorSpawnParams params{};
+    params.parameters = 0;
+    params.argument = -1;
+    params.room_num = static_cast<int8_t>(fopAcM_GetRoomNo(alink));
+    params.position = {
+        alink->current.pos.x, alink->current.pos.y + 80.0f, alink->current.pos.z};
+    params.angle = {-1, alink->shape_angle.y, 0};
+    params.scale = {1.0f, 1.0f, 1.0f};
+    ActorId actorId = fpcM_ERROR_PROCESS_ID_e;
+    if (s_manualJumpActorService->create_actor(
+            mod_ctx, fpcNm_NI_e, &params, &actorId) != MOD_OK ||
+        actorId == fpcM_ERROR_PROCESS_ID_e)
+    {
+        svc_log->error(mod_ctx, "failed to create the glide Cucco actor");
+        return false;
+    }
+
+    g_manualGlideActorId = static_cast<fpc_ProcID>(actorId);
+    g_manualGlideLoadTicks = 0;
+    return true;
+}
+
+void retire_manual_glide_actor() {
+    if (g_manualGlideActorId == fpcM_ERROR_PROCESS_ID_e) {
+        g_manualGlideRetiring = false;
+        return;
+    }
+
+    auto* actor = fopAcM_SearchByID(g_manualGlideActorId);
+    if (actor != nullptr) {
+        fopAcM_delete(actor);
+        g_manualGlideActorId = fpcM_ERROR_PROCESS_ID_e;
+        g_manualGlideRetiring = false;
+    } else if (fpcM_IsCreating(g_manualGlideActorId)) {
+        g_manualGlideRetiring = true;
+    } else {
+        g_manualGlideActorId = fpcM_ERROR_PROCESS_ID_e;
+        g_manualGlideRetiring = false;
     }
 }
 
 void release_manual_cucco_glide(daAlink_c* alink) {
     g_manualCuccoGlideActive = false;
-    clear_manual_glide_bow_aim(alink);
-    alink->mProcVar2.field_0x300c = 0;
-    alink->setSpecialGravity(alink->mpHIO->mAutoJump.m.mGravity,
-                             alink->mpHIO->mAutoJump.m.mMaxFallSpeed, TRUE);
-    alink->resetUpperAnime(daAlink_c::UPPER_1, 3.0f);
-    alink->field_0x30a0 = 0;
-    alink->onModeFlg(4);
-}
-
-HookAction release_manual_cucco_glide_on_a(
-    ModContext*, void* args, void*, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (g_manualCuccoGlideActive && alink != nullptr &&
-        alink == dComIfGp_getLinkPlayer() &&
-        (alink->mItemTrigger & daAlink_c::BTN_A) != 0)
+    g_manualGlideLoadTicks = 0;
+    auto* actor = g_manualGlideActorId == fpcM_ERROR_PROCESS_ID_e
+        ? nullptr : fopAcM_SearchByID(g_manualGlideActorId);
+    if (alink != nullptr && actor != nullptr &&
+        alink->mGrabItemAcKeep.getActor() == actor)
     {
-        alink->mItemTrigger &= static_cast<u8>(~daAlink_c::BTN_A);
-        release_manual_cucco_glide(alink);
+        alink->freeGrabItem();
     }
-    return HOOK_CONTINUE;
+    if (alink != nullptr && alink->mpHIO != nullptr) {
+        alink->mProcVar2.field_0x300c = 0;
+        alink->setSpecialGravity(alink->mpHIO->mAutoJump.m.mGravity,
+                                 alink->mpHIO->mAutoJump.m.mMaxFallSpeed, TRUE);
+        alink->resetUpperAnime(daAlink_c::UPPER_1, 3.0f);
+        alink->field_0x30a0 = 0;
+        alink->onModeFlg(4);
+    }
+    retire_manual_glide_actor();
 }
 
-HookAction emulate_manual_cucco_glide_check(
-    ModContext*, void* args, void* retval, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (g_manualCuccoGlideActive && alink != nullptr &&
-        alink == dComIfGp_getLinkPlayer() &&
-        alink->mProcID == daAlink_c::PROC_AUTO_JUMP &&
-        !alink->mLinkAcch.ChkGroundHit())
+u8 item_button_mask(int button) {
+    switch (button) {
+    case 0:
+        return daAlink_c::BTN_X;
+    case 1:
+        return daAlink_c::BTN_Y;
+    default:
+        return daAlink_c::BTN_Z;
+    }
+}
+
+bool track_falling_bombling(daNbomb_c* bomb);
+
+bool drop_bomb_during_manual_glide(daAlink_c* alink, int button, u8 itemId) {
+    if (alink == nullptr || !alink->checkBombItem(itemId) ||
+        dComIfGp_getSelectItemNum(button) <= 0)
     {
-        *static_cast<BOOL*>(retval) = TRUE;
-        return HOOK_SKIP_ORIGINAL;
+        return false;
     }
-    return HOOK_CONTINUE;
-}
 
-HookAction suspend_manual_glide_bow_movement_input(
-    ModContext*, void* args, void*, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (g_manualGlideBowAiming && alink != nullptr &&
-        alink == dComIfGp_getLinkPlayer())
+    if ((itemId == dItemNo_NORMAL_BOMB_e || itemId == dItemNo_WATER_BOMB_e) &&
+        alink->mActiveBombNum >= 3)
     {
-        g_manualGlideBowMoveValue = alink->mMoveValue;
-        alink->mMoveValue = 0.0f;
+        return false;
     }
-    return HOOK_CONTINUE;
+    if (itemId == dItemNo_POKE_BOMB_e && alink->field_0x2fcf >= 2) {
+        return false;
+    }
+
+    cXyz dropPosition = alink->current.pos;
+    dropPosition.y -= 30.0f;
+    fopAc_ac_c* bomb = nullptr;
+    if (itemId == dItemNo_NORMAL_BOMB_e) {
+        bomb = dBomb_c::createNormalBombPlayer(&dropPosition);
+    } else if (itemId == dItemNo_WATER_BOMB_e) {
+        bomb = dBomb_c::createWaterBombPlayer(&dropPosition);
+    } else if (itemId == dItemNo_POKE_BOMB_e) {
+        g_droppingBomblingFromGlide = true;
+        bomb = dBomb_c::createInsectBombPlayer(&dropPosition);
+        g_droppingBomblingFromGlide = false;
+    }
+
+    if (bomb == nullptr || fopAcM_GetName(bomb) != fpcNm_NBOMB_e) {
+        svc_log->error(mod_ctx, "failed to drop a bomb from the manual glide");
+        const u8 buttonMask = item_button_mask(button);
+        alink->mItemTrigger &= static_cast<u8>(~buttonMask);
+        alink->mItemButton &= static_cast<u8>(~buttonMask);
+        g_secondaryItemInputHandled = true;
+        return true;
+    }
+
+    bomb->speedF = 0.0f;
+    bomb->speed.set(0.0f, 0.0f, 0.0f);
+    if (itemId == dItemNo_POKE_BOMB_e) {
+        auto* bombling = static_cast<daNbomb_c*>(bomb);
+        bombling->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
+        const bool tracked = track_falling_bombling(bombling);
+        const bool waiting = bombling->procWaitInit();
+        if (!tracked || !waiting) {
+            svc_log->error(mod_ctx, "failed to initialize a falling Bombling");
+        }
+        ++alink->field_0x2fcf;
+    } else {
+        ++alink->mActiveBombNum;
+    }
+    alink->mSelectItemId = static_cast<u8>(button);
+    dComIfGp_addSelectItemNum(button, -1);
+    const u8 buttonMask = item_button_mask(button);
+    alink->mItemTrigger &= static_cast<u8>(~buttonMask);
+    alink->mItemButton &= static_cast<u8>(~buttonMask);
+    g_secondaryItemInputHandled = true;
+    return true;
 }
 
-void update_manual_glide_bow_aim(ModContext*, void* args, void*, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (alink == nullptr || alink != dComIfGp_getLinkPlayer()) {
+bool track_falling_bombling(daNbomb_c* bomb) {
+    if (bomb == nullptr) return false;
+    const u32 actorId = fopAcM_GetID(bomb);
+    for (FallingBombling& falling : g_fallingBomblings) {
+        if (falling.actor == bomb && falling.actorId == actorId) return true;
+        if (falling.actor != nullptr &&
+            fopAcM_SearchByID(falling.actorId) != falling.actor)
+        {
+            falling = {};
+        }
+    }
+    for (FallingBombling& falling : g_fallingBomblings) {
+        if (falling.actor == nullptr) {
+            falling = {bomb, actorId};
+            return true;
+        }
+    }
+    return false;
+}
+
+FallingBombling* falling_bombling(daNbomb_c* bomb) {
+    if (bomb == nullptr) return nullptr;
+    const u32 actorId = fopAcM_GetID(bomb);
+    for (FallingBombling& falling : g_fallingBomblings) {
+        if (falling.actor == bomb && falling.actorId == actorId) return &falling;
+    }
+    return nullptr;
+}
+
+HookAction defer_glide_bombling_explode(
+    ModContext* context, void* args, void* retval, void*)
+{
+    auto* bomb = mods::arg<daNbomb_c*>(args, 0);
+    if (!g_droppingBomblingFromGlide || bomb == nullptr ||
+        fopAcM_GetParam(bomb) != dBomb_c::PRM_INSECT_BOMB_PLAYER ||
+        !track_falling_bombling(bomb))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    bomb->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
+    if (!bomb->procWaitInit()) {
+        for (FallingBombling& falling : g_fallingBomblings) {
+            if (falling.actor == bomb && falling.actorId == fopAcM_GetID(bomb)) {
+                falling = {};
+                break;
+            }
+        }
+        svc_log->error(context, "failed to initialize a falling Bombling");
+        return HOOK_CONTINUE;
+    }
+    if (retval != nullptr) *static_cast<BOOL*>(retval) = TRUE;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+void finish_glide_bombling_fall(ModContext*, void* args, void*, void*) {
+    auto* bomb = mods::arg<daNbomb_c*>(args, 0);
+    FallingBombling* falling = falling_bombling(bomb);
+    if (falling == nullptr) return;
+
+    if (bomb->checkStateFlg0(daNbomb_c::FLG0_DELETE_BOMB)) {
+        *falling = {};
         return;
     }
+    if (!bomb->mAcch.ChkGroundHit()) return;
 
-    if (g_manualGlideBowAiming) {
-        alink->mMoveValue = g_manualGlideBowMoveValue;
+    bomb->onStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
+    if (!bomb->procInsectMoveInit()) {
+        bomb->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
+        svc_log->error(mod_ctx, "failed to start Bombling behavior after landing");
     }
-
-    const bool aimingBow = g_manualCuccoGlideActive &&
-        alink->mProcID == daAlink_c::PROC_AUTO_JUMP &&
-        alink->checkBowAndSlingItem(alink->mEquipItem) &&
-        alink->checkBowAnime();
-    if (!aimingBow) {
-        clear_manual_glide_bow_aim(alink);
-        return;
-    }
-
-    if (!g_manualGlideBowAiming) {
-        g_manualGlideBowBodyAngleY = alink->mBodyAngle.y;
-        g_manualGlideBowAiming = true;
-        dComIfGp_onCameraAttentionStatus(alink->field_0x317c, 0x10);
-        alink->setSubjectMode();
-    }
-
-    const s16 facingAngle = alink->shape_angle.y;
-    alink->shape_angle.y = alink->field_0x310c;
-    alink->mBodyAngle.y = g_manualGlideBowBodyAngleY;
-    alink->setBodyAngleToCamera();
-    const s16 aimingAngle = alink->shape_angle.y;
-    alink->shape_angle.y = facingAngle;
-    alink->mBodyAngle.y = static_cast<s16>(aimingAngle - facingAngle);
-    alink->field_0x310c = aimingAngle;
-    alink->setBowSight();
+    *falling = {};
 }
-
-HookAction enable_manual_glide_arrow_aim(
-    ModContext*, void*, void*, void*) {
-    auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
-    if (g_manualGlideBowAiming && alink != nullptr &&
-        !dComIfGp_checkPlayerStatus0(0, 0x200000))
-    {
-        dComIfGp_setPlayerStatus0(0, 0x200000);
-        g_manualGlideArrowAimStatusAdded = true;
-    }
-    return HOOK_CONTINUE;
-}
-
-void restore_manual_glide_arrow_aim(ModContext*, void*, void*, void*) {
-    if (g_manualGlideArrowAimStatusAdded) {
-        dComIfGp_clearPlayerStatus0(0, 0x200000);
-        g_manualGlideArrowAimStatusAdded = false;
-    }
-}
-
-HookAction allow_manual_glide_bow_pitch(
-    ModContext*, void*, void* retval, void*) {
-    if (g_manualGlideBowAiming) {
-        *static_cast<BOOL*>(retval) = FALSE;
-        return HOOK_SKIP_ORIGINAL;
-    }
-    return HOOK_CONTINUE;
-}
-
-HookAction preserve_manual_glide_bow_pitch(
-    ModContext*, void* args, void*, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (g_manualGlideBowAiming && alink != nullptr &&
-        alink == dComIfGp_getLinkPlayer() &&
-        alink->mProcID == daAlink_c::PROC_AUTO_JUMP)
-    {
-        return HOOK_SKIP_ORIGINAL;
-    }
-    return HOOK_CONTINUE;
-}
-
-#if TARGET_PC
-HookAction enable_manual_glide_bow_aim_context(
-    ModContext*, void*, void* retval, void*) {
-    if (g_manualGlideBowAiming) {
-        *static_cast<bool*>(retval) = true;
-        return HOOK_SKIP_ORIGINAL;
-    }
-    return HOOK_CONTINUE;
-}
-#endif
 
 void update_manual_cucco_glide(daAlink_c* alink) {
-    if (g_manualCuccoGlideActive &&
-        manualJumpBinding() == kManualJumpDisabled &&
-        alink != nullptr && !alink->checkEventRun() && !alink->checkWolf() &&
-        alink->mProcID == daAlink_c::PROC_AUTO_JUMP)
+    if (g_manualGlideRetiring) {
+        retire_manual_glide_actor();
+        return;
+    }
+    if (g_manualGlideActorId == fpcM_ERROR_PROCESS_ID_e) {
+        g_manualCuccoGlideActive = false;
+        return;
+    }
+
+    if (alink == nullptr || alink->mpHIO == nullptr || !glideEnabled() ||
+        alink->checkEventRun() || dComIfGp_event_runCheck() || alink->checkWolf() ||
+        alink->mLinkAcch.ChkGroundHit() ||
+        (alink->mProcID != daAlink_c::PROC_AUTO_JUMP &&
+         alink->mProcID != daAlink_c::PROC_FALL))
     {
         release_manual_cucco_glide(alink);
-    }
-
-    if (g_manualCuccoGlideActive &&
-        (alink == nullptr || alink->checkEventRun() || alink->checkWolf() ||
-         alink->mLinkAcch.ChkGroundHit() ||
-         alink->mProcID != daAlink_c::PROC_AUTO_JUMP ||
-         alink->mProcVar2.field_0x300c == 0))
-    {
-        g_manualCuccoGlideActive = false;
-        clear_manual_glide_bow_aim(alink);
-    }
-}
-
-void update_manual_glide_bow_slow_time() {
-    if (!g_manualCuccoGlideActive || !g_manualGlideBowAiming) {
-        restore_manual_glide_bow_slow_time();
         return;
     }
 
-    const int64_t slowdownPercent = glideBowSlowTimePercent();
-    if (slowdownPercent == 0) {
-        restore_manual_glide_bow_slow_time();
+    auto* actor = fopAcM_SearchByID(g_manualGlideActorId);
+    if (actor == nullptr) {
+        if (++g_manualGlideLoadTicks > 90 || !fpcM_IsCreating(g_manualGlideActorId)) {
+            svc_log->warn(mod_ctx, "glide Cucco did not finish loading; cancelling glide");
+            release_manual_cucco_glide(alink);
+        }
         return;
     }
 
-    if (!g_manualGlideSlowTimeScaleActive) {
-        g_manualGlidePreviousTimeScale = aurora_get_timescale();
-        g_manualGlideSlowTimeScaleActive = true;
-    }
+    if (alink->mGrabItemAcKeep.getActor() != actor) {
+        if (alink->mGrabItemAcKeep.getActor() != nullptr) {
+            release_manual_cucco_glide(alink);
+            return;
+        }
 
-    const f32 timeScale =
-        g_manualGlidePreviousTimeScale *
-        (1.0f - static_cast<f32>(slowdownPercent) / 100.0f);
-    aurora_set_timescale(timeScale);
+        const f32 fallHeight = alink->mFallHeight;
+        const f32 verticalSpeed = alink->speed.y;
+        const f32 horizontalSpeed = alink->mNormalSpeed;
+        alink->deleteEquipItem(TRUE, FALSE);
+        if (alink->mProcID != daAlink_c::PROC_AUTO_JUMP) {
+            alink->commonProcInit(daAlink_c::PROC_AUTO_JUMP);
+        }
+        alink->setGrabItemActor(actor);
+        alink->field_0x33e4 = 38.0f;
+        alink->setGrabUpperAnime(3.0f);
+        alink->mMaxSpeed = alink->mpHIO->mAutoJump.m.mCuccoJumpMaxSpeed;
+        alink->field_0x3478 = alink->mpHIO->mAutoJump.m.mCuccoFallMaxSpeed;
+        alink->mProcVar0.field_0x3008 = 0;
+        alink->mProcVar2.field_0x300c = 1;
+        alink->field_0x3198 = 0x33;
+        alink->field_0x2f99 = 0x20;
+        alink->offModeFlg(4);
+        alink->setSingleAnimeBaseSpeed(daAlink_c::ANM_JUMP_LAND, 0, 3.0f);
+        alink->setUpperAnime(dRes_ID_ALANM_BCK_WALKHBS_e, daAlink_c::UPPER_1, 1, 0, -1, 3);
+        alink->setSpecialGravity(-1.0f, alink->field_0x3478, FALSE);
+        alink->speed.y = std::max(verticalSpeed, alink->field_0x3478);
+        alink->mNormalSpeed = horizontalSpeed;
+        alink->mFallHeight = fallHeight;
+        actor->current.pos = alink->current.pos + cXyz(0, 80, 0);
+        actor->old.pos = actor->current.pos;
+        alink->setGrabItemPos();
+        g_manualCuccoGlideActive = true;
+    }
 }
 
-void restore_manual_glide_bow_slow_time() {
-    if (g_manualGlideSlowTimeScaleActive) {
-        aurora_set_timescale(g_manualGlidePreviousTimeScale);
-        g_manualGlideSlowTimeScaleActive = false;
-    }
-}
-
-bool manual_jump_binding_triggered(int64_t binding, bool pendingRPress) {
+bool manual_jump_binding_triggered(int64_t binding, bool pendingPress) {
     switch (binding) {
+    case 0:
+        return pendingPress || mDoCPd_c::getTrigLockR(PAD_1) != 0;
     case 1:
-        return mDoCPd_c::getTrigA(PAD_1) != 0;
+        return pendingPress || g_manualJumpLeftBumperTriggered;
     case 2:
-        return mDoCPd_c::getTrigB(PAD_1) != 0;
+        return pendingPress || g_manualJumpRightStickTriggered;
     case 3:
-        return g_manualJumpLeftBumperTriggered && !manual_jump_l1_ui_blocked();
-    case 4:
-        return pendingRPress || mDoCPd_c::getTrigLockR(PAD_1) != 0;
-    case 5:
-        return mDoCPd_c::getTrigZ(PAD_1) != 0;
-    case 6:
-        return g_manualJumpLeftStickTriggered;
-    case 7:
-        return g_manualJumpRightStickTriggered;
-    case 8:
-        return mDoCPd_c::getTrigL(PAD_1) != 0;
+        return pendingPress || g_manualJumpLeftStickTriggered;
+    default:
+        return false;
+    }
+}
+
+bool manual_jump_binding_held(int64_t binding) {
+    switch (binding) {
+    case 0:
+        return mDoCPd_c::getHoldLockR(PAD_1) != 0;
+    case 1:
+        return g_manualJumpLeftBumperWasHeld;
+    case 2:
+        return g_manualJumpRightStickWasHeld;
+    case 3:
+        return g_manualJumpLeftStickWasHeld;
     default:
         return false;
     }
@@ -294,19 +578,46 @@ bool manual_jump_binding_triggered(int64_t binding, bool pendingRPress) {
 
 int manual_jump_binding_button_mask(int64_t binding) {
     switch (binding) {
-    case 1:
-        return daAlink_c::BTN_A;
-    case 2:
-        return daAlink_c::BTN_B;
-    case 4:
+    case 0:
         return daAlink_c::BTN_R;
-    case 5:
-        return daAlink_c::BTN_Z;
-    case 8:
-        return daAlink_c::BTN_L;
     default:
         return 0;
     }
+}
+
+bool manual_jump_r_action_context_active(daAlink_c* alink) {
+    const u8 statuses[] = {
+        dComIfGp_getDoStatus(), dComIfGp_getDoStatusForce(),
+        dComIfGp_getRStatus(), dComIfGp_getRStatusForce()};
+    for (const u8 status : statuses) {
+        switch (status) {
+        case BUTTON_STATUS_ENTER:
+        case BUTTON_STATUS_GRAB:
+        case BUTTON_STATUS_PULL_DOWN:
+        case BUTTON_STATUS_PUSH:
+        case BUTTON_STATUS_RESIST:
+        case BUTTON_STATUS_STRIKE:
+        case BUTTON_STATUS_PULL:
+        case BUTTON_STATUS_HOLD_ON:
+        case BUTTON_STATUS_UNK_123:
+        case BUTTON_STATUS_UNK_150:
+        case BUTTON_STATUS_UNK_153:
+            return true;
+        default:
+            break;
+        }
+    }
+    if (alink->mAttention != nullptr && alink->checkAttentionLock()) return true;
+    if (alink->mTargetedActor != nullptr) return true;
+    if (alink->checkFmChainGrabAnime()) return true;
+
+    const u8 previousChainSlot = alink->field_0x2fa3;
+    const bool chainAvailable = alink->searchFmChainPos() != 0;
+    alink->field_0x2fa3 = previousChainSlot;
+    if (chainAvailable) return true;
+
+    alink->setFrontWallType();
+    return alink->checkResetFlg0(daPy_py_c::RFLG0_UNK_8) != 0;
 }
 
 bool get_vanilla_standing_jump_height(daAlink_c* alink, f32* outHeight) {
@@ -334,7 +645,7 @@ bool get_vanilla_standing_jump_height(daAlink_c* alink, f32* outHeight) {
     return true;
 }
 
-bool update_hover_plane_lowering(daAlink_c* alink, bool pendingRPress) {
+bool update_hover_plane_lowering(daAlink_c* alink, bool pendingJumpPress) {
     const bool held = hoverPlaneLowerBindingHeld(hoverPlaneLowerBinding());
     const bool pressed = held && !g_hoverPlaneLowerBindingWasHeld;
     g_hoverPlaneLowerBindingWasHeld = held;
@@ -376,8 +687,8 @@ bool update_hover_plane_lowering(daAlink_c* alink, bool pendingRPress) {
 
     const int64_t jumpBinding = manualJumpBinding();
     const bool raisePressed =
-        shieldSurfing && jumpBinding != kManualJumpDisabled &&
-        manual_jump_binding_triggered(jumpBinding, pendingRPress);
+        shieldSurfing && manualJumpEnabled() &&
+        manual_jump_binding_triggered(jumpBinding, pendingJumpPress);
     if (!pressed && !raisePressed) {
         return false;
     }
@@ -456,84 +767,415 @@ bool manual_jump_ground_action_ready(const daAlink_c* alink) {
     if (alink->checkWolf()) {
         return alink->mProcID == daAlink_c::PROC_WOLF_WAIT ||
                alink->mProcID == daAlink_c::PROC_WOLF_MOVE ||
-               alink->mProcID == daAlink_c::PROC_WOLF_WAIT_SLIP ||
+               alink->mProcID == daAlink_c::PROC_WOLF_DASH ||
                alink->mProcID == daAlink_c::PROC_WOLF_WAIT_TURN ||
-               alink->mProcID == daAlink_c::PROC_WOLF_TIRED_WAIT;
+               alink->mProcID == daAlink_c::PROC_WOLF_ATN_AC_MOVE;
+    }
+
+    if (alink->mProcID == daAlink_c::PROC_GRAB_WAIT) {
+        return alink->checkGrabAnime() &&
+               alink->mGrabItemAcKeep.getActor() != nullptr;
     }
 
     return alink->mProcID == daAlink_c::PROC_WAIT ||
-           alink->mProcID == daAlink_c::PROC_MOVE;
+           alink->mProcID == daAlink_c::PROC_MOVE ||
+           alink->mProcID == daAlink_c::PROC_ATN_MOVE ||
+           alink->mProcID == daAlink_c::PROC_ATN_ACTOR_WAIT ||
+           alink->mProcID == daAlink_c::PROC_ATN_ACTOR_MOVE ||
+           alink->mProcID == daAlink_c::PROC_WAIT_TURN ||
+           alink->mProcID == daAlink_c::PROC_MOVE_TURN;
 }
 
-bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
+bool manual_jump_ground_context_ready(
+    daAlink_c* alink, bool hoverSurface = false, bool sprinting = false)
+{
+    if (alink == nullptr || !manual_jump_ground_action_ready(alink)) return false;
+
+    auto* heldActor = alink->mGrabItemAcKeep.getActor();
+    const bool humanCarrying = !alink->checkWolf() && alink->checkGrabAnime() &&
+                               heldActor != nullptr;
+    const bool wolfCarrying = alink->checkWolf() && alink->checkWolfGrabAnime() &&
+                              heldActor != nullptr;
+    const bool carrying = humanCarrying || wolfCarrying;
+    return (hoverSurface || alink->mGndPolyAtt1 != 0xFF) &&
+           !alink->checkFlyAtnWait() &&
+           !alink->checkModeFlg(0x70C12) &&
+           alink->mProcID != daAlink_c::PROC_DOOR_OPEN &&
+           alink->mProcID != daAlink_c::PROC_WARP &&
+           !alink->getSumouMode() && !alink->checkPlayerDemoMode() &&
+           !alink->checkEventRun() && !dComIfGp_event_runCheck() &&
+           (hoverSurface ||
+            (!alink->checkMagneBootsFly() && !alink->checkMagneBootsOn())) &&
+           !alink->checkNotJumpSinkLimit() &&
+           (!alink->checkGrabAnime() || humanCarrying) &&
+           (!alink->checkWolf() || !alink->checkWolfGrabAnime() || wolfCarrying) &&
+           (heldActor == nullptr || carrying) &&
+           (hoverSurface || alink->mLinkAcch.ChkGroundHit()) &&
+           (!manual_jump_r_action_context_active(alink) || sprinting);
+}
+
+enum class RevaliGaleState : u8 {
+    Idle,
+    Airborne,
+    Crouching,
+};
+
+void apply_manual_jump_movement(daAlink_c* alink);
+
+struct RevaliGaleCharge {
+    daAlink_c* owner = nullptr;
+    RevaliGaleState state = RevaliGaleState::Idle;
+    f32 launchSpeed = 0.0f;
+    s16 launchAngle = 0;
+    u32 crouchTicks = 0;
+};
+
+RevaliGaleCharge g_revaliGaleCharge{};
+int64_t g_revaliGaleCharges = 0;
+int64_t g_revaliGaleObservedCapacity = 0;
+std::chrono::steady_clock::time_point g_revaliGaleNextRecovery{};
+
+struct RevaliGaleVisual {
+    JKRSolidHeap* heap = nullptr;
+    J3DModel* model = nullptr;
+    mDoExt_bckAnm motion;
+    mDoExt_btkAnm texture;
+    cXyz origin{0, 0, 0};
+    int ticks = 0;
+    bool readyLoop = false;
+    bool failed = false;
+
+    bool prepare() {
+        if (model != nullptr) return true;
+        if (failed) return false;
+        auto* data = static_cast<J3DModelData*>(
+            dComIfG_getObjectRes(daAlink_c::getAlinkArcName(), 0x34));
+        auto* bck = static_cast<J3DAnmTransform*>(
+            dComIfG_getObjectRes(daAlink_c::getAlinkArcName(), 0x13));
+        auto* btk = static_cast<J3DAnmTextureSRTKey*>(
+            dComIfG_getObjectRes(daAlink_c::getAlinkArcName(), 0x48));
+        if (data == nullptr || bck == nullptr || btk == nullptr ||
+            data->getJointNum() > 32)
+        {
+            return false;
+        }
+        heap = mDoExt_createSolidHeapFromGame(0x20000, 0x20);
+        if (heap != nullptr) {
+            auto* previous = mDoExt_setCurrentHeap(heap);
+            model = mDoExt_J3DModel__create(data, 0, 0x11000284);
+            const bool ready = model != nullptr &&
+                motion.init(bck, TRUE, J3DFrameCtrl::EMode_LOOP, 1, 0, -1, false) &&
+                texture.init(data, btk, TRUE, J3DFrameCtrl::EMode_LOOP, 1, 0, -1);
+            mDoExt_setCurrentHeap(previous);
+            if (ready) {
+                mDoExt_adjustSolidHeap(heap);
+                return true;
+            }
+            mDoExt_destroySolidHeap(heap);
+            heap = nullptr;
+            model = nullptr;
+        }
+        failed = true;
+        if (svc_log != nullptr) {
+            svc_log->warn(mod_ctx, "Revali's Gale: could not prepare the native wind model");
+        }
+        return false;
+    }
+
+    void launch(const cXyz& position) {
+        stop_ready();
+        origin = position;
+        if (prepare()) {
+            ticks = 60;
+            motion.setFrame(0);
+            texture.setFrame(0);
+        }
+    }
+
+    void hold_ready(const cXyz& position) {
+        origin = position;
+        if (readyLoop || !prepare()) return;
+        readyLoop = true;
+        ticks = 0;
+        motion.setFrame(0);
+        texture.setFrame(0);
+        Z2GetAudioMgr()->seStartLevel(
+            Z2SE_BOOM_TORNADO, &origin, 0, 0, 1, 1, -1, -1, 0);
+    }
+
+    void stop_ready() {
+        readyLoop = false;
+    }
+
+    void update() {
+        if (!readyLoop && ticks <= 0) return;
+        if (!readyLoop) --ticks;
+        motion.play();
+        texture.play();
+        Z2GetAudioMgr()->seStartLevel(
+            Z2SE_BOOM_TORNADO, &origin, 0, 0, 1, 1, -1, -1, 0);
+    }
+
+    void draw(daAlink_c* alink) {
+        if (model == nullptr || (!readyLoop && ticks <= 0) || alink == nullptr) return;
+        const f32 fade = readyLoop ? 1.0f : std::min(1.0f, ticks / 15.0f);
+        const f32 height = readyLoop ? 0.1f : 2.5f;
+        model->setBaseScale(cXyz(2.0f * fade, height * fade, 2.0f * fade));
+        mDoMtx_stack_c::transS(
+            origin.x, origin.y + 60.0f * height * fade, origin.z);
+        model->setBaseTRMtx(mDoMtx_stack_c::get());
+        auto* data = model->getModelData();
+        J3DJointCallBack callbacks[32]{};
+        for (u32 i = 0; i < data->getJointNum(); ++i) {
+            auto* joint = data->getJointNodePointer(i);
+            callbacks[i] = joint->getCallBack();
+            joint->setCallBack(nullptr);
+        }
+        auto* root = data->getJointNodePointer(0);
+        auto* previousCalc = root->getMtxCalc();
+        const f32 previousBckFrame = motion.getBckAnm()->getFrame();
+        const f32 previousBtkFrame = texture.getBtkAnm()->getFrame();
+        motion.entry(data);
+        texture.entry(data);
+        g_env_light.setLightTevColorType_MAJI(model, &alink->tevStr);
+        mDoExt_modelUpdateDL(model);
+        root->setMtxCalc(previousCalc);
+        motion.getBckAnm()->setFrame(previousBckFrame);
+        texture.getBtkAnm()->setFrame(previousBtkFrame);
+        for (u32 i = 0; i < data->getJointNum(); ++i) {
+            data->getJointNodePointer(i)->setCallBack(callbacks[i]);
+        }
+    }
+
+    void release() {
+        stop_ready();
+        ticks = 0;
+        model = nullptr;
+        if (heap != nullptr) mDoExt_destroySolidHeap(heap);
+        heap = nullptr;
+        failed = false;
+    }
+};
+
+RevaliGaleVisual g_revaliGaleVisual{};
+daAlink_c* g_revaliGaleVisualOwner = nullptr;
+
+void update_revali_gale_visual(ModContext*, void* args, void*, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink != g_revaliGaleVisualOwner) {
+        g_revaliGaleVisual.release();
+        g_revaliGaleVisualOwner = alink;
+    }
+    if (alink == nullptr || alink->checkEventRun() ||
+        dComIfGp_event_runCheck() || dComIfGp_isPauseFlag() ||
+        dComIfGp_isEnableNextStage())
+    {
+        g_revaliGaleVisual.stop_ready();
+        g_revaliGaleVisual.ticks = 0;
+        return;
+    }
+    g_revaliGaleVisual.update();
+}
+
+void draw_revali_gale_visual(ModContext*, void* args, void*, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink == g_revaliGaleVisualOwner) {
+        g_revaliGaleVisual.draw(alink);
+    }
+}
+
+void update_revali_gale_charges() {
+    const auto now = std::chrono::steady_clock::now();
+    const int64_t capacity = galeChargeCapacity();
+    if (g_revaliGaleObservedCapacity == 0) {
+        g_revaliGaleCharges = capacity;
+        g_revaliGaleObservedCapacity = capacity;
+    } else if (capacity != g_revaliGaleObservedCapacity) {
+        g_revaliGaleCharges = std::clamp(
+            g_revaliGaleCharges + capacity - g_revaliGaleObservedCapacity,
+            int64_t{0}, capacity);
+        g_revaliGaleObservedCapacity = capacity;
+    }
+
+    if (g_revaliGaleCharges >= capacity) {
+        g_revaliGaleNextRecovery = {};
+        return;
+    }
+    if (g_revaliGaleNextRecovery == std::chrono::steady_clock::time_point{}) {
+        g_revaliGaleNextRecovery = now +
+            std::chrono::seconds(galeRecoverySeconds());
+    }
+    while (now >= g_revaliGaleNextRecovery && g_revaliGaleCharges < capacity) {
+        ++g_revaliGaleCharges;
+        g_revaliGaleNextRecovery += std::chrono::seconds(galeRecoverySeconds());
+    }
+    if (g_revaliGaleCharges >= capacity) {
+        g_revaliGaleNextRecovery = {};
+    }
+}
+
+void cancel_revali_gale(daAlink_c* alink, bool restorePose) {
+    const bool wasCrouching = g_revaliGaleCharge.state == RevaliGaleState::Crouching;
+    g_revaliGaleCharge = {};
+    g_revaliGaleVisual.stop_ready();
+    if (restorePose && wasCrouching && alink != nullptr &&
+        alink->mProcID == daAlink_c::PROC_CROUCH)
+    {
+        alink->procWaitInit();
+    }
+}
+
+bool launch_revali_gale(daAlink_c* alink, int buttonMask) {
+    if (alink == nullptr || g_revaliGaleCharges <= 0 ||
+        !alink->procAutoJumpInit(1))
+    {
+        cancel_revali_gale(alink, true);
+        return false;
+    }
+
+    const cXyz origin = alink->current.pos;
+    const f32 launchSpeed = g_revaliGaleCharge.launchSpeed;
+    const s16 launchAngle = g_revaliGaleCharge.launchAngle;
+    --g_revaliGaleCharges;
+    g_revaliGaleNextRecovery = g_revaliGaleCharges < galeChargeCapacity()
+        ? std::chrono::steady_clock::now() +
+              std::chrono::seconds(galeRecoverySeconds())
+        : std::chrono::steady_clock::time_point{};
+    g_revaliGaleCharge = {};
+    apply_manual_jump_movement(alink);
+    alink->mNormalSpeed = launchSpeed;
+    alink->speedF = launchSpeed;
+    alink->mMaxSpeed = std::max(alink->mMaxSpeed, launchSpeed);
+    alink->shape_angle.y = launchAngle;
+    alink->current.angle.y = launchAngle;
+    const f32 totalHeightPercent =
+        static_cast<f32>(manualJumpHeightPercent() + galeHeightPercent());
+    alink->speed.y *= std::sqrt(totalHeightPercent / 100.0f);
+    alink->mItemTrigger &= static_cast<u8>(~buttonMask);
+    g_manualJumpOwner = alink;
+    bow_aim::mark_manual_jump_started(alink);
+    g_revaliGaleVisual.launch(origin);
+    return true;
+}
+
+bool update_revali_gale_charge(daAlink_c* alink) {
+    constexpr u32 kGaleChargeReadyTicks = 30;
+    update_revali_gale_charges();
+    if (g_revaliGaleCharge.state == RevaliGaleState::Idle) {
+        return false;
+    }
+    if (alink == nullptr || alink != g_revaliGaleCharge.owner ||
+        !manualJumpEnabled() || !revalisGaleEnabled() || alink->checkWolf() ||
+        alink->checkEventRun() || dComIfGp_event_runCheck() ||
+        dComIfGp_isEnableNextStage() || dComIfGp_isPauseFlag())
+    {
+        cancel_revali_gale(alink, true);
+        return false;
+    }
+
+    constexpr u32 kFaceButtons = PAD_BUTTON_A | PAD_BUTTON_B | PAD_BUTTON_X | PAD_BUTTON_Y;
+    if ((mDoCPd_c::getTrig(PAD_1) & kFaceButtons) != 0) {
+        cancel_revali_gale(alink, true);
+        return false;
+    }
+
+    const bool held = manual_jump_binding_held(manualJumpBinding());
+    if (g_revaliGaleCharge.state == RevaliGaleState::Airborne) {
+        if (!held) {
+            cancel_revali_gale(alink, false);
+            return false;
+        }
+        const bool landed = alink->mLinkAcch.ChkGroundHit() &&
+            (alink->mProcID == daAlink_c::PROC_AUTO_JUMP ||
+                alink->mProcID == daAlink_c::PROC_FALL ||
+                alink->mProcID == daAlink_c::PROC_LAND);
+        if (!landed) {
+            return false;
+        }
+        if (!alink->procCrouchInit()) {
+            cancel_revali_gale(alink, false);
+            return false;
+        }
+        g_revaliGaleCharge.state = RevaliGaleState::Crouching;
+        g_revaliGaleCharge.crouchTicks = 0;
+    }
+
+    if (alink->mProcID != daAlink_c::PROC_CROUCH ||
+        !alink->mLinkAcch.ChkGroundHit())
+    {
+        cancel_revali_gale(alink, true);
+        return false;
+    }
+
+    if (g_revaliGaleCharge.crouchTicks < kGaleChargeReadyTicks) {
+        ++g_revaliGaleCharge.crouchTicks;
+    }
+    if (g_revaliGaleCharge.crouchTicks >= kGaleChargeReadyTicks && held) {
+        g_revaliGaleVisual.hold_ready(alink->current.pos);
+    }
+    if (!held) {
+        if (g_revaliGaleCharge.crouchTicks >= kGaleChargeReadyTicks) {
+            return launch_revali_gale(
+                alink, manual_jump_binding_button_mask(manualJumpBinding()));
+        }
+        cancel_revali_gale(alink, true);
+        return false;
+    }
+
+    alink->mNormalSpeed = 0.0f;
+    alink->speedF = 0.0f;
+    alink->speed.set(0.0f, 0.0f, 0.0f);
+    alink->shape_angle.y = g_revaliGaleCharge.launchAngle;
+    alink->current.angle.y = g_revaliGaleCharge.launchAngle;
+    return true;
+}
+
+void set_manual_jump_direction(daAlink_c* alink) {
+    if (alink->checkInputOnR()) alink->shape_angle.y = alink->mMoveAngle;
+    alink->current.angle.y = alink->shape_angle.y;
+}
+
+void apply_manual_jump_movement(daAlink_c* alink) {
+    if (!alink->checkInputOnR()) {
+        alink->speedF = 0.0f;
+        alink->mNormalSpeed = 0.0f;
+    }
+    alink->mLinkAcch.ClrGroundHit();
+    alink->setJumpMode();
+}
+
+bool try_manual_jump(daAlink_c* alink, bool pendingJumpPress = false) {
     if (alink == nullptr || g_secondaryRing != nullptr || g_primaryRingOpen ||
         g_sitActionState != SitActionState::Inactive || g_shieldSurfActive ||
         alink->checkEventRun() || alink->checkRideOn())
     {
         return false;
     }
+    if (g_manualJumpOwner == alink &&
+        (!manualJumpEnabled() || alink->mLinkAcch.ChkGroundHit() ||
+         (alink->mProcID != daAlink_c::PROC_AUTO_JUMP &&
+          alink->mProcID != daAlink_c::PROC_FALL)))
+    {
+        g_manualJumpOwner = nullptr;
+    }
+    if (update_revali_gale_charge(alink)) {
+        return true;
+    }
+
     const int64_t binding = manualJumpBinding();
-    if (binding == kManualJumpDisabled) {
+    if (!manualJumpEnabled() && !glideEnabled()) {
         return false;
     }
     const bool wolf = alink->checkWolf();
     const bool wolfGrounded = wolf && manual_jump_ground_action_ready(alink);
 
-    int buttonMask = 0;
-    bool triggered = false;
-    switch (binding) {
-    case 1:
-        buttonMask = daAlink_c::BTN_A;
-        triggered = mDoCPd_c::getTrigA(PAD_1) != 0;
-        break;
-    case 2:
-        buttonMask = daAlink_c::BTN_B;
-        triggered = mDoCPd_c::getTrigB(PAD_1) != 0;
-        break;
-    case 3:
-        buttonMask = daAlink_c::BTN_L;
-        triggered = g_manualJumpLeftBumperTriggered && !manual_jump_l1_ui_blocked();
-        break;
-    case 4:
-        buttonMask = daAlink_c::BTN_R;
-        triggered = pendingRPress || mDoCPd_c::getTrigLockR(PAD_1) != 0;
-        break;
-    case 5:
-        buttonMask = daAlink_c::BTN_Z;
-        triggered = mDoCPd_c::getTrigZ(PAD_1) != 0;
-        break;
-    case 6:
-        triggered = g_manualJumpLeftStickTriggered;
-        break;
-    case 7:
-        triggered = g_manualJumpRightStickTriggered;
-        break;
-    case 8:
-        buttonMask = daAlink_c::BTN_L;
-        triggered = mDoCPd_c::getTrigL(PAD_1) != 0;
-        break;
-    default:
-        return false;
-    }
-
+    const int buttonMask = manual_jump_binding_button_mask(binding);
+    const bool triggered = manual_jump_binding_triggered(binding, pendingJumpPress);
     if (!triggered) {
         return false;
     }
 
-    if (!pendingRPress && buttonMask == daAlink_c::BTN_R &&
-        alink->mLinkAcch.ChkGroundHit() &&
-        manual_jump_ground_action_ready(alink))
-    {
-        // Let vanilla R interactions choose Link's action before treating the press as a jump.
-        g_manualJumpPendingR = true;
-        return false;
-    }
-
     if (g_manualCuccoGlideActive) {
-        if (buttonMask != daAlink_c::BTN_A) {
-            alink->mItemTrigger &= static_cast<u8>(~buttonMask);
-            release_manual_cucco_glide(alink);
-        }
         return true;
     }
 
@@ -547,21 +1189,15 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
     }
 
     if (!alink->mLinkAcch.ChkGroundHit() && !hovering && !wolfGrounded) {
-        if (g_hoverBootsEquipped) {
-            if (!hoverBootsAirwalkingEnabled() ||
+        if (!glideEnabled()) {
+            return false;
+        }
+        if (g_hoverBootsEquipped &&
+            (!hoverBootsAirwalkingEnabled() ||
                 alink->checkModeFlg(daAlink_c::MODE_SWIMMING) ||
-                alink->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE))
-            {
-                return false;
-            }
-
-            g_hoverGroundHeight = alink->current.pos.y;
-            g_hoverGroundHeightValid = true;
-            g_hoverLandingSequenceActive = false;
-            g_hoverAtSurface = false;
-            g_hoverLandingFrames = 0;
-            alink->mItemTrigger &= static_cast<u8>(~buttonMask);
-            return true;
+                alink->checkNoResetFlg0(daAlink_c::FLG0_WATER_IN_MOVE)))
+        {
+            return false;
         }
 
         if (alink->mProcID != daAlink_c::PROC_FALL &&
@@ -570,16 +1206,15 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
             return false;
         }
 
-        if (alink->checkGrabGlide()) {
-            if (!start_manual_cucco_glide(alink)) {
-                return false;
-            }
-        } else {
-            g_manualCuccoGlideActive = true;
-            if (!start_manual_cucco_glide(alink)) {
-                g_manualCuccoGlideActive = false;
-                return false;
-            }
+        if (!request_manual_glide(alink)) {
+            return false;
+        }
+
+        if (g_hoverBootsEquipped && g_hoverGroundHeightValid) {
+            g_hoverGroundHeight = alink->current.pos.y;
+            g_hoverLandingSequenceActive = false;
+            g_hoverAtSurface = false;
+            g_hoverLandingFrames = 0;
         }
 
         alink->mLinkAcch.ClrGroundHit();
@@ -587,23 +1222,65 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
         return true;
     }
 
-    if (!manual_jump_ground_action_ready(alink)) {
+    if (hovering && g_hoverLandingSequenceActive &&
+        alink->mProcID == daAlink_c::PROC_LAND)
+    {
+        g_hoverLandingSequenceActive = false;
+        g_hoverLandingFrames = 0;
+        alink->procMoveInit();
+    }
+
+    const bool sprinting = !wolf && sprint_requested(alink);
+    const bool hoverSurfaceJump = hovering && g_hoverBootsEquipped &&
+        hoverBootsAirwalkingEnabled();
+    if (!manualJumpEnabled() ||
+        !manual_jump_ground_context_ready(alink, hoverSurfaceJump, sprinting))
+    {
         return false;
     }
 
-    const f32 horizontalMomentum = alink->mNormalSpeed;
-    const s16 momentumAngle = alink->current.angle.y;
-    const int jumpStarted = wolf ? alink->procWolfAutoJumpInit(0)
-                                 : alink->procAutoJumpInit(0);
+    set_manual_jump_direction(alink);
+    constexpr int kSwordItem = 0x103;
+    if (!wolf && alink->mGrabItemAcKeep.getActor() == nullptr &&
+        alink->mEquipItem == kSwordItem &&
+        (mDoCPd_c::getHoldB(PAD_1) || mDoCPd_c::getTrigB(PAD_1)))
+    {
+        if (!alink->procCutJumpInit(FALSE)) return false;
+        apply_manual_jump_movement(alink);
+        g_manualJumpOwner = nullptr;
+        alink->mItemTrigger &= static_cast<u8>(~buttonMask);
+        return true;
+    }
+
+    const f32 launchSpeed = std::max(0.0f, alink->mNormalSpeed);
+    const s16 launchAngle = alink->shape_angle.y;
+    const f32 sprintJumpMultiplier =
+        wolf ? 1.0f : sprint_jump_speed_multiplier(alink);
+    const int jumpStarted = wolf ? alink->procWolfAutoJumpInit(1)
+                                 : alink->procAutoJumpInit(1);
     if (!jumpStarted) {
         return false;
     }
 
+    apply_manual_jump_movement(alink);
+    if (!wolf) {
+        apply_sprint_jump_speed(alink, sprintJumpMultiplier);
+    }
     const f32 heightScale = std::sqrt(
         static_cast<f32>(manualJumpHeightPercent()) / 100.0f);
     alink->speed.y *= heightScale;
-    alink->mNormalSpeed = horizontalMomentum;
-    alink->current.angle.y = momentumAngle;
+    g_manualJumpOwner = wolf ? nullptr : alink;
+    if (!wolf) {
+        bow_aim::mark_manual_jump_started(alink);
+    }
+    if (!wolf && revalisGaleEnabled() && g_revaliGaleCharges > 0 &&
+        manual_jump_binding_held(binding))
+    {
+        g_revaliGaleCharge.owner = alink;
+        g_revaliGaleCharge.state = RevaliGaleState::Airborne;
+        g_revaliGaleCharge.launchSpeed = launchSpeed;
+        g_revaliGaleCharge.launchAngle = launchAngle;
+    }
     if (hovering) {
         g_hoverLandingSequenceActive = false;
         g_hoverAtSurface = false;
@@ -614,11 +1291,38 @@ bool try_manual_jump(daAlink_c* alink, bool pendingRPress = false) {
     return true;
 }
 
+HookAction release_manual_cucco_glide_on_a(ModContext*, void* args, void* retval, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (alink == nullptr) return HOOK_CONTINUE;
+
+    if (g_manualCuccoGlideActive && (alink->mItemTrigger & daAlink_c::BTN_A) != 0) {
+        release_manual_cucco_glide(alink);
+    }
+
+    if (!manualJumpEnabled() || g_manualJumpOwner != alink ||
+        g_manualCuccoGlideActive || alink->mProcID != daAlink_c::PROC_AUTO_JUMP ||
+        !manual_jump_binding_held(manualJumpBinding()) ||
+        !mDoCPd_c::getTrigB(PAD_1) || alink->mEquipItem != 0x103 ||
+        alink->mGrabItemAcKeep.getActor() != nullptr)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    set_manual_jump_direction(alink);
+    if (!alink->procCutJumpInit(TRUE)) return HOOK_CONTINUE;
+    apply_manual_jump_movement(alink);
+    g_manualJumpOwner = nullptr;
+    *static_cast<int*>(retval) = 1;
+    return HOOK_SKIP_ORIGINAL;
+}
+
 void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     if (alink == nullptr) {
         return;
     }
+    const bool pendingManualJumpPress = g_manualJumpPendingPress;
+    g_manualJumpPendingPress = false;
 
     if (g_goronMaskInputBlockFrames > 0) {
         const u8 maskButtonMask = static_cast<u8>(
@@ -633,7 +1337,15 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
                           kGoronMaskItem ||
                       secondaryItemIdForSlot(g_secondarySelectedItems[1]) ==
                           kGiantMaskItem)
-                 ? daAlink_c::BTN_Y : 0));
+                 ? daAlink_c::BTN_Y : 0) |
+            (secondaryItemAssigned(kZItemSelectIndex) &&
+                     (secondaryItemIdForSlot(
+                          g_secondarySelectedItems[kZItemSelectIndex]) ==
+                          kGoronMaskItem ||
+                      secondaryItemIdForSlot(
+                          g_secondarySelectedItems[kZItemSelectIndex]) ==
+                          kGiantMaskItem)
+                 ? daAlink_c::BTN_Z : 0));
         if (maskButtonMask != 0) {
             alink->mItemTrigger &= static_cast<u8>(~maskButtonMask);
             alink->mItemButton &= static_cast<u8>(~maskButtonMask);
@@ -651,34 +1363,11 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     }
 
     recover_shield_surf_state(alink);
-    const bool pendingRPress = g_manualJumpPendingR;
-    g_manualJumpPendingR = false;
-    const u32 extendedButtons = JUTGamePad::mPadStatus[PAD_1].extButton;
-    const bool leftStickHeld = (extendedButtons & PAD_BUTTON_LEFT_STICK) != 0;
-    const bool rightStickHeld =
-        (extendedButtons & PAD_BUTTON_RIGHT_STICK) != 0 ||
-        PADGetNativeButtonPressed(PAD_1) == kNativeRightStickButton;
-    const bool leftBumperHeld =
-        PADGetNativeButtonPressed(PAD_1) == kNativeLeftShoulderButton;
-    g_manualJumpLeftStickTriggered = leftStickHeld && !g_manualJumpLeftStickWasHeld;
-    g_manualJumpRightStickTriggered = rightStickHeld && !g_manualJumpRightStickWasHeld;
-    g_manualJumpLeftBumperTriggered = leftBumperHeld && !g_manualJumpLeftBumperWasHeld;
-    g_manualJumpLeftStickWasHeld = leftStickHeld;
-    g_manualJumpRightStickWasHeld = rightStickHeld;
-    g_manualJumpLeftBumperWasHeld = leftBumperHeld;
-    if (update_hover_plane_lowering(alink, pendingRPress)) {
+    if (update_hover_plane_lowering(alink, pendingManualJumpPress)) {
         return;
     }
 
-    if (pendingRPress && manualJumpBinding() == 4 &&
-        alink->mLinkAcch.ChkGroundHit() &&
-        manual_jump_ground_action_ready(alink) &&
-        try_manual_jump(alink, true))
-    {
-        return;
-    }
-
-    if (try_manual_jump(alink)) {
+    if (try_manual_jump(alink, pendingManualJumpPress)) {
         return;
     }
 
@@ -688,15 +1377,59 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
 
     const bool xTriggered = mDoCPd_c::getTrigX(PAD_1) != 0;
     const bool yTriggered = mDoCPd_c::getTrigY(PAD_1) != 0;
-    if (!xTriggered && !yTriggered) {
+    const bool zTriggered = zItemSlotEnabled() && mDoCPd_c::getTrigZ(PAD_1) != 0;
+    if (!xTriggered && !yTriggered && !zTriggered) {
         return;
+    }
+
+    if (g_manualCuccoGlideActive &&
+        alink->mProcID == daAlink_c::PROC_AUTO_JUMP)
+    {
+        for (int button = 0; button < kSecondaryAssignmentCount; ++button) {
+            const bool triggered = button == 0 ? xTriggered
+                : button == 1 ? yTriggered : zTriggered;
+            if (!triggered) {
+                continue;
+            }
+            const int itemId = secondaryItemAssigned(button)
+                ? secondaryItemIdForSlot(g_secondarySelectedItems[button])
+                : selected_item_for_button(button);
+            if (alink->checkBowItem(itemId)) {
+                release_manual_cucco_glide(alink);
+                if (g_manualJumpOwner != alink) {
+                    g_manualJumpOwner = alink;
+                    bow_aim::mark_manual_jump_started(alink);
+                }
+                break;
+            }
+        }
+
+        if (g_manualCuccoGlideActive) {
+            for (int button = 0; button < kSecondaryAssignmentCount; ++button) {
+                const bool triggered = button == 0 ? xTriggered
+                    : button == 1 ? yTriggered : zTriggered;
+                if (!triggered) {
+                    continue;
+                }
+                const int itemId = secondaryItemAssigned(button)
+                    ? secondaryItemIdForSlot(g_secondarySelectedItems[button])
+                    : selected_item_for_button(button);
+                if (drop_bomb_during_manual_glide(
+                        alink, button, static_cast<u8>(itemId)))
+                {
+                    return;
+                }
+            }
+        }
     }
 
     const u8 pressedButtons = static_cast<u8>(
         (secondaryItemAssigned(0) && xTriggered
              ? daAlink_c::BTN_X : 0) |
         (secondaryItemAssigned(1) && yTriggered
-             ? daAlink_c::BTN_Y : 0));
+             ? daAlink_c::BTN_Y : 0) |
+        (secondaryItemAssigned(kZItemSelectIndex) && zTriggered
+             ? daAlink_c::BTN_Z : 0));
     alink->mItemTrigger &= static_cast<u8>(~pressedButtons);
     alink->mItemButton &= static_cast<u8>(~pressedButtons);
 
@@ -705,37 +1438,12 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         return;
     }
 
-    if (g_manualCuccoGlideActive &&
-        alink->mProcID == daAlink_c::PROC_AUTO_JUMP)
-    {
-        auto* heldActor = alink->mGrabItemAcKeep.getActor();
-        if (heldActor != nullptr &&
-            fopAcM_GetName(heldActor) == fpcNm_NBOMB_e)
-        {
-            for (int button = 0; button < 2; ++button) {
-                const bool triggered = button == 0 ? xTriggered : yTriggered;
-                if (!triggered) {
-                    continue;
-                }
-
-                const int itemId = secondaryItemAssigned(button)
-                    ? secondaryItemIdForSlot(g_secondarySelectedItems[button])
-                    : dComIfGp_getSelectItem(button);
-                if (alink->checkBombItem(itemId)) {
-                    heldActor->speedF = 0.0f;
-                    heldActor->speed.y = 0.0f;
-                    alink->freeGrabItem();
-                    const u8 buttonMask =
-                        button == 0 ? daAlink_c::BTN_X : daAlink_c::BTN_Y;
-                    alink->mItemTrigger &= static_cast<u8>(~buttonMask);
-                    g_secondaryItemInputHandled = true;
-                    return;
-                }
-            }
-        }
-    }
-
     if (pressedButtons == 0) {
+        if (zTriggered && !secondaryItemAssigned(kZItemSelectIndex) &&
+            selected_item_for_button(kZItemSelectIndex) != dItemNo_NONE_e)
+        {
+            alink->mSelectItemId = kZItemSelectIndex;
+        }
         return;
     }
 
@@ -743,7 +1451,8 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         return;
     }
 
-    const int button = (pressedButtons & daAlink_c::BTN_X) != 0 ? 0 : 1;
+    const int button = (pressedButtons & daAlink_c::BTN_X) != 0 ? 0
+        : (pressedButtons & daAlink_c::BTN_Y) != 0 ? 1 : kZItemSelectIndex;
     const u8 itemId = secondaryItemIdForSlot(g_secondarySelectedItems[button]);
     g_secondaryItemInputHandled = true;
     switch (itemId) {
@@ -780,10 +1489,9 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         begin_hover_boots_toggle(alink);
         break;
     case kDarkLinkItem:
-        g_darkLinkFormActive = !g_darkLinkFormActive;
-        play_dark_link_transition_effect(alink, g_darkLinkFormActive);
-        svc_log->info(mod_ctx, g_darkLinkFormActive ? "Dark Link Form activated" :
-                                                     "Dark Link Form deactivated");
+        g_darkLinkVisualActive = !g_darkLinkVisualActive;
+        svc_log->info(mod_ctx, g_darkLinkVisualActive ? "Dawnlight Dark Link activated" :
+                                                       "Dawnlight Dark Link deactivated");
         break;
     case kLensOfTruthItem:
         if (alink->checkWolf()) {

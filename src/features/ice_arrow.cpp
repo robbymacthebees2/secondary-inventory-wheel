@@ -191,7 +191,7 @@ HookAction hide_secondary_assigned_vanilla_ammo_count(
     auto* meterDraw = mods::arg<dMeter2Draw_c*>(args, 0);
     const u8 button = mods::arg<u8>(args, 1);
     auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
-    if (meterDraw == nullptr || button >= dMeter2Draw_c::SELECT_MAX_e ||
+    if (meterDraw == nullptr || button >= 2 ||
         alink == nullptr || alink->checkWolf() || !secondaryItemAssigned(button))
     {
         return HOOK_CONTINUE;
@@ -399,10 +399,13 @@ DEFINE_HOOK(&dMenu_Ring_c::openExplain, OpenExplain);
 DEFINE_HOOK(&dMenu_Ring_c::setNameString, SetNameString);
 DEFINE_HOOK(&dMenu_Ring_c::setSelectItem, RingSetSelectItem);
 DEFINE_HOOK(&dMenu_Ring_c::setJumpItem, RingSetJumpItem);
+DEFINE_HOOK(&dMenu_Ring_c::setActiveCursor, RingSetActiveCursor);
+DEFINE_HOOK(&dMenu_Ring_c::setSelectItemForce, RingSetSelectItemForce);
 DEFINE_HOOK(&dMenu_Ring_c::isMixItemOn, RingIsMixItemOn);
 DEFINE_HOOK(&dMenu_Ring_c::isMixItemOff, RingIsMixItemOff);
 DEFINE_HOOK(&dMenu_Collect2D_c::changeClothe, CollectChangeClothe);
 DEFINE_HOOK(&dMeter2Draw_c::changeTextureItemXY, ChangeTextureItemXY);
+DEFINE_HOOK(&dMeter2Draw_c::setButtonIconMidonaAlpha, MeterMidnaAlpha);
 DEFINE_HOOK(&dMeter2Draw_c::drawItemNum, DrawItemNum);
 DEFINE_HOOK(&dMeter2_c::moveButtonXY, MeterMoveButtonXY);
 DEFINE_HOOK(&daSpinner_c::reflectAccept, SpinnerReflectAccept);
@@ -410,6 +413,10 @@ DEFINE_HOOK(&dMeter2Info_readItemTexture, ReadItemTexture);
 DEFINE_HOOK(&daAlink_c::setWaterY, SetWaterY);
 DEFINE_HOOK(&daAlink_c::setRoomInfo, SetRoomInfo);
 DEFINE_HOOK(&daAlink_c::setStickData, SetStickData);
+DEFINE_HOOK(&daAlink_c::checkSetItemTrigger, CheckSetItemTrigger);
+DEFINE_HOOK(&daAlink_c::checkItemChangeFromButton, CheckItemChangeFromButton);
+DEFINE_HOOK(&daAlink_c::midnaTalkTrigger, MidnaTalkTrigger);
+DEFINE_HOOK(&mDoCPd_c::read, PlayerPadRead);
 DEFINE_HOOK(&daAlink_c::checkGrabRooster, CheckGrabRooster);
 DEFINE_HOOK(&daAlink_c::boardCommon, BoardCommon);
 DEFINE_HOOK(&daAlink_c::checkSnowCode, CheckSnowCode);
