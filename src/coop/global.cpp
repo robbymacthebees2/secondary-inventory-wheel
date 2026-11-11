@@ -20,6 +20,7 @@
 #include <cstring>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -140,6 +141,7 @@ ConfigVarHandle s_tagDistVar = 0;
 std::vector<GlobalPlayer> s_userBlocked;
 
 std::vector<GlobalPlayer> s_seen;
+std::vector<GlobalPlayer> s_onlineRoster;
 
 void remember_seen(uint32_t id, const std::string& tag, const std::string& name = "") {
     if (id == 0 || tag.empty()) return;
@@ -438,7 +440,8 @@ bool clean_snapshot(PlayerSnapshot& s) {
     if (s.sheath > kPuppetSheathMaster) s.sheath = kPuppetSheathNone;
     if (s.chainKind > kPuppetChainRodLure) s.chainKind = kPuppetChainNone;
     if (s.chainCount > kPuppetChainPts) s.chainCount = kPuppetChainPts;
-    s.poseFlags &= kPuppetPoseSeated | kPuppetPoseShieldSurf;
+    s.poseFlags &= kPuppetPoseSeated | kPuppetPoseShieldSurf |
+        kPuppetPoseDarkLink | kPuppetPoseGiantMask;
     s.wheelFlags &= kPuppetWheelArmosHammer;
     for (AttachedModelSnapshot& a : s.attached) {
         if (a.kind >= kPuppetHeldCount) a.kind = kPuppetHeldNone;
@@ -698,6 +701,29 @@ void on_server_message(const std::string& text) {
         }
         return;
     }
+    if (op == "roster") {
+        const std::vector<std::string> values = msg.list("players");
+        if ((values.size() & 1u) != 0 || values.size() > 800) return;
+        std::vector<GlobalPlayer> roster;
+        roster.reserve(values.size() / 2);
+        for (size_t i = 0; i < values.size(); i += 2) {
+            char* end = nullptr;
+            const unsigned long id = std::strtoul(values[i].c_str(), &end, 10);
+            if (end == values[i].c_str() || *end != '\0' || id == 0 ||
+                id > UINT32_MAX || values[i + 1].empty())
+            {
+                continue;
+            }
+            const uint32_t playerId = static_cast<uint32_t>(id);
+            const auto existing = std::find_if(roster.begin(), roster.end(),
+                [playerId](const GlobalPlayer& player) { return player.id == playerId; });
+            if (existing == roster.end()) {
+                roster.push_back(GlobalPlayer{playerId, values[i + 1], ""});
+            }
+        }
+        s_onlineRoster = std::move(roster);
+        return;
+    }
     if (op == "chat_slow") {
         chat_note("Slow down a little.");
         return;
@@ -793,6 +819,7 @@ void disconnect(const char* why) {
     s_here = 0;
     s_area = "\x01";
     s_seen.clear();
+    s_onlineRoster.clear();
     coop_global_udp_close();
 }
 
@@ -896,6 +923,10 @@ std::vector<GlobalPlayer> global_players() {
         if (p.used && p.reached && !p.name.empty() && is_tag(p.tag)) out.push_back(GlobalPlayer{p.id, p.name, p.tag});
     }
     return out;
+}
+
+std::vector<GlobalPlayer> global_online_players() {
+    return s_onlineRoster;
 }
 
 uint8_t global_peer_slot(uint32_t id) {

@@ -1,24 +1,60 @@
+bool g_darkLinkDamageMultiplierConfigReadFailureReported = false;
+
+bool zItemSlotEnabled();
+bool get_bool_option(ConfigVarHandle handle, bool fallback);
+
 bool wheelOpensDown() {
+    if (zItemSlotEnabled()) {
+        return true;
+    }
+
     int64_t value = kWheelOpensDown;
     return g_wheelOpenDirection != 0 &&
            svc_config->get_int(mod_ctx, g_wheelOpenDirection, &value) == MOD_OK &&
            value == kWheelOpensDown;
 }
 
+bool manualJumpEnabled() {
+    return get_bool_option(g_manualJumpEnabled, true);
+}
+
 int64_t manualJumpBinding() {
-    int64_t value = kManualJumpDefaultBinding;
-    if (g_manualJumpBinding == 0 ||
-        svc_config->get_int(mod_ctx, g_manualJumpBinding, &value) != MOD_OK)
-    {
-        if (!g_manualJumpConfigReadFailureReported) {
-            svc_log->warn(mod_ctx, "could not read manual jump binding config");
-            g_manualJumpConfigReadFailureReported = true;
+    int64_t value = kJumpButtonDefault;
+    if (g_jumpButton == 0 || svc_config->get_int(mod_ctx, g_jumpButton, &value) != MOD_OK) {
+        if (!g_jumpButtonConfigReadFailureReported) {
+            svc_log->warn(mod_ctx, "could not read jump button config");
+            g_jumpButtonConfigReadFailureReported = true;
         }
-        return kManualJumpDisabled;
+        return kJumpButtonDefault;
     }
 
-    g_manualJumpConfigReadFailureReported = false;
-    return std::clamp(value, kManualJumpDisabled, static_cast<int64_t>(8));
+    g_jumpButtonConfigReadFailureReported = false;
+    switch (value) {
+    case 1:
+    case 2:
+    case 3:
+        return value;
+    default:
+        return kJumpButtonDefault;
+    }
+}
+
+int64_t darkLinkDamageMultiplierPercent() {
+    int64_t value = kDarkLinkDamageMultiplierDefaultPercent;
+    if (g_darkLinkDamageMultiplier == 0 ||
+        svc_config->get_int(mod_ctx, g_darkLinkDamageMultiplier, &value) != MOD_OK)
+    {
+        if (!g_darkLinkDamageMultiplierConfigReadFailureReported) {
+            svc_log->warn(mod_ctx, "could not read Dark Link damage multiplier config");
+            g_darkLinkDamageMultiplierConfigReadFailureReported = true;
+        }
+        return kDarkLinkDamageMultiplierDefaultPercent;
+    }
+
+    g_darkLinkDamageMultiplierConfigReadFailureReported = false;
+    return std::clamp(
+        value, kDarkLinkDamageMultiplierMinPercent,
+        kDarkLinkDamageMultiplierMaxPercent);
 }
 
 int64_t manualJumpHeightPercent() {
@@ -37,21 +73,67 @@ int64_t manualJumpHeightPercent() {
     return std::clamp(value, kManualJumpMinHeightPercent, kManualJumpMaxHeightPercent);
 }
 
-int64_t glideBowSlowTimePercent() {
-    int64_t value = kGlideBowSlowTimeDefaultPercent;
-    if (g_glideBowSlowTimePercent == 0 ||
-        svc_config->get_int(mod_ctx, g_glideBowSlowTimePercent, &value) != MOD_OK)
-    {
-        if (!g_glideBowSlowTimeConfigReadFailureReported) {
-            svc_log->warn(mod_ctx, "could not read glide bow slow time config");
-            g_glideBowSlowTimeConfigReadFailureReported = true;
-        }
-        return kGlideBowSlowTimeDefaultPercent;
+int64_t get_int_option(ConfigVarHandle handle, int64_t fallback, int64_t minimum,
+    int64_t maximum) {
+    int64_t value = fallback;
+    if (handle == 0 || svc_config->get_int(mod_ctx, handle, &value) != MOD_OK) {
+        return fallback;
     }
+    return std::clamp(value, minimum, maximum);
+}
 
-    g_glideBowSlowTimeConfigReadFailureReported = false;
-    return std::clamp(
-        value, kGlideBowSlowTimeMinPercent, kGlideBowSlowTimeMaxPercent);
+bool revalisGaleEnabled() {
+    return get_bool_option(g_revalisGaleEnabled, false);
+}
+
+int64_t galeHeightPercent() {
+    return get_int_option(g_galeHeightPercent, kGaleHeightDefaultPercent,
+        kGaleHeightMinPercent, kGaleHeightMaxPercent);
+}
+
+int64_t galeChargeCapacity() {
+    return get_int_option(g_galeChargeCapacity, kGaleChargeCapacityDefault, 1,
+        kGaleChargeCapacityMax);
+}
+
+int64_t galeRecoverySeconds() {
+    return get_int_option(g_galeRecoverySeconds, kGaleRecoveryDefaultSeconds, 1,
+        kGaleRecoveryMaxSeconds);
+}
+
+int64_t aimMode() {
+    return get_int_option(g_aimMode, kAimModeDefault, 0, 2);
+}
+
+bool aimMovementEnabled() {
+    return get_bool_option(g_aimMovementEnabled, true);
+}
+
+int64_t cinemaZoomPercent() {
+    return get_int_option(g_cinemaZoomPercent, kCinemaZoomDefaultPercent,
+        kCinemaZoomMinPercent, kCinemaZoomMaxPercent);
+}
+
+int64_t thirdPersonReticleOffsetY() {
+    return get_int_option(g_thirdPersonReticleOffsetY, kThirdPersonReticleDefaultY,
+        kThirdPersonReticleMinY, kThirdPersonReticleMaxY);
+}
+
+int64_t bulletTimeMode() {
+    return get_int_option(g_bulletTimeMode, kBulletTimeModeDefault, 0, 2);
+}
+
+int64_t glideItem() {
+    int64_t value = kGlideItemDefault;
+    if (g_glideItem == 0 || svc_config->get_int(mod_ctx, g_glideItem, &value) != MOD_OK) {
+        if (!g_glideItemConfigReadFailureReported) {
+            svc_log->warn(mod_ctx, "could not read glide item config; using Cucco");
+            g_glideItemConfigReadFailureReported = true;
+        }
+        return kGlideItemDefault;
+    }
+    g_glideItemConfigReadFailureReported = false;
+    return value == 1 ? 1 : kGlideItemDefault;
 }
 
 int64_t hoverPlaneLowerBinding() {
@@ -103,12 +185,50 @@ bool secondaryWheelBindingEnabled() {
     return get_bool_option(g_secondaryWheelBindingEnabled, true);
 }
 
+bool zItemSlotEnabled() {
+    return get_bool_option(g_zItemSlotEnabled, false);
+}
+
 bool mapOpensDown() {
     return secondaryWheelBindingEnabled() && !wheelOpensDown();
 }
 
 bool vanillaAutoJumpDisabled() {
     return get_bool_option(g_disableVanillaAutoJump, false);
+}
+
+bool sprintEnabled() {
+    return get_bool_option(g_sprintEnabled, false);
+}
+
+int64_t sprintSpeedPercent() {
+    return get_int_option(g_sprintSpeedPercent, kSprintSpeedDefaultPercent, 100, 300);
+}
+
+bool wolfSprintEnabled() {
+    return get_bool_option(g_wolfSprintEnabled, false);
+}
+
+int64_t wolfSprintSpeedPercent() {
+    return get_int_option(
+        g_wolfSprintSpeedPercent, kSprintSpeedDefaultPercent, 100, 300);
+}
+
+bool sprintStaminaEnabled() {
+    return get_bool_option(g_sprintStaminaEnabled, false);
+}
+
+int64_t sprintStaminaDrain() {
+    return get_int_option(g_sprintStaminaDrain, kSprintStaminaDrainDefault, 0, 20);
+}
+
+int64_t sprintStaminaRecovery() {
+    return get_int_option(
+        g_sprintStaminaRecovery, kSprintStaminaRecoveryDefault, 1, 100);
+}
+
+bool glideEnabled() {
+    return get_bool_option(g_glideEnabled, false);
 }
 
 bool infiniteLavaWalkEnabled() {
@@ -224,7 +344,9 @@ bool isSecondaryRing(const dMenu_Ring_c* ring) {
 }
 
 bool secondaryTunicAssigned(int button) {
-    if (button < 0 || button > 1) {
+    if (button < 0 || button >= kSecondaryAssignmentCount ||
+        (button == kZItemSelectIndex && !zItemSlotEnabled()))
+    {
         return false;
     }
 
@@ -484,7 +606,7 @@ const char* secondaryItemNameForSlot(u8 slotId) {
             return "Hover Boots";
         }
         if (item == kDarkLinkItem) {
-            return "Dark Link Form";
+            return "Dawnlight Dark Link";
         }
         if (item == kIceArrowItem) {
             return "Ice Arrow (Bow)";
@@ -513,7 +635,9 @@ const char* secondaryItemNameForSlot(u8 slotId) {
 }
 
 bool secondaryHawkGrassAssigned(int button) {
-    if (button < 0 || button > 1) {
+    if (button < 0 || button >= kSecondaryAssignmentCount ||
+        (button == kZItemSelectIndex && !zItemSlotEnabled()))
+    {
         return false;
     }
 
@@ -524,7 +648,9 @@ bool secondaryHawkGrassAssigned(int button) {
 }
 
 bool secondaryHoverBootsAssigned(int button) {
-    if (button < 0 || button > 1) {
+    if (button < 0 || button >= kSecondaryAssignmentCount ||
+        (button == kZItemSelectIndex && !zItemSlotEnabled()))
+    {
         return false;
     }
 
@@ -629,11 +755,82 @@ bool is_spawned_hawk_internal(uint32_t id) {
 }
 
 bool secondaryItemAssigned(int button) {
-    if (button < 0 || button > 1) {
+    if (button < 0 || button >= kSecondaryAssignmentCount ||
+        (button == kZItemSelectIndex && !zItemSlotEnabled()))
+    {
         return false;
     }
 
     return secondaryItemIdForSlot(g_secondarySelectedItems[button]) != dItemNo_NONE_e;
+}
+
+u8 selected_item_for_button(int button) {
+    if (button != kZItemSelectIndex) {
+        return dComIfGp_getSelectItem(button);
+    }
+
+    // The engine stores the inventory slot, not the item ID, in SELECT_ITEM_DOWN.
+    const u8 itemSlot = dComIfGs_getSelectItemIndex(button);
+    if (itemSlot == dItemNo_NONE_e) {
+        return dItemNo_NONE_e;
+    }
+
+    u8 selectedItem = dComIfGs_getItem(itemSlot, false);
+    const u8 mixItemSlot = dComIfGs_getMixItemIndex(button);
+    if (mixItemSlot == dItemNo_NONE_e) {
+        return selectedItem;
+    }
+
+    const u8 mixItem = dComIfGs_getItem(mixItemSlot, false);
+    if (selectedItem == dItemNo_BOW_e) {
+        switch (mixItem) {
+        case dItemNo_NORMAL_BOMB_e:
+        case dItemNo_WATER_BOMB_e:
+        case dItemNo_POKE_BOMB_e:
+            selectedItem = dItemNo_BOMB_ARROW_e;
+            break;
+        case dItemNo_HAWK_EYE_e:
+            selectedItem = dItemNo_HAWK_ARROW_e;
+            break;
+        }
+    } else if (mixItem == dItemNo_BOW_e) {
+        switch (selectedItem) {
+        case dItemNo_NORMAL_BOMB_e:
+        case dItemNo_WATER_BOMB_e:
+        case dItemNo_POKE_BOMB_e:
+            selectedItem = dItemNo_BOMB_ARROW_e;
+            break;
+        case dItemNo_HAWK_EYE_e:
+            selectedItem = dItemNo_HAWK_ARROW_e;
+            break;
+        }
+    } else if (selectedItem == dItemNo_FISHING_ROD_1_e) {
+        switch (mixItem) {
+        case dItemNo_BEE_CHILD_e:
+            selectedItem = dItemNo_BEE_ROD_e;
+            break;
+        case dItemNo_WORM_e:
+            selectedItem = dItemNo_WORM_ROD_e;
+            break;
+        case dItemNo_ZORAS_JEWEL_e:
+            selectedItem = dItemNo_JEWEL_ROD_e;
+            break;
+        }
+    } else if (mixItem == dItemNo_FISHING_ROD_1_e) {
+        switch (selectedItem) {
+        case dItemNo_BEE_CHILD_e:
+            selectedItem = dItemNo_BEE_ROD_e;
+            break;
+        case dItemNo_WORM_e:
+            selectedItem = dItemNo_WORM_ROD_e;
+            break;
+        case dItemNo_ZORAS_JEWEL_e:
+            selectedItem = dItemNo_JEWEL_ROD_e;
+            break;
+        }
+    }
+
+    return selectedItem;
 }
 
 bool isValidSecondaryAssignment(int64_t slotId) {

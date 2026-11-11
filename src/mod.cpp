@@ -1,5 +1,7 @@
 #include "mods/service.hpp"
 #include "mods/svc/config.h"
+#include "mods/svc/actor.h"
+#include "mods/svc/gfx.h"
 #include "mods/svc/hook.hpp"
 #include "mods/svc/interp.h"
 #include "mods/svc/log.h"
@@ -7,6 +9,7 @@
 #include "mods/svc/save.h"
 #include "mods/svc/ui.h"
 #include "coop/mod.hpp"
+#include "twilit_essentials/stamina.h"
 
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DPacket.h"
@@ -39,20 +42,25 @@
 #include "SSystem/SComponent/c_cc_d.h"
 #include "SSystem/SComponent/c_cc_s.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_camera.h"
 #include "d/d_lib.h"
 #include "d/d_meter2.h"
 #include "d/d_particle_name.h"
 #include "d/d_meter2_draw.h"
+#include "d/d_kantera_icon_meter.h"
 #include "d/d_menu_ring.h"
+#include "d/d_menu_item_explain.h"
 #include "d/d_menu_collect.h"
 #include "d/d_menu_window.h"
 #include "d/d_meter_map.h"
 #include "d/d_meter2_info.h"
 #include "d/d_meter_HIO.h"
+#include "d/d_msg_object.h"
 #include "d/d_kankyo.h"
 #include "d/d_pane_class.h"
 #include "d/d_select_cursor.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
+#include "Z2AudioLib/Z2SeMgr.h"
 #include "Z2AudioLib/Z2SceneMgr.h"
 #include "Z2AudioLib/Z2Param.h"
 #include "Z2AudioLib/Z2SeqMgr.h"
@@ -74,28 +82,67 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
+#include <chrono>
+#include <mutex>
+#include <vector>
 
 DEFINE_MOD();
 IMPORT_SERVICE(ConfigService, svc_config);
 IMPORT_SERVICE(HookService, svc_hook);
+IMPORT_SERVICE(GfxService, svc_gfx);
 IMPORT_SERVICE(InterpService, svc_interp);
 IMPORT_SERVICE(LogService, svc_log);
 IMPORT_SERVICE(ResourceService, svc_resource);
 IMPORT_SERVICE(SaveService, svc_save);
 IMPORT_SERVICE(UiService, svc_ui);
+IMPORT_OPTIONAL_SERVICE(ActorService, s_manualJumpActorService);
+IMPORT_OPTIONAL_SERVICE_VERSION(
+    TwilitEssentialsStaminaService, svc_te_stamina, 0);
+
+#include "features/dark_link_eye_bloom.cpp"
 
 namespace {
 
+namespace bow_aim {
+void mark_manual_jump_started(daAlink_c* link);
+void clear_manual_jump(daAlink_c* link);
+}
+f32 sprint_jump_speed_multiplier(daAlink_c* link);
+bool sprint_requested(daAlink_c* link);
+void apply_sprint_jump_speed(daAlink_c* link, f32 multiplier);
+
 constexpr int kWheelOpensLeft = 0;
 constexpr int kWheelOpensDown = 1;
-constexpr int64_t kManualJumpDisabled = 0;
-constexpr int64_t kManualJumpDefaultBinding = 1;
+constexpr int64_t kJumpButtonDefault = 0;
 constexpr int64_t kManualJumpDefaultHeightPercent = 100;
 constexpr int64_t kManualJumpMinHeightPercent = 100;
-constexpr int64_t kManualJumpMaxHeightPercent = 300;
-constexpr int64_t kGlideBowSlowTimeDefaultPercent = 0;
-constexpr int64_t kGlideBowSlowTimeMinPercent = 0;
-constexpr int64_t kGlideBowSlowTimeMaxPercent = 100;
+constexpr int64_t kManualJumpMaxHeightPercent = 500;
+constexpr int64_t kSprintSpeedDefaultPercent = 150;
+constexpr int64_t kSprintStaminaDrainDefault = 5;
+constexpr int64_t kSprintStaminaRecoveryDefault = 5;
+constexpr int64_t kGlideItemDefault = 0;
+constexpr int64_t kGaleHeightDefaultPercent = 500;
+constexpr int64_t kGaleHeightMinPercent = 100;
+constexpr int64_t kGaleHeightMaxPercent = 1000;
+constexpr int64_t kGaleChargeCapacityDefault = 3;
+constexpr int64_t kGaleChargeCapacityMax = 12;
+constexpr int64_t kGaleRecoveryDefaultSeconds = 120;
+constexpr int64_t kGaleRecoveryMaxSeconds = 3600;
+constexpr int64_t kAimModeDefault = 2;
+constexpr int64_t kCinemaZoomDefaultPercent = 100;
+constexpr int64_t kCinemaZoomMinPercent = 25;
+constexpr int64_t kCinemaZoomMaxPercent = 400;
+constexpr int64_t kThirdPersonReticleDefaultY = 0;
+constexpr int64_t kThirdPersonReticleMinY = -40;
+constexpr int64_t kThirdPersonReticleMaxY = 40;
+constexpr int64_t kBulletTimeModeDefault = 1;
+constexpr int64_t kDarkLinkDamageMultiplierDefaultPercent = 200;
+constexpr int64_t kDarkLinkDamageMultiplierMinPercent = 0;
+constexpr int64_t kDarkLinkDamageMultiplierMaxPercent = 1000;
+constexpr int kZItemSelectIndex = 2;
+constexpr int kSecondaryAssignmentCount = 3;
 constexpr int64_t kHoverPlaneLowerDefaultBinding = 5;
 // SDL_GamepadButton::LEFT_SHOULDER; the mod SDK only exposes native button polling.
 constexpr s32 kNativeLeftShoulderButton = 9;
@@ -147,7 +194,6 @@ constexpr u32 kHawkAttackType =
     AT_TYPE_THROW_OBJ | AT_TYPE_NORMAL_SWORD | AT_TYPE_BOMB;
 constexpr unsigned int kHawkIdleDespawnDelayFrames = 5 * 30;
 constexpr unsigned int kHoverWaterMissToleranceFrames = 8;
-constexpr u32 kDarkLinkTransitionFrames = 30;
 constexpr f32 kSitModelGroundOffset = -28.0f;
 constexpr f32 kSitModelForwardOffset = 65.0f;
 constexpr f32 kShieldSurfBoardRaise = 15.0f;
@@ -202,10 +248,30 @@ enum class SitActionState : u8 {
 
 ConfigVarHandle g_wheelOpenDirection = 0;
 ConfigVarHandle g_secondaryWheelBindingEnabled = 0;
-ConfigVarHandle g_manualJumpBinding = 0;
+ConfigVarHandle g_zItemSlotEnabled = 0;
+ConfigVarHandle g_darkLinkDamageMultiplier = 0;
+ConfigVarHandle g_manualJumpEnabled = 0;
+ConfigVarHandle g_jumpButton = 0;
 ConfigVarHandle g_manualJumpHeightPercent = 0;
 ConfigVarHandle g_disableVanillaAutoJump = 0;
-ConfigVarHandle g_glideBowSlowTimePercent = 0;
+ConfigVarHandle g_sprintEnabled = 0;
+ConfigVarHandle g_sprintSpeedPercent = 0;
+ConfigVarHandle g_wolfSprintEnabled = 0;
+ConfigVarHandle g_wolfSprintSpeedPercent = 0;
+ConfigVarHandle g_sprintStaminaEnabled = 0;
+ConfigVarHandle g_sprintStaminaDrain = 0;
+ConfigVarHandle g_sprintStaminaRecovery = 0;
+ConfigVarHandle g_glideEnabled = 0;
+ConfigVarHandle g_glideItem = 0;
+ConfigVarHandle g_revalisGaleEnabled = 0;
+ConfigVarHandle g_galeHeightPercent = 0;
+ConfigVarHandle g_galeChargeCapacity = 0;
+ConfigVarHandle g_galeRecoverySeconds = 0;
+ConfigVarHandle g_aimMode = 0;
+ConfigVarHandle g_aimMovementEnabled = 0;
+ConfigVarHandle g_cinemaZoomPercent = 0;
+ConfigVarHandle g_thirdPersonReticleOffsetY = 0;
+ConfigVarHandle g_bulletTimeMode = 0;
 ConfigVarHandle g_hoverPlaneLowerBinding = 0;
 ConfigVarHandle g_infiniteLavaWalk = 0;
 ConfigVarHandle g_twilightWard = 0;
@@ -219,6 +285,9 @@ ConfigVarHandle g_sitMusicTrack = 0;
 ConfigVarHandle g_sitHealingEnabled = 0;
 ConfigVarHandle g_disableSpinnerSurfaceBounce = 0;
 ConfigVarHandle g_spinnerAttackAlwaysActive = 0;
+ConfigVarHandle g_fairyCompanionColor = 0;
+ConfigVarHandle g_fairyCompanionLight = 0;
+ConfigVarHandle g_fairyCompanionToggleBinding = 0;
 std::array<std::array<char, 48>, kSitMusicOptionCount> g_sitMusicOptionLabelStorage{};
 std::array<const char*, kSitMusicOptionCount> g_sitMusicOptionLabels{};
 bool g_sitMusicOptionsInitialized = false;
@@ -262,36 +331,13 @@ cBgS_PolyInfo g_shieldSurfGroundPolygon;
 fpc_ProcID g_shieldSurfBoardId = fpcM_ERROR_PROCESS_ID_e;
 unsigned int g_shieldSurfStartWaitFrames = 0;
 bool g_manualCuccoGlideActive = false;
-bool g_manualGlideBowAiming = false;
-f32 g_manualGlideBowMoveValue = 0.0f;
-s16 g_manualGlideBowBodyAngleY = 0;
-bool g_manualGlideArrowAimStatusAdded = false;
-bool g_manualGlideSlowTimeScaleActive = false;
-f32 g_manualGlidePreviousTimeScale = 1.0f;
-u32 g_manualGlideAuraEmitters[2][3] = {};
-bool g_darkLinkFormActive = false;
+bool g_manualGlideRetiring = false;
+fpc_ProcID g_manualGlideActorId = fpcM_ERROR_PROCESS_ID_e;
+u16 g_manualGlideLoadTicks = 0;
+bool g_darkLinkVisualActive = false;
 SitActionState g_sitActionState = SitActionState::Inactive;
 s16 g_sitOriginalShapeAngleX = 0;
 s16 g_sitOriginalShapeAngleZ = 0;
-f32 g_darkLinkFormBlend = 0.0f;
-J3DModelData* g_darkLinkDrawModelData = nullptr;
-// Shape packets render after modelDraw returns, so retain their model identities.
-std::array<J3DModelData*, 10> g_darkLinkAppearanceModelData{};
-u8 g_darkLinkAppearanceModelDataCount = 0;
-struct DarkLinkDrawMaterialSnapshot {
-    J3DMaterial* material = nullptr;
-    u8 stageIndex = 0;
-    u8 tevKColorSel = 0;
-    bool isPupilMaterial = false;
-    bool hasTevColor = false;
-    bool hasTevKColor = false;
-    f32 blend = 0.0f;
-    J3DTevStage stage{};
-    J3DGXColorS10 tevColor{};
-    J3DGXColor tevKColor{};
-};
-std::array<DarkLinkDrawMaterialSnapshot, 64> g_darkLinkDrawMaterialSnapshots{};
-u16 g_darkLinkDrawMaterialSnapshotCount = 0;
 struct IceArrowFrozenTarget {
     fpc_ProcID actorId = fpcM_ERROR_PROCESS_ID_e;
     J3DModel* model = nullptr;
@@ -314,9 +360,10 @@ u8 g_iceArrowActorExecuteDepth = 0;
 bool g_iceArrowSelected = false;
 bool g_lensOfTruthActive = false;
 bool g_secondaryItemInputHandled = false;
-bool g_manualJumpConfigReadFailureReported = false;
+bool g_jumpButtonConfigReadFailureReported = false;
 bool g_manualJumpHeightConfigReadFailureReported = false;
-bool g_glideBowSlowTimeConfigReadFailureReported = false;
+bool g_glideItemConfigReadFailureReported = false;
+bool g_jumpInputVisibilityFailureReported = false;
 bool g_hoverPlaneLowerBindingConfigReadFailureReported = false;
 bool g_hoverPlaneLowerBindingWasHeld = false;
 bool g_hoverGroundHeightValid = false;
@@ -331,6 +378,27 @@ SecondaryIconContext g_secondaryIconContext = SecondaryIconContext::None;
 dMeter2_c* g_secondaryHudOwner = nullptr;
 std::array<u8, MAX_SELECT_ITEM> g_secondaryHudAssignments{};
 std::array<bool, MAX_SELECT_ITEM> g_secondaryHudRefreshPending{};
+alignas(32) std::array<std::array<u8, kItemTextureBufferSize>, 2>
+    g_secondaryZHudTextureBuffers{};
+dMeter2Draw_c* g_secondaryZHudOwner = nullptr;
+J2DPicture* g_secondaryZHudPicture = nullptr;
+std::array<J2DPicture*, 4> g_secondaryZHudAmmoDigits{};
+dMeter2Draw_c* g_secondaryZHudAmmoOwner = nullptr;
+f32 g_secondaryZHudAmmoX = 0.0f;
+f32 g_secondaryZHudAmmoY = 0.0f;
+f32 g_secondaryZHudAmmoDigitSize = 0.0f;
+int g_secondaryZHudAmmoDigitCount = 0;
+bool g_secondaryZHudAmmoVisible = false;
+dKantera_icon_c* g_secondaryZHudLanternMeter = nullptr;
+bool g_secondaryZHudLanternVisible = false;
+u8 g_secondaryZHudSlot = dItemNo_NONE_e;
+u8 g_secondaryZHudItem = dItemNo_NONE_e;
+J2DScreen* g_zSlotMidnaScreen = nullptr;
+J2DPane* g_zSlotMidnaOriginalParent = nullptr;
+f32 g_zSlotMidnaOriginalScaleX = 1.0f;
+f32 g_zSlotMidnaOriginalScaleY = 1.0f;
+f32 g_zSlotMidnaOriginalTranslateX = 0.0f;
+f32 g_zSlotMidnaOriginalTranslateY = 0.0f;
 f32 g_hoverGroundHeight = 0.0f;
 u32 g_hoverLandingFrames = 0;
 u32 g_hoverRippleEmitter = 0;
@@ -443,11 +511,16 @@ void set_goron_tunic_active(bool active);
 #include "features/world_hooks.cpp"
 #include "features/goron_tunic.cpp"
 #include "features/dark_link.cpp"
+#include "features/dark_link_veil.cpp"
 #include "features/character_actions.cpp"
 #include "features/sit_music.cpp"
 #include "features/shield_surf.cpp"
 #include "features/armos_hammer.cpp"
 #include "features/manual_jump.cpp"
+#include "features/sprint.cpp"
+#include "features/bow_aim.cpp"
+#include "features/manual_glider_visual.cpp"
+#include "features/fairy_companion.cpp"
 #include "features/settings.cpp"
 #include "features/ice_arrow.cpp"
 #include "features/deku_nut.cpp"
@@ -456,17 +529,25 @@ void set_goron_tunic_active(bool active);
 #include "features/goron_mask.cpp"
 #include "features/giant_mask.cpp"
 
+using manual_glider_visual::ManualGliderCarrierDraw;
+using manual_glider_visual::ManualGliderDrawHand;
+using manual_glider_visual::ManualGliderPlayerDraw;
+
 ModResult install_hooks() {
     ADD_PRE(OpenExplain, suppress_secondary_explain);
     ADD_POST(SetNameString, name_secondary_item);
     ADD_PRE(RingSetSelectItem, prepare_secondary_equip_icon);
     ADD_POST(RingSetSelectItem, finish_secondary_equip_icon);
     ADD_POST(RingSetJumpItem, clear_secondary_assignment_for_vanilla_ring);
+    ADD_PRE(RingSetSelectItemForce, preserve_secondary_z_assignment);
+    ADD_PRE(RingSetActiveCursor, assign_secondary_z_from_ring);
     ADD_PRE(RingIsMixItemOn, show_ice_arrow_combo_on_prompt);
     ADD_PRE(RingIsMixItemOff, show_ice_arrow_combo_off_prompt);
     ADD_PRE(ChangeTextureItemXY, prepare_hover_boots_hud_icon);
     ADD_POST(ChangeTextureItemXY, tint_goron_tunic_hud_icon);
     ADD_POST(ChangeTextureItemXY, finish_hover_boots_hud_icon);
+    ADD_POST(MeterMidnaAlpha, update_z_slot_hud);
+    ADD_POST(ZSlotAmmoDraw, draw_z_slot_ammo_numbers);
     ADD_POST(MeterMoveButtonXY, refresh_secondary_hud_assignments);
     ADD_PRE(ReadItemTexture, apply_hawk_grass_equip_icon);
     ADD_POST(ReadItemTexture, replace_secondary_custom_icon);
@@ -477,6 +558,46 @@ ModResult install_hooks() {
     ADD_POST(AutoGroundHit, maintain_hover_height);
     ADD_POST(PlayerExecute, disable_hover_boots_for_wolf);
     ADD_POST(PlayerExecute, enforce_goron_tunic_clothing);
+    ADD_PRE(DeferGlideBomblingExplode, defer_glide_bombling_explode);
+    ADD_POST(GlideBomblingWait, finish_glide_bombling_fall);
+    ADD_PRE(bow_aim::BulletTimeActorExecute, bow_aim::track_actor_execute);
+    ADD_POST(bow_aim::BulletTimeActorExecute, bow_aim::untrack_actor_execute);
+    ADD_POST(bow_aim::BulletTimeActorExecute, manual_glider_visual::after_carrier_execute);
+    ADD_PRE(bow_aim::BulletTimeProcessExecute, bow_aim::scale_actor_execution);
+    ADD_PRE(bow_aim::BulletTimeLinkPosMove, bow_aim::slow_link_movement);
+    ADD_POST(bow_aim::BulletTimeLinkPosMove, bow_aim::finish_slow_link_movement);
+    ADD_PRE(bow_aim::BowSubject, bow_aim::replace_bow_subject);
+    ADD_POST(bow_aim::BowCameraNextMode, bow_aim::select_bow_camera_mode);
+    ADD_POST(bow_aim::BowCameraNextType, bow_aim::select_bow_camera_type);
+    ADD_POST(bow_aim::BowSubjectCamera, bow_aim::adjust_third_person_bow_camera);
+    ADD_PRE(bow_aim::BowCameraRun, bow_aim::prepare_bow_aim_camera);
+    ADD_POST(bow_aim::BowCameraRun, bow_aim::adjust_bow_aim_camera);
+    ADD_PRE(bow_aim::BowModelCalc, bow_aim::correct_held_bow_pose);
+    ADD_POST(bow_aim::BowModelCalc, bow_aim::restore_held_bow_pose);
+    ADD_POST(bow_aim::BowArrowShooting, bow_aim::aim_arrow_at_bow_reticle);
+    ADD_PRE(PlayerExecute, bow_aim::update_before_player_execute);
+    ADD_POST(PlayerExecute, bow_aim::update_after_player_execute);
+    ADD_PRE(WheelSprintCheckMoveDoAction, defer_sprint_roll_for_window);
+    ADD_PRE(WheelSprintProcMove, before_sprint_proc_move);
+    ADD_POST(WheelSprintProcMove, after_sprint_proc_move);
+    ADD_PRE(WheelSprintSetDoubleAnime, adjust_sprint_animation_cadence);
+    ADD_PRE(WheelSprintGetMainBckData, select_sprint_run_animation);
+    ADD_PRE(WheelWolfSprintMovement, before_wolf_sprint_movement);
+    ADD_PRE(WheelWolfSprintDash, before_wolf_sprint_movement);
+    ADD_PRE(WheelWolfSprintJump, before_wolf_sprint_jump);
+    ADD_POST(WheelWolfSprintJump, after_wolf_sprint_jump);
+    ADD_PRE(WheelSprintCommonProcInit, before_sprint_common_proc_init);
+    ADD_POST(PlayerExecute, update_sprint_stamina);
+    ADD_POST(WheelSprintStaminaMeterDraw, draw_sprint_stamina_meter);
+    ADD_POST(PlayerExecute, update_revali_gale_visual);
+    ADD_POST(FairyActionLabelHook, replace_fairy_action_label);
+    ADD_POST(FairyDoStatus, choose_fairy_action_prompt);
+    ADD_POST(FairyCommonDoStatus, choose_fairy_action_prompt);
+    ADD_POST(FairySetStickData, intercept_fairy_a_toggle);
+    ADD_POST(PlayerDraw, draw_revali_gale_visual);
+    ADD_POST(ManualGliderPlayerDraw, manual_glider_visual::after_player_draw);
+    ADD_POST(ManualGliderDrawHand, manual_glider_visual::after_draw_hand);
+    ADD_PRE(ManualGliderCarrierDraw, manual_glider_visual::before_carrier_draw);
     ADD_PRE(CollectChangeClothe, prevent_goron_tunic_clothing_change);
     ADD_PRE(GetGroundAngle, flatten_hover_water_ground_angle);
     ADD_PRE(GetSlidePolygon, suppress_submerged_water_slide_polygon);
@@ -485,6 +606,10 @@ ModResult install_hooks() {
     ADD_PRE(IceSlipBgCheck, skip_submerged_ice_slip);
     ADD_PRE(SwimOutAfter, keep_hover_boots_on_water_surface);
     ADD_PRE(CheckAutoJumpAction, handle_hover_airborne_action);
+    ADD_PRE(CheckAutoJumpAction, before_check_auto_jump_action);
+    ADD_POST(CheckAutoJumpAction, after_check_auto_jump_action);
+    ADD_PRE(DisableAutoJumpFallInit, preserve_sprint_speed_on_ledge_fall);
+    ADD_PRE(DisableAutoJumpWolfFallInit, preserve_sprint_speed_on_ledge_fall);
     ADD_PRE(ProcHangStartInit, suppress_hover_ledge_grab);
     ADD_PRE(ProcHangFallStartInit, suppress_hover_ledge_grab);
     ADD_PRE(CheckLandAction, land_on_lava_surface);
@@ -504,17 +629,11 @@ ModResult install_hooks() {
     ADD_PRE(ProcSwimDamageInit, suppress_twilight_ward_hit_stun);
     ADD_PRE(SetHeavyBoots, handle_hover_boots_heavy_toggle);
     ADD_POST(SetStickData, update_secondary_assigned_item_input);
+    ADD_PRE(MidnaTalkTrigger, route_midna_to_dpad_left);
+    ADD_POST(MidnaTalkTrigger, restore_midna_z_trigger);
+    ADD_POST(PlayerPadRead, update_manual_jump_button_input);
+    ADD_POST(PlayerPadRead, capture_z_slot_midna_input);
     ADD_POST(SetStickData, suppress_goron_mask_sword_item_input);
-    ADD_PRE(CheckGrabRooster, emulate_manual_cucco_glide_check);
-    ADD_PRE(ProcAutoJump, suspend_manual_glide_bow_movement_input);
-    ADD_POST(ProcAutoJump, update_manual_glide_bow_aim);
-    ADD_PRE(ArrowShooting, enable_manual_glide_arrow_aim);
-    ADD_POST(ArrowShooting, restore_manual_glide_arrow_aim);
-    ADD_PRE(SetBodyAngleXReadyAnime, preserve_manual_glide_bow_pitch);
-    ADD_PRE(CheckNotItemSinkLimit, allow_manual_glide_bow_pitch);
-#if TARGET_PC
-    ADD_PRE(CheckAimContext, enable_manual_glide_bow_aim_context);
-#endif
     ADD_POST(SetStickData, suppress_sit_stick_input);
     ADD_PRE(CheckSnowCode, allow_shield_surf_on_any_ground);
     ADD_PRE(CheckShieldDraw, suppress_player_shield_draw_during_surf);
@@ -543,6 +662,15 @@ ModResult install_hooks() {
     ADD_PRE(MapShow, begin_map_input);
     ADD_POST(MapShow, end_map_input);
     ADD_PRE(CheckRestartRoom, prevent_lava_return);
+    ADD_POST(CheckItemChangeFromButton, handle_vanilla_z_item_change);
+    ADD_PRE(CheckSetItemTrigger, activate_vanilla_z_slot_item);
+    ADD_POST(CheckItemSetButtonHook, count_z_item_as_assigned);
+    const ModResult zSelectItemHookResult =
+        mods::hook::add_post<ZSelectItemAccessorHook>(
+            svc_hook, resolve_z_selected_item);
+    if (zSelectItemHookResult != MOD_OK) {
+        return zSelectItemHookResult;
+    }
     ADD_PRE(ItemTriggerCheck, suppress_goron_mask_sword_trigger);
     ADD_PRE(ItemButtonCheck, suppress_goron_mask_sword_button);
     ADD_PRE(DrawButtonB, set_goron_mask_roll_action);
@@ -603,16 +731,7 @@ ModResult install_hooks() {
     ADD_PRE(CheckRestartRoom, suppress_water_surface_restart);
     ADD_PRE(CheckSceneChange, suppress_submerged_water_exit);
     ADD_PRE(ModelCalc, offset_sit_model_forward_before_calc);
-    ADD_PRE(ModelDraw, mark_dark_link_model_for_draw);
-    ADD_POST(LightTevColorTypeMaji, apply_dark_link_after_lighting);
     ADD_POST(SettingTevStruct, apply_ice_arrow_shader_after_tev_setup);
-    ADD_PRE(MaterialMakeDisplayList, apply_dark_link_material_before_display);
-    ADD_PRE(MaterialDiff, apply_dark_link_material_diff);
-    ADD_PRE(ShapeDraw, apply_dark_link_terminal_output_before_shape_draw);
-    ADD_POST(DamageMagnification, double_dark_link_incoming_damage);
-    ADD_PRE(SwordAtParam, modify_active_form_sword_damage);
-    ADD_PRE(CylinderAtParam, modify_active_form_cylinder_sword_damage);
-    ADD_POST(ModelDraw, restore_dark_link_model_after_draw);
     ADD_POST(ModelCalc, update_hover_magic_after_model_calc);
     ADD_POST(ItemExecute, collect_nearby_rupees);
     ADD_PRE(GlowSphereExecute, collect_nearby_clawshot_orbs);
@@ -645,6 +764,23 @@ bool features_is_spawned_hawk(uint32_t id) {
     return is_spawned_hawk_internal(id);
 }
 
+bool wheel_is_dark_link_active() {
+    return g_darkLinkVisualActive;
+}
+
+bool wheel_is_giant_mask_active() {
+    const auto* link = daAlink_getAlinkActorClass();
+    return g_giantMaskActive && link != nullptr && !link->checkWolf();
+}
+
+void wheel_dark_link_remote_draw_begin(J3DModel* model, bool active) {
+    g_darkLinkRemoteDrawModel = active ? model : nullptr;
+}
+
+void wheel_dark_link_remote_draw_end() {
+    g_darkLinkRemoteDrawModel = nullptr;
+}
+
 extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_giantMaskActive = false;
@@ -653,28 +789,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_giantMaskLoadFailed = false;
     g_giantMaskPhase = {};
     g_giantMaskModel = nullptr;
-    g_darkLinkFormActive = false;
-    g_darkLinkFormBlend = 0.0f;
+    g_darkLinkVisualActive = false;
     g_shieldSurfActive = false;
     g_shieldSurfStartPending = false;
     g_shieldSurfDismountPending = false;
     g_shieldSurfBoardId = fpcM_ERROR_PROCESS_ID_e;
     g_shieldSurfStartWaitFrames = 0;
     g_manualCuccoGlideActive = false;
-    g_manualGlideBowAiming = false;
-    g_manualGlideBowMoveValue = 0.0f;
-    g_manualGlideBowBodyAngleY = 0;
-    g_manualGlideArrowAimStatusAdded = false;
-    g_manualGlideSlowTimeScaleActive = false;
-    g_manualGlidePreviousTimeScale = 1.0f;
-    g_manualJumpPendingR = false;
-    g_manualJumpLeftStickWasHeld = false;
-    g_manualJumpRightStickWasHeld = false;
-    g_manualJumpLeftStickTriggered = false;
-    g_manualJumpRightStickTriggered = false;
-    g_manualJumpLeftBumperWasHeld = false;
-    g_manualJumpLeftBumperTriggered = false;
-    stop_manual_glide_aura();
+    g_manualGlideRetiring = false;
+    g_manualGlideActorId = fpcM_ERROR_PROCESS_ID_e;
+    reset_manual_jump_input_state();
     g_iceArrowSelected = false;
     g_lensOfTruthActive = false;
     g_lensVisionActivated = false;
@@ -692,13 +816,10 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_sitMusicAudioManagerUnavailableReported = false;
     g_sitMusicReportedFailureTrack = 0;
     g_sitMusicWaveFailureTrack = 0;
-    g_darkLinkDrawModelData = nullptr;
-    g_darkLinkAppearanceModelData.fill(nullptr);
-    g_darkLinkAppearanceModelDataCount = 0;
     g_secondaryItemInputHandled = false;
-    g_manualJumpConfigReadFailureReported = false;
+    g_jumpButtonConfigReadFailureReported = false;
     g_manualJumpHeightConfigReadFailureReported = false;
-    g_glideBowSlowTimeConfigReadFailureReported = false;
+    g_glideItemConfigReadFailureReported = false;
     g_hoverPlaneLowerBindingConfigReadFailureReported = false;
     g_hoverPlaneLowerBindingWasHeld = false;
     g_secondaryRingInterpolationErrorLogged = false;
@@ -724,12 +845,42 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
-    config.name = "manualJumpBinding";
-    config.type = CONFIG_VAR_INT;
-    config.default_int = kManualJumpDefaultBinding;
-    result = svc_config->register_var(mod_ctx, &config, &g_manualJumpBinding);
+    config.name = "zItemSlotEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_zItemSlotEnabled);
     if (result != MOD_OK) {
-        svc_log->error(mod_ctx, "failed to register manual jump binding setting");
+        svc_log->error(mod_ctx, "failed to register Z item slot setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "darkLinkDamageMultiplier";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kDarkLinkDamageMultiplierDefaultPercent;
+    result = svc_config->register_var(mod_ctx, &config, &g_darkLinkDamageMultiplier);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Dark Link damage multiplier setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "manualJumpEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = true;
+    result = svc_config->register_var(mod_ctx, &config, &g_manualJumpEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register manual jump setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "jumpButton";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kJumpButtonDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_jumpButton);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register jump button setting");
         return result;
     }
 
@@ -754,12 +905,182 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
-    config.name = "glideBowSlowTimePercent";
-    config.type = CONFIG_VAR_INT;
-    config.default_int = kGlideBowSlowTimeDefaultPercent;
-    result = svc_config->register_var(mod_ctx, &config, &g_glideBowSlowTimePercent);
+    config.name = "sprintEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_sprintEnabled);
     if (result != MOD_OK) {
-        svc_log->error(mod_ctx, "failed to register glide bow slow time setting");
+        svc_log->error(mod_ctx, "failed to register sprint setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "sprintSpeedPercent";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kSprintSpeedDefaultPercent;
+    result = svc_config->register_var(mod_ctx, &config, &g_sprintSpeedPercent);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register sprint speed setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "wolfSprintEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_wolfSprintEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Wolf sprint setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "wolfSprintSpeedPercent";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kSprintSpeedDefaultPercent;
+    result = svc_config->register_var(mod_ctx, &config, &g_wolfSprintSpeedPercent);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Wolf sprint speed setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "sprintStaminaEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_sprintStaminaEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register sprint stamina setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "sprintStaminaDrain";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kSprintStaminaDrainDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_sprintStaminaDrain);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register sprint stamina drain setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "sprintStaminaRecovery";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kSprintStaminaRecoveryDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_sprintStaminaRecovery);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register sprint stamina recovery setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "glideEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_glideEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register glide setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "glideItem";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kGlideItemDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_glideItem);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register glide item setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "revalisGaleEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_revalisGaleEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Revali's Gale setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "galeHeightPercent";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kGaleHeightDefaultPercent;
+    result = svc_config->register_var(mod_ctx, &config, &g_galeHeightPercent);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Gale height setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "galeChargeCapacity";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kGaleChargeCapacityDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_galeChargeCapacity);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Gale charge capacity setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "galeRecoverySeconds";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kGaleRecoveryDefaultSeconds;
+    result = svc_config->register_var(mod_ctx, &config, &g_galeRecoverySeconds);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Gale recovery setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "aimMode";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kAimModeDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_aimMode);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register bow aim mode setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "aimMovementEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = true;
+    result = svc_config->register_var(mod_ctx, &config, &g_aimMovementEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register bow aim movement setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "cinemaZoomPercent";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kCinemaZoomDefaultPercent;
+    result = svc_config->register_var(mod_ctx, &config, &g_cinemaZoomPercent);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Cinema zoom setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "thirdPersonReticleOffsetY";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kThirdPersonReticleDefaultY;
+    result = svc_config->register_var(mod_ctx, &config, &g_thirdPersonReticleOffsetY);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register third-person reticle offset setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "bulletTimeMode";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kBulletTimeModeDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_bulletTimeMode);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Bullet Time setting");
         return result;
     }
 
@@ -917,9 +1238,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
     restore_secondary_items_for_save(mod_ctx, 0, nullptr);
 
+    result = register_fairy_companion_settings();
+    if (result != MOD_OK) {
+        return result;
+    }
+
     UiModsPanelDesc panel = UI_MODS_PANEL_DESC_INIT;
     panel.build = build_panel;
-    panel.update = update_glide_bow_slow_time_setting;
     result = svc_ui->register_mods_panel(mod_ctx, &panel);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register the secondary wheel settings panel");
@@ -947,12 +1272,19 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) {
         return result;
     }
+    result = initialize_dark_link_visual_hooks(error);
+    if (result != MOD_OK) {
+        return result;
+    }
     result = coop_mod_initialize(error);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to initialize co-op runtime");
         coop_mod_shutdown(error);
+        shutdown_dark_link_visual_hooks();
         return result;
     }
+    initialize_fairy_companion_actor();
+    dark_link_veil::initialize_dark_link_veil();
     svc_log->info(mod_ctx, "secondary inventory wheel initialized");
     (void)error;
     return MOD_OK;
@@ -968,7 +1300,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
             g_hoverBootsTransitionPending = false;
         }
     }
-    update_dark_link_form_blend();
+    dark_link_veil::update_dark_link_veil();
     update_sit_action();
     update_sit_music();
     update_goron_lava_contact_timer();
@@ -979,19 +1311,31 @@ MOD_EXPORT ModResult mod_update(ModError*) {
         static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     update_manual_cucco_glide(
         static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
-    update_manual_glide_bow_slow_time();
+    manual_glider_visual::update(
+        static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     update_hawk_grass_resource();
     update_ice_keese_resource();
     update_spawned_hawk_cleanup();
     update_lens_of_truth_poes();
     update_truth_mask_resource();
+    update_fairy_companion();
     update_goron_mask();
     update_giant_mask();
     update_armos_hammer();
+    bow_aim::update_bullet_time_for_player(
+        static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     return coop_mod_update(nullptr);
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    bow_aim::stop_bow_bullet_time();
+    shutdown_fairy_companion();
+    g_revaliGaleVisual.release();
+    g_revaliGaleVisualOwner = nullptr;
+    JKR_DELETE(g_secondaryZHudLanternMeter);
+    manual_glider_visual::shutdown();
+    shutdown_dark_link_visual_hooks();
+    dark_link_veil::shutdown_dark_link_veil();
     const ModResult coopResult = coop_mod_shutdown(nullptr);
     g_giantMaskActive = false;
     if (g_armosHammerActive) {
@@ -1004,17 +1348,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
         forget_armos_hammer_hand_matrix();
         g_armosHammerActive = false;
     }
-    if (g_manualGlideArrowAimStatusAdded) {
-        dComIfGp_clearPlayerStatus0(0, 0x200000);
-        g_manualGlideArrowAimStatusAdded = false;
-    }
-    if (g_manualGlideBowAiming) {
-        dComIfGp_clearPlayerStatus0(0, 0x2000);
-        g_manualGlideBowAiming = false;
-    }
-    g_manualCuccoGlideActive = false;
-    stop_manual_glide_aura();
-    restore_manual_glide_bow_slow_time();
+    release_manual_cucco_glide(static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     if (g_secondarySaveObserver != 0) {
         const ModResult result =
             svc_save->unobserve_saves(mod_ctx, g_secondarySaveObserver);
@@ -1023,8 +1357,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
         }
         g_secondarySaveObserver = 0;
     }
-    restore_dark_link_colors();
-    g_darkLinkFormActive = false;
+    g_darkLinkVisualActive = false;
     if (g_sitActionState == SitActionState::Seated) {
         auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
         if (alink != nullptr && !alink->checkEventRun() &&
@@ -1117,8 +1450,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     set_goron_tunic_active(false);
     g_goronLavaContactFrames = 0;
     g_hoverBootsEquipped = false;
-    g_darkLinkFormActive = false;
-    g_darkLinkFormBlend = 0.0f;
+    g_darkLinkVisualActive = false;
     g_iceArrowSelected = false;
     g_lensOfTruthActive = false;
     g_truthMaskActive = false;
@@ -1126,7 +1458,6 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_goronMaskInputBlockFrames = 0;
     update_lens_of_truth_poes();
     g_iceArrowFrozenTargets.fill({});
-    g_darkLinkDrawModelData = nullptr;
     g_secondaryItemInputHandled = false;
     g_hoverGroundHeightValid = false;
     g_hoverLandingSequenceActive = false;

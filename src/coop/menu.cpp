@@ -56,6 +56,11 @@ struct SurfaceHandles {
     std::vector<std::string> voicePeerLabels;
     std::string lastVoicePeers;
     bool voicePeersPushed = false;
+    UiListHandle globalPlayers = 0;
+    std::vector<uint64_t> globalPlayerIds;
+    std::vector<std::string> globalPlayerLabels;
+    std::string lastGlobalPlayers;
+    bool globalPlayersPushed = false;
     std::string lastGlobalStatus;
     UiListHandle blockList = 0;
     std::string lastBlockList;
@@ -452,6 +457,47 @@ void push_voice_peers(SurfaceHandles& h) {
     size_list(h.voicePeers, items.size());
 }
 
+void push_global_player_names(SurfaceHandles& h) {
+    if (h.globalPlayers == 0) return;
+    const uint32_t myId = global_my_id();
+    std::vector<uint64_t> ids;
+    std::vector<std::string> labels;
+    if (global_active()) {
+        ids.push_back(myId);
+        labels.push_back(features_local_name() + " (You)");
+    }
+    for (const GlobalPlayer& peer : global_online_players()) {
+        if (peer.id != myId && !peer.name.empty()) {
+            ids.push_back(peer.id);
+            labels.push_back(peer.name);
+        }
+    }
+
+    std::string joined;
+    for (size_t i = 0; i < labels.size(); ++i) {
+        joined += std::to_string(ids[i]) + ":" + labels[i] + "\n";
+    }
+    if (h.globalPlayersPushed && joined == h.lastGlobalPlayers) return;
+    h.globalPlayersPushed = true;
+    h.lastGlobalPlayers = joined;
+    h.globalPlayerIds = std::move(ids);
+    h.globalPlayerLabels = std::move(labels);
+
+    std::vector<UiListItem> items;
+    items.reserve(h.globalPlayerLabels.size());
+    for (size_t i = 0; i < h.globalPlayerLabels.size(); ++i) {
+        UiListItem item = UI_LIST_ITEM_INIT;
+        item.key = h.globalPlayerIds[i];
+        item.label = h.globalPlayerLabels[i].c_str();
+        items.push_back(item);
+    }
+    svc_ui->list_set_items(
+        mod_ctx, h.globalPlayers, items.empty() ? nullptr : items.data(), items.size());
+    size_list(h.globalPlayers, items.size());
+}
+
+void on_global_player_name_pressed(ModContext*, UiListHandle, uint64_t, void*) {}
+
 void on_voice_peer_pressed(ModContext*, UiListHandle, uint64_t key, void*) {
     if (key >= kCoopMaxPlayers) return;
     const uint8_t id = static_cast<uint8_t>(key);
@@ -650,6 +696,7 @@ void refresh(SurfaceHandles& h) {
     }
     push_players(h);
     push_voice_peers(h);
+    push_global_player_names(h);
 }
 
 void on_player_pressed(ModContext*, UiListHandle, uint64_t key, void*) {
@@ -893,7 +940,37 @@ ModResult group_global_pvp(ModContext*, UiElementHandle pane, void*, ModError*) 
     return MOD_OK;
 }
 
+ModResult group_global_player_list(
+    ModContext*, UiElementHandle pane, void*, ModError*)
+{
+    add_panel_header(pane, "Players Online", "Players currently using Hyrule Online.");
+    if (!global_active()) {
+        svc_ui->pane_add_text(mod_ctx, pane, "Join Hyrule Online to see player names.", nullptr);
+    }
+
+    UiListDesc list = UI_LIST_DESC_INIT;
+    list.on_pressed = on_global_player_name_pressed;
+    s_window.globalPlayers = 0;
+    s_window.globalPlayerIds.clear();
+    s_window.globalPlayerLabels.clear();
+    s_window.globalPlayersPushed = false;
+    if (svc_ui->pane_add_list(mod_ctx, pane, &list, &s_window.globalPlayers) != MOD_OK) {
+        s_window.globalPlayers = 0;
+        coop_log::warn("coop_mod: [UI] could not add the Hyrule Online players list");
+        svc_ui->pane_add_text(
+            mod_ctx, pane, "The player list is temporarily unavailable.", nullptr);
+        return MOD_OK;
+    }
+    push_global_player_names(s_window);
+    return MOD_OK;
+}
+
 void build_global(UiElementHandle pane, SurfaceHandles& h, UiElementHandle detail) {
+    h.globalPlayers = 0;
+    h.globalPlayerIds.clear();
+    h.globalPlayerLabels.clear();
+    h.globalPlayersPushed = false;
+    h.lastGlobalPlayers.clear();
     add_panel_header(pane, "Hyrule Online", "Play alongside everyone out in Hyrule.");
     add_wide_rml(pane, "<div class=\"hot-intro\">See other people playing in the same area as you. You each "
                        "keep your own game, nothing gets shared.</div>");
@@ -901,6 +978,7 @@ void build_global(UiElementHandle pane, SurfaceHandles& h, UiElementHandle detai
     add_wide_rml(pane, h.lastStatusCard, &h.statusCard);
     h.lastPlayersCard = global_players_card_rml();
     add_wide_rml(pane, h.lastPlayersCard, &h.playersCard);
+    add_group_or_section(pane, detail, "Players Online", group_global_player_list);
 
     UiControlDesc join = UI_CONTROL_DESC_INIT;
     join.kind = UI_CONTROL_BUTTON;

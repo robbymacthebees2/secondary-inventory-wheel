@@ -1564,6 +1564,12 @@ void send_local_snapshot() {
         snapshot.poseFlags |= kPuppetPoseSeated;
         snapshot.sinkShapeOffset = alink->mSinkShapeOffset;
     }
+    if (alink != nullptr && !localIsWolf && wheel_is_dark_link_active()) {
+        snapshot.poseFlags |= kPuppetPoseDarkLink;
+    }
+    if (alink != nullptr && !localIsWolf && wheel_is_giant_mask_active()) {
+        snapshot.poseFlags |= kPuppetPoseGiantMask;
+    }
     auto fill_slots = [](AnmSlotSnapshot* out, const daPy_anmHeap_c* heaps,
                          const daPy_frameCtrl_c* frameCtrls, mDoExt_AnmRatioPack* packs) {
         for (int i = 0; i < 3; ++i) {

@@ -415,6 +415,7 @@ export class Global {
     info.name = clean;
     ws.serializeAttachment(info);
     this.everyoneInArea(info, { op: "rename", id: info.id, name: clean });
+    this.broadcastRoster();
   }
 
   unpair(ws, info, otherId) {
@@ -500,6 +501,19 @@ export class Global {
     return { total, here, same };
   }
 
+  broadcastRoster(exclude = null) {
+    const players = [];
+    for (const ws of this.all()) {
+      if (ws === exclude) continue;
+      const info = ws.deserializeAttachment();
+      if (info?.hello) players.push(String(info.id), info.name || "Player");
+    }
+    const roster = { op: "roster", players };
+    for (const ws of this.all()) {
+      if (ws !== exclude && ws.deserializeAttachment()?.hello) send(ws, roster);
+    }
+  }
+
   part(ws, info) {
     const freed = [];
     for (const otherId of info.peers || []) {
@@ -583,6 +597,7 @@ export class Global {
       this.introduce(ws, info);
       ws.serializeAttachment(info);
       send(ws, { op: "count", ...this.counts(info.area, info.v) });
+      this.broadcastRoster();
       return;
     }
     if (msg.op === "area") {
@@ -624,7 +639,10 @@ export class Global {
 
     }
     const info = ws.deserializeAttachment();
-    if (info) this.part(ws, info);
+    if (info) {
+      this.part(ws, info);
+      this.broadcastRoster(ws);
+    }
   }
 
   async webSocketError(ws) {

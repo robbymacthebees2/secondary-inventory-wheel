@@ -251,7 +251,6 @@ HookAction suppress_hover_ledge_grab(ModContext*, void* args, void* retval, void
 void update_hover_magic_after_model_calc(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     update_hover_magic_effect(alink);
-    update_manual_glide_aura(alink);
 }
 
 HookAction offset_sit_model_forward_before_calc(ModContext*, void* args, void*, void*) {

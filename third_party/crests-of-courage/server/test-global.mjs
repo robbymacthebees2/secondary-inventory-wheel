@@ -33,6 +33,27 @@ function check(what, ok) {
   if (!ok) process.exitCode = 1;
 }
 
+async function nextOp(peer, op) {
+  for (let i = 0; i < 10; ++i) {
+    const msg = await peer.next();
+    if (!msg) return null;
+    if (msg.op === op) return msg;
+  }
+  return null;
+}
+
+function hasRoster(msg, expected) {
+  if (msg?.op !== "roster" || !Array.isArray(msg.players) || msg.players.length % 2 !== 0) {
+    return false;
+  }
+  const players = new Map();
+  for (let i = 0; i < msg.players.length; i += 2) {
+    players.set(String(msg.players[i]), msg.players[i + 1]);
+  }
+  return players.size === expected.length &&
+    expected.every(([id, name]) => players.get(String(id)) === name);
+}
+
 const a = await open();
 const b = await open();
 const c = await open();
@@ -41,10 +62,27 @@ const wb = await b.next();
 const wc = await c.next();
 check("welcome with an id", wa.op === "welcome" && wb.id !== wa.id && wc.id !== wb.id);
 
-for (const [p, port] of [[a, 1001], [b, 1002], [c, 1003]]) {
-  p.send({ op: "hello", v: 99, ep: `203.0.113.${port % 250}:${port}`, port, lan: "192.168.1.5" });
-  await p.next();
-}
+a.send({ op: "hello", v: 99, name: "Alice", ep: "203.0.113.1:1001", port: 1001 });
+check("hello publishes the first online name",
+  hasRoster(await nextOp(a, "roster"), [[wa.id, "Alice"]]));
+b.send({ op: "hello", v: 99, name: "Bob", ep: "203.0.113.2:1002", port: 1002 });
+check("hello publishes the roster to existing and new clients",
+  hasRoster(await nextOp(a, "roster"), [[wa.id, "Alice"], [wb.id, "Bob"]]) &&
+  hasRoster(await nextOp(b, "roster"), [[wa.id, "Alice"], [wb.id, "Bob"]]));
+c.send({ op: "area", stage: "F_SP104" });
+await c.next();
+c.send({ op: "hello", v: 99, name: "Charlie", ep: "203.0.113.3:1003", port: 1003 });
+const threePlayers = [[wa.id, "Alice"], [wb.id, "Bob"], [wc.id, "Charlie"]];
+check("all online names are broadcast across game areas",
+  hasRoster(await nextOp(a, "roster"), threePlayers) &&
+  hasRoster(await nextOp(b, "roster"), threePlayers) &&
+  hasRoster(await nextOp(c, "roster"), threePlayers));
+a.send({ op: "name", name: "Alice Updated" });
+check("renames update every online roster",
+  hasRoster(await nextOp(a, "roster"), [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]) &&
+  hasRoster(await nextOp(b, "roster"), [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]) &&
+  hasRoster(await nextOp(c, "roster"), [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]));
+
 a.send({ op: "area", stage: "F_SP103" });
 await a.next();
 b.send({ op: "area", stage: "F_SP103" });

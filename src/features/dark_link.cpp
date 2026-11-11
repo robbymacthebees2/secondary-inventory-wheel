@@ -1,547 +1,459 @@
-void restore_dark_link_colors() {
-    g_darkLinkFormBlend = 0.0f;
-    g_darkLinkDrawModelData = nullptr;
-    g_darkLinkAppearanceModelData.fill(nullptr);
-    g_darkLinkAppearanceModelDataCount = 0;
-}
+#include "features/dark_link_eye_bloom.hpp"
 
-void play_dark_link_transition_effect(daAlink_c* alink, bool activating) {
-    if (alink == nullptr) {
-        return;
+namespace {
+
+DEFINE_HOOK(&J3DMatPacket::draw, DarkLinkMaterialDrawHook);
+DEFINE_HOOK(&J3DShapePacket::draw, DarkLinkShapePacketDrawHook);
+DEFINE_HOOK(&J3DShapePacket::drawFast, DarkLinkShapePacketFastHook);
+DEFINE_HOOK(&J3DShape::drawFast, DarkLinkShapeDrawHook);
+DEFINE_HOOK(&J3DShapeDraw::draw, DarkLinkEyePrimitiveDrawHook);
+DEFINE_HOOK(&at_power_check, DarkLinkAttackPowerHook);
+
+struct DarkLinkDrawScope {
+    J3DShapePacket* packet = nullptr;
+    J3DMatPacket* materialPacket = nullptr;
+    bool applied = false;
+    bool eyeGlow = false;
+};
+
+std::array<DarkLinkDrawScope, 16> g_darkLinkDrawScopes{};
+std::array<J3DMatPacket*, 16> g_darkLinkMaterialScopes{};
+size_t g_darkLinkDrawDepth = 0;
+size_t g_darkLinkMaterialDepth = 0;
+J3DModel* g_darkLinkRemoteDrawModel = nullptr;
+
+struct DarkLinkSwapTable {
+    int identity = -1;
+};
+
+DarkLinkSwapTable find_dark_link_swap_table(J3DTevBlock* tev, unsigned stageCount) {
+    std::array<bool, 4> used{};
+    DarkLinkSwapTable result;
+    for (unsigned i = 0; i < stageCount; ++i) {
+        const auto* stage = tev->getTevStage(i);
+        if (stage == nullptr) {
+            return result;
+        }
+
+        used[stage->mTevSwapModeInfo & 3] = true;
+        used[(stage->mTevSwapModeInfo >> 2) & 3] = true;
     }
-
-    cXyz scale(1.0f, 1.0f, 1.0f);
-    const u16 effectId = activating ? ID_ZI_S_LK_WARP_APP_A
-                                    : ID_ZI_S_LK_WARP_DISAPP_A;
-    dComIfGp_particle_set(dPa_RM(effectId), &alink->current.pos, nullptr, &scale);
-}
-
-f32 smoothstep(f32 edge0, f32 edge1, f32 value) {
-    const f32 t = std::clamp((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
-
-bool contains_case_insensitive(const char* text, const char* needle) {
-    if (text == nullptr || needle == nullptr || *needle == '\0') {
-        return false;
-    }
-
-    for (const char* start = text; *start != '\0'; ++start) {
-        const char* textChar = start;
-        const char* needleChar = needle;
-        while (*textChar != '\0' && *needleChar != '\0' &&
-               std::tolower(static_cast<unsigned char>(*textChar)) ==
-                   std::tolower(static_cast<unsigned char>(*needleChar)))
+    for (int i = 0; i < 4; ++i) {
+        const auto* table = tev->getTevSwapModeTable(i);
+        if (table != nullptr && table->getR() == GX_CH_RED &&
+            table->getG() == GX_CH_GREEN && table->getB() == GX_CH_BLUE &&
+            table->getA() == GX_CH_ALPHA)
         {
-            ++textChar;
-            ++needleChar;
-        }
-        if (*needleChar == '\0') {
-            return true;
+            result.identity = i;
+            break;
         }
     }
-    return false;
+    for (int i = 0; i < 4; ++i) {
+        if (!used[i] && i != result.identity && result.identity < 0) {
+            result.identity = i;
+        }
+    }
+    return result;
 }
 
-bool material_uses_pupil_texture(J3DModelData* modelData, J3DMaterial* material) {
+bool dark_link_eye_material(J3DModelData* modelData, J3DMaterial* material) {
     if (modelData == nullptr || material == nullptr) {
         return false;
     }
-
-    J3DTexture* textures = modelData->getTexture();
-    JUTNameTab* textureNames = modelData->getTextureName();
-    J3DTevBlock* tevBlock = material->getTevBlock();
-    if (textures == nullptr || textureNames == nullptr || tevBlock == nullptr) {
+    auto* names = modelData->getMaterialName();
+    if (names == nullptr) {
         return false;
     }
-
-    const u8 stageCount = std::min<u8>(material->getTevStageNum(), 16);
-    for (u8 stage = 0; stage < stageCount; ++stage) {
-        J3DTevOrder* order = tevBlock->getTevOrder(stage);
-        const u8 textureMap = order != nullptr ? order->getTexMap() : 0xFF;
-        if (textureMap > 7) {
-            continue;
-        }
-
-        const u16 textureIndex = tevBlock->getTexNo(textureMap);
-        if (textureIndex >= textures->getNum()) {
-            continue;
-        }
-
-        const char* textureName = textureNames->getName(textureIndex);
-        if (contains_case_insensitive(textureName, "pupil") ||
-            contains_case_insensitive(textureName, "iris") ||
-            contains_case_insensitive(textureName, "hitomi"))
-        {
-            return true;
-        }
-    }
-    return false;
+    const char* name = names->getName(material->getIndex());
+    return name != nullptr &&
+        (std::strstr(name, "eyeballL") != nullptr ||
+         std::strstr(name, "eyeballR") != nullptr);
 }
 
-void remember_dark_link_model_data(J3DModelData* modelData) {
-    if (modelData == nullptr) {
-        return;
-    }
+class DarkLinkDisplayList {
+    alignas(32) std::array<u8, 1024> bytes{};
+    size_t size = 0;
+    bool valid = true;
 
-    for (u8 i = 0; i < g_darkLinkAppearanceModelDataCount; ++i) {
-        if (g_darkLinkAppearanceModelData[i] == modelData) {
-            return;
-        }
-    }
-    if (g_darkLinkAppearanceModelDataCount < g_darkLinkAppearanceModelData.size()) {
-        g_darkLinkAppearanceModelData[g_darkLinkAppearanceModelDataCount++] =
-            modelData;
-    }
-}
-
-void remember_dark_link_model_data(J3DModel* model) {
-    remember_dark_link_model_data(
-        model != nullptr ? model->getModelData() : nullptr);
-}
-
-bool is_dark_link_appearance_model_data(J3DModelData* modelData) {
-    if (modelData == nullptr) {
-        return false;
-    }
-    for (u8 i = 0; i < g_darkLinkAppearanceModelDataCount; ++i) {
-        if (g_darkLinkAppearanceModelData[i] == modelData) {
-            return true;
-        }
-    }
-    return false;
-}
-
-HookAction mark_dark_link_model_for_draw(ModContext*, void* args, void*, void*) {
-    g_darkLinkDrawModelData = nullptr;
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    auto* model = mods::arg<J3DModel*>(args, 1);
-    if (alink == nullptr || model == nullptr) {
-        return HOOK_CONTINUE;
-    }
-
-    g_darkLinkAppearanceModelData.fill(nullptr);
-    g_darkLinkAppearanceModelDataCount = 0;
-    if (!alink->checkWolf() && g_darkLinkFormBlend > 0.0f) {
-        remember_dark_link_model_data(alink->mpLinkModel);
-        remember_dark_link_model_data(alink->mpLinkFaceModel);
-        remember_dark_link_model_data(alink->mpLinkHatModel);
-        remember_dark_link_model_data(alink->mpLinkHandModel);
-        remember_dark_link_model_data(alink->mpLinkBootModels[0]);
-        remember_dark_link_model_data(alink->mpLinkBootModels[1]);
-        remember_dark_link_model_data(alink->mShieldModel);
-        remember_dark_link_model_data(alink->mSwordModel);
-        remember_dark_link_model_data(alink->mSheathModel);
-        remember_dark_link_model_data(alink->field_0x064C);
-    }
-
-    const bool isLinkAppearanceModel =
-        model == alink->mpLinkModel || model == alink->mpLinkFaceModel ||
-        model == alink->mpLinkHatModel || model == alink->mpLinkHandModel ||
-        model == alink->mpLinkBootModels[0] || model == alink->mpLinkBootModels[1] ||
-        model == alink->mShieldModel || model == alink->mSwordModel ||
-        model == alink->mSheathModel ||
-        (model->getModelData() != nullptr &&
-         model->getModelData() == alink->field_0x064C);
-    if (isLinkAppearanceModel) {
-        if (!alink->checkWolf() && g_darkLinkFormBlend > 0.0f) {
-            g_darkLinkDrawModelData = model->getModelData();
-        }
-    }
-    return HOOK_CONTINUE;
-}
-
-void apply_dark_link_after_lighting(ModContext*, void* args, void*, void*) {
-    auto* modelData = mods::arg<J3DModelData*>(args, 1);
-    if (modelData == nullptr || modelData != g_darkLinkDrawModelData ||
-        g_darkLinkFormBlend <= 0.0f)
-    {
-        return;
-    }
-
-    g_darkLinkDrawMaterialSnapshotCount = 0;
-    auto* materialNames = modelData->getMaterialName();
-    f32 modelMinY = G_CM3D_F_INF;
-    f32 modelMaxY = -G_CM3D_F_INF;
-    for (u16 i = 0; i < modelData->getMaterialNum(); ++i) {
-        J3DMaterial* material = modelData->getMaterialNodePointer(i);
-        J3DShape* shape = material != nullptr ? material->getShape() : nullptr;
-        Vec* shapeMin = shape != nullptr ? shape->getMin() : nullptr;
-        Vec* shapeMax = shape != nullptr ? shape->getMax() : nullptr;
-        if (shapeMin == nullptr || shapeMax == nullptr) {
-            continue;
-        }
-        modelMinY = std::min(modelMinY, shapeMin->y);
-        modelMaxY = std::max(modelMaxY, shapeMax->y);
-    }
-
-    for (u16 i = 0; i < modelData->getMaterialNum(); ++i) {
-        J3DMaterial* material = modelData->getMaterialNodePointer(i);
-        if (material == nullptr) {
-            continue;
-        }
-
-        J3DTevBlock* tevBlock = material->getTevBlock();
-        const u8 stageCount = material->getTevStageNum();
-        J3DTevStage* stage =
-            tevBlock != nullptr && stageCount > 0
-                ? tevBlock->getTevStage(stageCount - 1)
-                : nullptr;
-        J3DGXColorS10* tevColor = material->getTevColor(0);
-        J3DGXColor* tevKColor = material->getTevKColor(0);
-        if (g_darkLinkDrawMaterialSnapshotCount >=
-            g_darkLinkDrawMaterialSnapshots.size())
-        {
-            svc_log->error(mod_ctx, "Dark Link Form exceeded its draw material capacity");
-            break;
-        }
-
-        DarkLinkDrawMaterialSnapshot& snapshot =
-            g_darkLinkDrawMaterialSnapshots[g_darkLinkDrawMaterialSnapshotCount++];
-        snapshot.material = material;
-        snapshot.stageIndex = stageCount > 0 ? stageCount - 1 : 0;
-        if (stage != nullptr) {
-            snapshot.tevKColorSel =
-                tevBlock->getTevKColorSel(snapshot.stageIndex);
-            snapshot.stage = *stage;
-        }
-        snapshot.hasTevColor = tevColor != nullptr;
-        snapshot.hasTevKColor = tevKColor != nullptr;
-        if (snapshot.hasTevColor) {
-            snapshot.tevColor = *tevColor;
-        }
-        if (snapshot.hasTevKColor) {
-            snapshot.tevKColor = *tevKColor;
-        }
-
-        const char* name = materialNames != nullptr ? materialNames->getName(i) : nullptr;
-        snapshot.isPupilMaterial =
-            contains_case_insensitive(name, "pupil") ||
-            contains_case_insensitive(name, "iris") ||
-            contains_case_insensitive(name, "hitomi") ||
-            material_uses_pupil_texture(modelData, material);
-        snapshot.blend = g_darkLinkFormBlend;
-        J3DShape* shape = material->getShape();
-        Vec* shapeMin = shape != nullptr ? shape->getMin() : nullptr;
-        Vec* shapeMax = shape != nullptr ? shape->getMax() : nullptr;
-        if (modelMaxY > modelMinY && shapeMin != nullptr && shapeMax != nullptr) {
-            const f32 centerY = (shapeMin->y + shapeMax->y) * 0.5f;
-            const f32 span = modelMaxY - modelMinY;
-            const f32 band = std::max(12.0f, span * 0.04f);
-            const f32 fragmentOffset =
-                (static_cast<f32>((i * 37u + 11u) % 17u) / 16.0f - 0.5f) * band;
-            const f32 progress =
-                g_darkLinkFormActive ? g_darkLinkFormBlend : 1.0f - g_darkLinkFormBlend;
-            if (g_darkLinkFormActive) {
-                const f32 front = modelMaxY + band - progress * (span + 2.0f * band);
-                snapshot.blend =
-                    smoothstep(-band, band, centerY + fragmentOffset - front);
-            } else {
-                const f32 front = -band + progress * (span + 2.0f * band);
-                snapshot.blend =
-                    1.0f - smoothstep(
-                               -band, band,
-                               front - (centerY + fragmentOffset - modelMinY));
-            }
-        }
-        if (g_darkLinkFormActive && g_darkLinkFormBlend >= 1.0f) {
-            snapshot.blend = 1.0f;
-        } else if (!g_darkLinkFormActive && g_darkLinkFormBlend <= 0.0f) {
-            snapshot.blend = 0.0f;
-        }
-    }
-}
-
-void apply_dark_link_material_output(DarkLinkDrawMaterialSnapshot& snapshot) {
-    J3DMaterial* material = snapshot.material;
-    if (material == nullptr) {
-        return;
-    }
-
-    J3DTevBlock* tevBlock = material->getTevBlock();
-    J3DTevStage* stage =
-        tevBlock != nullptr ? tevBlock->getTevStage(snapshot.stageIndex) : nullptr;
-    if (stage == nullptr) {
-        return;
-    }
-
-    if (snapshot.blend < 1.0f) {
-        if (!snapshot.hasTevColor || !snapshot.hasTevKColor) {
-            return;
-        }
-
-        J3DGXColorS10 factor{};
-        const s16 brightness = static_cast<s16>((1.0f - snapshot.blend) * 255.0f);
-        factor.r = brightness;
-        factor.g = brightness;
-        factor.b = brightness;
-        factor.a = 255;
-        J3DGXColor target{};
-        target.r =
-            static_cast<u8>(snapshot.isPupilMaterial ? 255.0f * snapshot.blend : 0.0f);
-        target.g = 0;
-        target.b = 0;
-        target.a = 255;
-        stage->setTevColorAB(GX_CC_CPREV, GX_CC_ZERO);
-        stage->setTevColorCD(GX_CC_C0,
-                             snapshot.isPupilMaterial ? GX_CC_KONST : GX_CC_ZERO);
-        if (snapshot.isPupilMaterial) {
-            tevBlock->setTevKColorSel(snapshot.stageIndex, GX_TEV_KCSEL_K0);
-        }
-        material->setTevColor(0, &factor);
-        material->setTevKColor(0, &target);
-    } else if (snapshot.isPupilMaterial &&
-               (snapshot.hasTevKColor || snapshot.hasTevColor))
-    {
-        stage->setTevColorAB(GX_CC_ZERO, GX_CC_ZERO);
-        if (snapshot.hasTevKColor) {
-            stage->setTevColorCD(GX_CC_ZERO, GX_CC_KONST);
-            tevBlock->setTevKColorSel(snapshot.stageIndex, GX_TEV_KCSEL_K0);
-            J3DGXColor target{};
-            target.r = 255;
-            target.g = 0;
-            target.b = 0;
-            target.a = 255;
-            material->setTevKColor(0, &target);
+    void byte(u8 value) {
+        if (size < bytes.size()) {
+            bytes[size++] = value;
         } else {
-            stage->setTevColorCD(GX_CC_ZERO, GX_CC_C0);
-            J3DGXColorS10 target{};
-            target.r = 255;
-            target.g = 0;
-            target.b = 0;
-            target.a = 255;
-            material->setTevColor(0, &target);
-        }
-    } else {
-        stage->setTevColorAB(GX_CC_ZERO, GX_CC_ZERO);
-        stage->setTevColorCD(GX_CC_ZERO, GX_CC_ZERO);
-    }
-    stage->setTevColorOp(
-        GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
-}
-
-HookAction apply_dark_link_material_before_display(ModContext*, void* args, void*, void*) {
-    auto* material = mods::arg<J3DMaterial*>(args, 0);
-    for (u16 i = 0; i < g_darkLinkDrawMaterialSnapshotCount; ++i) {
-        DarkLinkDrawMaterialSnapshot& snapshot =
-            g_darkLinkDrawMaterialSnapshots[i];
-        if (snapshot.material == material) {
-            apply_dark_link_material_output(snapshot);
-            break;
+            valid = false;
         }
     }
-    return HOOK_CONTINUE;
-}
-
-bool tint_goron_material_for_draw(daAlink_c* alink, J3DMaterial* material) {
-    if (!g_goronTunicEquipped || alink == nullptr ||
-        alink->getClothesChangeWaitTimer() != 0 || material == nullptr)
-    {
-        return false;
+    void word(u32 value) {
+        byte(value >> 24);
+        byte(value >> 16);
+        byte(value >> 8);
+        byte(value);
+    }
+    void bp(u8 reg, u32 value) {
+        byte(0x61);
+        word((u32(reg) << 24) | (value & 0xFFFFFF));
+    }
+    void masked_bp(u8 reg, u32 mask, u32 value) {
+        bp(0xFE, mask);
+        bp(reg, value);
+    }
+    void xf(u16 reg, u32 value) {
+        byte(0x10);
+        word(reg);
+        word(value);
+    }
+    static u32 rgba(GXColor color) {
+        return (u32(color.r) << 24) | (u32(color.g) << 16) |
+            (u32(color.b) << 8) | color.a;
     }
 
-    auto* bodyModel = alink->field_0x064C;
-    auto* hatModel = alink->mpLinkHatModel != nullptr
-                         ? alink->mpLinkHatModel->getModelData()
-                         : nullptr;
-    const u16* bodyIndices = nullptr;
-    size_t bodyIndexCount = 0;
-    const u16* hatIndices = nullptr;
-    size_t hatIndexCount = 0;
-    static constexpr u16 zoraBodyIndices[] = {13, 0, 1};
-    static constexpr u16 magicBodyIndices[] = {11, 10, 9, 8, 6};
-    static constexpr u16 casualBodyIndices[] = {7, 5};
-    static constexpr u16 zoraHatIndices[] = {1};
-    static constexpr u16 magicHatIndices[] = {2, 1};
-    static constexpr u16 casualHatIndices[] = {0};
-
-    if (alink->checkZoraWearAbility()) {
-        bodyIndices = zoraBodyIndices;
-        bodyIndexCount = std::size(zoraBodyIndices);
-        hatIndices = zoraHatIndices;
-        hatIndexCount = std::size(zoraHatIndices);
-    } else if (alink->checkMagicArmorWearAbility()) {
-        bodyIndices = magicBodyIndices;
-        bodyIndexCount = std::size(magicBodyIndices);
-        hatIndices = magicHatIndices;
-        hatIndexCount = std::size(magicHatIndices);
-    } else if (daAlink_c::checkCasualWearFlg()) {
-        bodyIndices = casualBodyIndices;
-        bodyIndexCount = std::size(casualBodyIndices);
-        hatIndices = casualHatIndices;
-        hatIndexCount = std::size(casualHatIndices);
-    } else {
-        return false;
+public:
+    void lighting(bool eye, u8 ambientAlpha, u8 materialAlpha) {
+        xf(0x1009, 2);
+        xf(0x100B, rgba({64, 64, 64, ambientAlpha}));
+        xf(0x100D, rgba(eye ? GXColor{255, 28, 20, materialAlpha}
+                            : GXColor{8, 9, 11, materialAlpha}));
+        xf(0x100F, (1u << 10) | (u32(GX_DF_CLAMP) << 7) |
+            (eye ? 0u : (1u << 1) | (1u << 2)));
     }
 
-    auto matchesMaterial = [material](J3DModelData* model, const u16* indices,
-                                      size_t count) {
-        if (model == nullptr) {
+    void eye_mask() {
+        masked_bp(0x41, 0xFE3u, 1u | (4u << 8));
+        masked_bp(0x40, 0x1Fu, 1u | (3u << 1) | (1u << 4));
+    }
+
+    void specular_lighting(u8 ambientAlpha0, u8 materialAlpha0,
+                           u8 ambientAlpha1, u8 materialAlpha1) {
+        xf(0x1009, 2);
+        xf(0x100A, rgba({64, 64, 64, ambientAlpha0}));
+        xf(0x100C, rgba({8, 9, 11, materialAlpha0}));
+        xf(0x100E, (1u << 10) | (u32(GX_DF_CLAMP) << 7) | (1u << 1) | (1u << 2));
+        xf(0x100B, rgba({0, 0, 0, ambientAlpha1}));
+        xf(0x100D, rgba({24, 28, 32, materialAlpha1}));
+        xf(0x100F, (1u << 9) | (1u << 1) | (1u << 2));
+
+        xf(0x0603, rgba({255, 255, 255, 255}));
+        const float light[12] = {
+            0.0f, 0.0f, 1.0f, 16.0f, 0.0f, -15.0f,
+            -419430.4f, 524288.0f, 805414.91f,
+            -0.212703f, 0.265879f, 0.940248f,
+        };
+        for (u16 i = 0; i < std::size(light); ++i) {
+            u32 bits;
+            std::memcpy(&bits, &light[i], sizeof(bits));
+            xf(0x0604 + i, bits);
+        }
+    }
+
+    void swap(unsigned table) {
+        masked_bp(0xF6 + 2 * table, 0xF, GX_CH_RED | (GX_CH_GREEN << 2));
+        masked_bp(0xF7 + 2 * table, 0xF, GX_CH_BLUE | (GX_CH_ALPHA << 2));
+    }
+
+    void stage(unsigned index, unsigned identity, GXTevColorArg a, GXTevColorArg b,
+               GXTevColorArg c, GXTevColorArg d, GXTevScale scale = GX_CS_SCALE_1,
+               unsigned rasterChannel = 1) {
+        const unsigned shift = (index & 1) * 12;
+        const u32 order = rasterChannel << 7;
+        masked_bp(0x28 + index / 2, 0xFFFu << shift, order << shift);
+        bp(0x10 + index, 0);
+        bp(0xC0 + 2 * index, u32(d) | (u32(c) << 4) | (u32(b) << 8) |
+            (u32(a) << 12) | (1u << 19) | (u32(scale) << 20));
+        bp(0xC1 + 2 * index, identity | (identity << 2) |
+            (u32(GX_CA_APREV) << 4) | (u32(GX_CA_ZERO) << 7) |
+            (u32(GX_CA_ZERO) << 10) | (u32(GX_CA_ZERO) << 13) | (1u << 19));
+    }
+
+    bool submit() {
+        while (size % 32 != 0 && valid) {
+            byte(0);
+        }
+        if (!valid) {
             return false;
         }
-        for (size_t i = 0; i < count; ++i) {
-            const u16 index = indices[i];
-            if (index < model->getMaterialNum() &&
-                model->getMaterialNodePointer(index) == material)
-            {
-                tint_clothing_material(model, index);
-                return true;
-            }
-        }
-        return false;
-    };
+        GXCallDisplayList(bytes.data(), static_cast<u32>(size));
+        return true;
+    }
 
-    return matchesMaterial(bodyModel, bodyIndices, bodyIndexCount) ||
-           matchesMaterial(hatModel, hatIndices, hatIndexCount);
+    bool apply(unsigned stageCount, unsigned texGenCount) {
+        masked_bp(0x00, 0x3C7F, texGenCount | (2u << 4) | ((stageCount - 1) << 10));
+        xf(0x103F, texGenCount);
+        return submit();
+    }
+};
+
+bool is_dark_link_model(daAlink_c* link, J3DModel* model) {
+    return link != nullptr && model != nullptr && !link->checkWolf() &&
+        link->mClothesChangeWaitTimer == 0 &&
+        (model == link->mpLinkModel || model == link->mpLinkFaceModel ||
+         model == link->mpLinkHatModel ||          model == link->mpLinkHandModel ||
+         model == link->mpLinkBootModels[0] || model == link->mpLinkBootModels[1] ||
+         model == link->mShieldModel || model == link->mSwordModel ||
+         model == link->mSheathModel);
 }
 
-HookAction apply_dark_link_material_diff(ModContext*, void* args, void*, void*) {
-    auto* material = mods::arg<J3DMaterial*>(args, 0);
-    auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
-    if (tint_goron_material_for_draw(alink, material)) {
-        mods::arg_ref<u32>(args, 1) |= J3DDiffFlag_TevReg;
+J3DMatPacket* dark_link_drawing_material(J3DShapePacket* packet) {
+    if (g_darkLinkMaterialDepth == 0 ||
+        g_darkLinkMaterialDepth > g_darkLinkMaterialScopes.size())
+    {
+        return nullptr;
     }
-
-    for (u16 i = 0; i < g_darkLinkDrawMaterialSnapshotCount; ++i) {
-        DarkLinkDrawMaterialSnapshot& snapshot =
-            g_darkLinkDrawMaterialSnapshots[i];
-        if (snapshot.material == material) {
-            apply_dark_link_material_output(snapshot);
-            mods::arg_ref<u32>(args, 1) |=
-                J3D_DIFF_TEVSTAGENUM(1) | J3DDiffFlag_TevReg;
-            break;
+    auto* material = g_darkLinkMaterialScopes[g_darkLinkMaterialDepth - 1];
+    if (material == nullptr) {
+        return nullptr;
+    }
+    for (auto* shape = material->getShapePacket(); shape != nullptr;
+         shape = static_cast<J3DShapePacket*>(shape->getNextPacket()))
+    {
+        if (shape == packet) {
+            return material;
         }
     }
+    return nullptr;
+}
+
+HookAction begin_dark_link_material_draw(ModContext*, void* args, void*, void*) {
+    if (g_darkLinkMaterialDepth < g_darkLinkMaterialScopes.size()) {
+        g_darkLinkMaterialScopes[g_darkLinkMaterialDepth] =
+            mods::arg<J3DMatPacket*>(args, 0);
+    }
+    ++g_darkLinkMaterialDepth;
     return HOOK_CONTINUE;
 }
 
-void set_dark_link_terminal_color(bool isPupilMaterial) {
-    const GXColor color = {
-        static_cast<u8>(isPupilMaterial ? 255 : 0), 0, 0, 255};
-    GXSetNumTevStages(1);
-    GXSetTevOrder(
-        GX_TEVSTAGE0, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR_NULL);
-    GXSetTevColor(GX_TEVREG0, color);
-    GXSetTevColorIn(
-        GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_C0);
-    GXSetTevColorOp(
-        GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
-    GXSetTevAlphaIn(
-        GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A0);
-    GXSetTevAlphaOp(
-        GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+void end_dark_link_material_draw(ModContext*, void*, void*, void*) {
+    if (g_darkLinkMaterialDepth == 0) {
+        return;
+    }
+    --g_darkLinkMaterialDepth;
+    if (g_darkLinkMaterialDepth < g_darkLinkMaterialScopes.size()) {
+        g_darkLinkMaterialScopes[g_darkLinkMaterialDepth] = nullptr;
+    }
 }
 
-HookAction apply_dark_link_terminal_output_before_shape_draw(
-    ModContext*, void*, void*, void*) {
-    J3DShapePacket* packet = j3dSys.getShapePacket();
-    J3DModel* model = packet != nullptr ? packet->getModel() : nullptr;
-    if (!g_darkLinkFormActive || g_darkLinkFormBlend < 1.0f)
+HookAction begin_dark_link_shape_packet(ModContext*, void* args, void*, void*) {
+    if (g_darkLinkDrawDepth < g_darkLinkDrawScopes.size()) {
+        auto& scope = g_darkLinkDrawScopes[g_darkLinkDrawDepth];
+        scope = {};
+        auto* packet = mods::arg<J3DShapePacket*>(args, 0);
+        auto* model = packet != nullptr ? packet->getModel() : nullptr;
+        const bool localDarkLink = g_darkLinkVisualActive &&
+            is_dark_link_model(daAlink_getAlinkActorClass(), model);
+        const bool remoteDarkLink = model != nullptr &&
+            model == g_darkLinkRemoteDrawModel;
+        if (localDarkLink || remoteDarkLink)
+        {
+            scope.materialPacket = dark_link_drawing_material(packet);
+            if (scope.materialPacket != nullptr) {
+                scope.packet = packet;
+            }
+        }
+    }
+    ++g_darkLinkDrawDepth;
+    return HOOK_CONTINUE;
+}
+
+void restore_dark_link_draw_state(DarkLinkDrawScope& scope) {
+    if (!scope.applied || scope.packet == nullptr || scope.materialPacket == nullptr) {
+        return;
+    }
+    scope.materialPacket->callDL();
+    if (scope.packet->getDisplayListObj() != nullptr) {
+        scope.packet->getDisplayListObj()->callDL();
+    }
+    scope.applied = false;
+}
+
+void end_dark_link_shape_packet(ModContext*, void*, void*, void*) {
+    if (g_darkLinkDrawDepth == 0) {
+        return;
+    }
+    --g_darkLinkDrawDepth;
+    if (g_darkLinkDrawDepth < g_darkLinkDrawScopes.size()) {
+        restore_dark_link_draw_state(g_darkLinkDrawScopes[g_darkLinkDrawDepth]);
+        g_darkLinkDrawScopes[g_darkLinkDrawDepth] = {};
+    }
+}
+
+HookAction apply_dark_link_appearance(ModContext*, void* args, void*, void*) {
+    if (g_darkLinkDrawDepth == 0 ||
+        g_darkLinkDrawDepth > g_darkLinkDrawScopes.size())
+    {
+        return HOOK_CONTINUE;
+    }
+    auto& scope = g_darkLinkDrawScopes[g_darkLinkDrawDepth - 1];
+    auto* shape = mods::arg<const J3DShape*>(args, 0);
+    if (scope.packet == nullptr || scope.materialPacket == nullptr || shape == nullptr ||
+        scope.applied || scope.packet->getShape() != shape ||
+        scope.materialPacket->getDisplayListObj() == nullptr)
+    {
+        return HOOK_CONTINUE;
+    }
+    auto* material = shape->getMaterial();
+    auto* model = scope.packet->getModel();
+    if (material == nullptr || model == nullptr ||
+        material->getTevBlock() == nullptr || material->getColorBlock() == nullptr ||
+        material->getTexGenBlock() == nullptr)
     {
         return HOOK_CONTINUE;
     }
 
-    J3DShape* shape = packet != nullptr ? packet->getShape() : nullptr;
-    J3DMaterial* material = shape != nullptr ? shape->getMaterial() : nullptr;
-    if (material == nullptr) {
+    auto* tev = material->getTevBlock();
+    const unsigned count = tev->getTevStageNum();
+    if (count == 0 || count >= 16) {
         return HOOK_CONTINUE;
     }
-
-    J3DModelData* modelData = model != nullptr ? model->getModelData() : nullptr;
-    if (modelData == nullptr) {
+    const auto swaps = find_dark_link_swap_table(tev, count);
+    const unsigned texGenCount = material->getTexGenNum();
+    if (swaps.identity < 0 || texGenCount > 8) {
         return HOOK_CONTINUE;
     }
-    if (!is_dark_link_appearance_model_data(modelData)) {
-        return HOOK_CONTINUE;
-    }
+    const bool eye = dark_link_eye_material(model->getModelData(), material);
+    scope.eyeGlow = eye;
+    const auto* ambient = material->getColorBlock()->getAmbColor(1);
+    const auto* color = material->getMatColor(1);
+    const u8 ambientAlpha = ambient != nullptr ? ambient->a : 255;
+    const u8 materialAlpha = color != nullptr ? color->a : 255;
+    auto* batchMaterial = scope.materialPacket->getMaterial();
+    const auto* alpha0 = material->getColorBlock()->getColorChan(1);
+    const auto* alpha1 = material->getColorBlock()->getColorChan(3);
+    const bool alphaUsesLight0 =
+        (alpha0 != nullptr && alpha0->getEnable() && (alpha0->getLightMask() & 1)) ||
+        (alpha1 != nullptr && alpha1->getEnable() && (alpha1->getLightMask() & 1));
+    const bool glossy = !eye && !alphaUsesLight0 && count + 2 <= 16 &&
+        batchMaterial != nullptr && batchMaterial->getColorBlock() != nullptr &&
+        batchMaterial->getColorBlock()->getLight(0) != nullptr;
 
-    for (u16 i = 0; i < modelData->getMaterialNum(); ++i) {
-        if (modelData->getMaterialNodePointer(i) != material) {
-            continue;
-        }
-
-        auto* materialNames = modelData->getMaterialName();
-        const char* name =
-            materialNames != nullptr ? materialNames->getName(i) : nullptr;
-        const bool isPupilMaterial =
-            contains_case_insensitive(name, "pupil") ||
-            contains_case_insensitive(name, "iris") ||
-            contains_case_insensitive(name, "hitomi") ||
-            material_uses_pupil_texture(modelData, material);
-        set_dark_link_terminal_color(isPupilMaterial);
-        break;
+    DarkLinkDisplayList display;
+    display.swap(static_cast<unsigned>(swaps.identity));
+    unsigned next = count;
+    if (glossy) {
+        const auto* ambient0 = material->getColorBlock()->getAmbColor(0);
+        const auto* color0 = material->getMatColor(0);
+        display.specular_lighting(
+            ambient0 != nullptr ? ambient0->a : 255,
+            color0 != nullptr ? color0->a : 255,
+            ambientAlpha, materialAlpha);
+        display.stage(count, swaps.identity, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO,
+                      GX_CC_RASC, GX_CS_SCALE_1, 0);
+        display.stage(count + 1, swaps.identity, GX_CC_RASC, GX_CC_ZERO, GX_CC_ZERO,
+                      GX_CC_CPREV);
+        next += 2;
+    } else {
+        display.lighting(eye, ambientAlpha, materialAlpha);
+        display.stage(count, swaps.identity, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO,
+                      GX_CC_RASC, eye ? GX_CS_SCALE_2 : GX_CS_SCALE_1);
+        ++next;
     }
+    scope.applied = display.apply(next, texGenCount);
     return HOOK_CONTINUE;
 }
 
-void double_dark_link_incoming_damage(ModContext*, void* args, void* retval, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (!g_darkLinkFormActive || alink == nullptr || alink->checkWolf()) {
+void capture_dark_link_eye_primitive(ModContext*, void* args, void*, void*) {
+    if (g_darkLinkDrawDepth == 0 ||
+        g_darkLinkDrawDepth > g_darkLinkDrawScopes.size())
+    {
+        return;
+    }
+    auto& scope = g_darkLinkDrawScopes[g_darkLinkDrawDepth - 1];
+    if (!scope.applied || !scope.eyeGlow || scope.packet == nullptr) {
+        return;
+    }
+    auto* primitive = mods::arg<const J3DShapeDraw*>(args, 0);
+    if (primitive == nullptr || primitive->getDisplayList() == nullptr ||
+        primitive->getDisplayListSize() == 0 ||
+        !dark_link_eye_bloom::begin_capture())
+    {
+        return;
+    }
+    DarkLinkDisplayList mask;
+    mask.eye_mask();
+    if (mask.submit()) {
+        GXCallDisplayList(
+            primitive->getDisplayList(), primitive->getDisplayListSize());
+    }
+    dark_link_eye_bloom::end_capture();
+    restore_dark_link_draw_state(scope);
+    void* shapeArgs[]{scope.packet->getShape()};
+    apply_dark_link_appearance(nullptr, shapeArgs, nullptr, nullptr);
+}
+
+void end_dark_link_shape_draw(ModContext*, void*, void*, void*) {
+    if (g_darkLinkDrawDepth != 0 &&
+        g_darkLinkDrawDepth <= g_darkLinkDrawScopes.size())
+    {
+        restore_dark_link_draw_state(
+            g_darkLinkDrawScopes[g_darkLinkDrawDepth - 1]);
+    }
+}
+
+void apply_dark_link_damage_multiplier(ModContext*, void* args, void*, void*) {
+    auto* attack = mods::arg<dCcU_AtInfo*>(args, 0);
+    auto* link = daAlink_getAlinkActorClass();
+    constexpr u32 kSwordAttackTypes =
+        AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD;
+    if (!g_darkLinkVisualActive || link == nullptr || attack == nullptr ||
+        attack->mpActor != link || attack->mpCollider == nullptr ||
+        attack->mHitType != HIT_TYPE_LINK_NORMAL_ATTACK ||
+        attack->mAttackPower == 0 ||
+        (attack->mpCollider->GetAtType() & kSwordAttackTypes) == 0)
+    {
         return;
     }
 
-    *static_cast<f32*>(retval) *= 4.0f;
+    const u32 percent = static_cast<u32>(darkLinkDamageMultiplierPercent());
+    attack->mAttackPower = static_cast<u16>(std::min<u32>(
+        (static_cast<u32>(attack->mAttackPower) * percent + 99U) / 100U,
+        0xFFFFU));
 }
 
-HookAction modify_active_form_sword_damage(ModContext*, void* args, void*, void*) {
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    int& attackPower = mods::arg_ref<int>(args, 4);
-    if (g_darkLinkFormActive && alink != nullptr && !alink->checkWolf()) {
-        attackPower *= 4;
-    }
-    return HOOK_CONTINUE;
-}
-
-HookAction modify_active_form_cylinder_sword_damage(
-    ModContext*, void* args, void*, void*)
-{
-    auto* alink = mods::arg<daAlink_c*>(args, 0);
-    constexpr u32 kSwordAttackTypes = AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD;
-    if (alink == nullptr || alink->checkWolf() ||
-        (mods::arg<u32>(args, 1) & kSwordAttackTypes) == 0)
+ModResult initialize_dark_link_visual_hooks(ModError*) {
+    ModResult result;
+    if ((result = mods::hook::add_post<DarkLinkAttackPowerHook>(
+             svc_hook, apply_dark_link_damage_multiplier)) != MOD_OK ||
+        (result = mods::hook::add_pre<DarkLinkMaterialDrawHook>(
+             svc_hook, begin_dark_link_material_draw)) != MOD_OK ||
+        (result = mods::hook::add_post<DarkLinkMaterialDrawHook>(
+             svc_hook, end_dark_link_material_draw)) != MOD_OK ||
+        (result = mods::hook::add_pre<DarkLinkShapePacketDrawHook>(
+             svc_hook, begin_dark_link_shape_packet)) != MOD_OK ||
+        (result = mods::hook::add_post<DarkLinkShapePacketDrawHook>(
+             svc_hook, end_dark_link_shape_packet)) != MOD_OK ||
+        (result = mods::hook::add_pre<DarkLinkShapePacketFastHook>(
+             svc_hook, begin_dark_link_shape_packet)) != MOD_OK ||
+        (result = mods::hook::add_post<DarkLinkShapePacketFastHook>(
+             svc_hook, end_dark_link_shape_packet)) != MOD_OK ||
+        (result = mods::hook::add_pre<DarkLinkShapeDrawHook>(
+             svc_hook, apply_dark_link_appearance)) != MOD_OK ||
+        (result = mods::hook::add_post<DarkLinkShapeDrawHook>(
+             svc_hook, end_dark_link_shape_draw)) != MOD_OK ||
+        (result = mods::hook::add_post<DarkLinkEyePrimitiveDrawHook>(
+             svc_hook, capture_dark_link_eye_primitive)) != MOD_OK)
     {
-        return HOOK_CONTINUE;
+        mods::hook::uninstall<DarkLinkAttackPowerHook>(svc_hook);
+        mods::hook::uninstall<DarkLinkMaterialDrawHook>(svc_hook);
+        mods::hook::uninstall<DarkLinkShapePacketDrawHook>(svc_hook);
+        mods::hook::uninstall<DarkLinkShapePacketFastHook>(svc_hook);
+        mods::hook::uninstall<DarkLinkShapeDrawHook>(svc_hook);
+        mods::hook::uninstall<DarkLinkEyePrimitiveDrawHook>(svc_hook);
+        svc_log->error(mod_ctx, "failed to install Dawnlight Dark Link material hooks");
+        return result;
     }
-
-    int& attackPower = mods::arg_ref<int>(args, 5);
-    if (g_darkLinkFormActive) {
-        attackPower *= 4;
-    }
-    return HOOK_CONTINUE;
+    dark_link_eye_bloom::initialize();
+    return MOD_OK;
 }
 
-void restore_dark_link_model_after_draw(ModContext*, void*, void*, void*) {
-    for (u16 i = 0; i < g_darkLinkDrawMaterialSnapshotCount; ++i) {
-        DarkLinkDrawMaterialSnapshot& snapshot =
-            g_darkLinkDrawMaterialSnapshots[i];
-        if (snapshot.material == nullptr) {
-            continue;
-        }
-
-        J3DTevBlock* tevBlock = snapshot.material->getTevBlock();
-        if (tevBlock != nullptr) {
-            tevBlock->setTevStage(snapshot.stageIndex, &snapshot.stage);
-            if (snapshot.hasTevKColor) {
-                tevBlock->setTevKColorSel(snapshot.stageIndex, snapshot.tevKColorSel);
-            }
-        }
-        if (snapshot.hasTevColor) {
-            snapshot.material->setTevColor(0, &snapshot.tevColor);
-        }
-        if (snapshot.hasTevKColor) {
-            snapshot.material->setTevKColor(0, &snapshot.tevKColor);
-        }
-        snapshot.material = nullptr;
-    }
-    g_darkLinkDrawMaterialSnapshotCount = 0;
-    g_darkLinkDrawModelData = nullptr;
+void shutdown_dark_link_visual_hooks() {
+    dark_link_eye_bloom::shutdown();
+    mods::hook::uninstall<DarkLinkAttackPowerHook>(svc_hook);
+    mods::hook::uninstall<DarkLinkMaterialDrawHook>(svc_hook);
+    mods::hook::uninstall<DarkLinkShapePacketDrawHook>(svc_hook);
+    mods::hook::uninstall<DarkLinkShapePacketFastHook>(svc_hook);
+    mods::hook::uninstall<DarkLinkShapeDrawHook>(svc_hook);
+    mods::hook::uninstall<DarkLinkEyePrimitiveDrawHook>(svc_hook);
+    g_darkLinkDrawScopes.fill({});
+    g_darkLinkMaterialScopes.fill(nullptr);
+    g_darkLinkDrawDepth = 0;
+    g_darkLinkMaterialDepth = 0;
 }
 
-void update_dark_link_form_blend() {
-    const f32 step = 1.0f / static_cast<f32>(kDarkLinkTransitionFrames);
-    if (g_darkLinkFormActive) {
-        g_darkLinkFormBlend = std::min(1.0f, g_darkLinkFormBlend + step);
-    } else {
-        g_darkLinkFormBlend = std::max(0.0f, g_darkLinkFormBlend - step);
-    }
-}
+}  // namespace

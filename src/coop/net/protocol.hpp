@@ -141,6 +141,8 @@ const uint8_t kSnapNoHits = 0x10;
 enum PuppetPoseFlags : uint8_t {
     kPuppetPoseSeated = 1 << 0,
     kPuppetPoseShieldSurf = 1 << 1,
+    kPuppetPoseDarkLink = 1 << 2,
+    kPuppetPoseGiantMask = 1 << 3,
 };
 
 enum PuppetWheelFlags : uint8_t {
