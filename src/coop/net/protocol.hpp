@@ -277,6 +277,27 @@ struct MidnaSnapshot {
     uint8_t hairK2[4];
     MidnaJointSnapshot joints[kMidnaJoints];
 };
+
+const uint32_t kCompanionSnapshotMagic = 0x314E5043u;
+const uint8_t kCompanionFlagActive = 0x01;
+const uint8_t kCompanionAppearanceMax = 2;
+
+struct CompanionSnapshot {
+    uint32_t magic;
+    uint32_t seq;
+    uint32_t tick;
+    uint8_t playerId;
+    uint8_t flags;
+    uint8_t appearance;
+    uint8_t color;
+    float x;
+    float y;
+    float z;
+    float scale;
+    int16_t yaw;
+    int8_t room;
+    uint8_t reserved;
+};
 #pragma pack(pop)
 
 static_assert(sizeof(MidnaJointSnapshot) == 18 + 12, "MidnaJointSnapshot must stay packed");
@@ -325,6 +346,8 @@ static_assert(sizeof(HorseSnapshot) <= 1200, "HorseSnapshot must fit one small d
 static_assert(sizeof(MidnaSnapshot) ==
         4 + 4 + 1 + 1 + 1 + 1 + 2 + 2 + 4 + 48 + 48 + 8 + 8 + 4 + 4 + (kMidnaJoints * 30),
     "MidnaSnapshot must stay packed");
+static_assert(sizeof(CompanionSnapshot) == 4 + 4 + 4 + 4 + 16 + 2 + 1 + 1,
+    "CompanionSnapshot must stay packed");
 
 static_assert(sizeof(AnmSlotSnapshot) == 2 + 4 + 4 + 4,
     "AnmSlotSnapshot must stay tightly packed");
@@ -343,3 +366,7 @@ static_assert(sizeof(MidnaSnapshot) != sizeof(PlayerSnapshot),
 static_assert(sizeof(HorseSnapshot) != sizeof(PlayerSnapshot) &&
                   sizeof(HorseSnapshot) != sizeof(MidnaSnapshot),
     "HorseSnapshot must differ in size from the other datagrams - handle_udp_event dispatches on it");
+static_assert(sizeof(CompanionSnapshot) != sizeof(PlayerSnapshot) &&
+                  sizeof(CompanionSnapshot) != sizeof(MidnaSnapshot) &&
+                  sizeof(CompanionSnapshot) != sizeof(HorseSnapshot),
+    "CompanionSnapshot must differ in size from the other datagrams - handle_udp_event dispatches on it");

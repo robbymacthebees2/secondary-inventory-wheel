@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "mods/svc/actor.h"
 #include "f_op/f_op_actor.h"
 #include "SSystem/SComponent/c_phase.h"
@@ -13,6 +15,12 @@ enum FairyColor_e {
     FAIRY_COLOR_ORANGE = 1,  // Tatl
     FAIRY_COLOR_PURPLE = 2,  // Tael
     FAIRY_COLOR_GREEN = 3,  // Extra
+};
+
+enum FairyAppearance_e {
+    FAIRY_APPEARANCE_FAIRY = 0,
+    FAIRY_APPEARANCE_MIDNA = 1,
+    FAIRY_APPEARANCE_MIDNA_REGULAR = 2,
 };
 
 class maFairyCompanion_c : public fopAc_ac_c {
@@ -34,6 +42,7 @@ public:
     u8  mSparkleTimer;  // Sparkle timer
     u8  mAuraTimer;     // Aura timer
     u8  mColorId;       // Active color index
+    u8  mAppearanceId;
 
     virtual ~maFairyCompanion_c();
 
@@ -45,12 +54,16 @@ public:
     void      setBaseMtx();
 
     // Material tinting (applies color to model TEV registers after environment pass)
-    void applyFairyTint(J3DModel* i_model);
+    static void applyFairyTint(J3DModel* i_model, u8 colorId);
 
     // --- Global Configuration (Shared across respawns) ---
     static u8   sSelectedColor;
     static void setSelectedColor(u8 colorId);
     static u8   getSelectedColor() { return sSelectedColor; }
+
+    static u8   sSelectedAppearance;
+    static void setSelectedAppearance(u8 appearanceId);
+    static u8   getSelectedAppearance() { return sSelectedAppearance; }
 
     static bool sCalled;
     static void setCalled(bool called) { sCalled = called; }
@@ -69,3 +82,6 @@ public:
 
     static u32  sExecTick;
 };
+
+bool fairy_companion_midna_is_out();
+bool fairy_companion_midna_is_regular();

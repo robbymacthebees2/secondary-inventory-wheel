@@ -1,6 +1,7 @@
 // Ported from Fairy Companion v1.2.1 by AgustinFuac with permission.
 // The companion, visuals, color options, and light are retained; fairy abilities are omitted.
 #include "ma_fairy_companion.hpp"
+#include "coop/mod.hpp"
 
 #include <cmath>
 
@@ -133,6 +134,7 @@ static f32 updateHideBlend() {
 // ---------------------------------------------------------------------------
 
 u8          maFairyCompanion_c::sSelectedColor = FAIRY_COLOR_BLUE;
+u8          maFairyCompanion_c::sSelectedAppearance = FAIRY_APPEARANCE_FAIRY;
 bool        maFairyCompanion_c::sCalled = false;
 bool        maFairyCompanion_c::sLightEnabled = true;
 u32         maFairyCompanion_c::sExecTick = 0;
@@ -141,6 +143,13 @@ ActorHandle maFairyCompanion_c::sActorHandle = -1;
 
 void maFairyCompanion_c::setSelectedColor(u8 colorId) {
     sSelectedColor = (colorId < k_fairyTintCount) ? colorId : FAIRY_COLOR_BLUE;
+}
+
+void maFairyCompanion_c::setSelectedAppearance(u8 appearanceId) {
+    sSelectedAppearance =
+        appearanceId <= FAIRY_APPEARANCE_MIDNA_REGULAR
+            ? appearanceId
+            : FAIRY_APPEARANCE_FAIRY;
 }
 
 namespace {
@@ -292,6 +301,13 @@ void on_fairy_color_changed(
     maFairyCompanion_c::setSelectedColor(static_cast<u8>(value->int_value));
 }
 
+void on_fairy_appearance_changed(
+    ModContext*, ConfigVarHandle, const ConfigVarValue* value,
+    const ConfigVarValue*, void*)
+{
+    maFairyCompanion_c::setSelectedAppearance(static_cast<u8>(value->int_value));
+}
+
 void on_fairy_light_changed(
     ModContext*, ConfigVarHandle, const ConfigVarValue* value,
     const ConfigVarValue*, void*)
@@ -302,12 +318,28 @@ void on_fairy_light_changed(
 }
 
 ModResult register_fairy_companion_settings() {
+    ConfigVarDesc appearance = CONFIG_VAR_DESC_INIT;
+    appearance.name = "fairyCompanionAppearance";
+    appearance.type = CONFIG_VAR_INT;
+    appearance.default_int = FAIRY_APPEARANCE_FAIRY;
+    ModResult result =
+        svc_config->register_var(mod_ctx, &appearance, &g_fairyCompanionAppearance);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Fairy Companion appearance setting");
+        return result;
+    }
+    result = svc_config->subscribe(
+        mod_ctx, g_fairyCompanionAppearance, on_fairy_appearance_changed, nullptr, nullptr);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to subscribe to Fairy Companion appearance setting");
+        return result;
+    }
+
     ConfigVarDesc color = CONFIG_VAR_DESC_INIT;
     color.name = "fairyCompanionColor";
     color.type = CONFIG_VAR_INT;
     color.default_int = FAIRY_COLOR_BLUE;
-    ModResult result =
-        svc_config->register_var(mod_ctx, &color, &g_fairyCompanionColor);
+    result = svc_config->register_var(mod_ctx, &color, &g_fairyCompanionColor);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register Fairy Companion color setting");
         return result;
@@ -345,6 +377,19 @@ ModResult register_fairy_companion_settings() {
         svc_log->error(mod_ctx, "failed to register Fairy Companion toggle binding");
         return result;
     }
+
+    int64_t selectedAppearance = FAIRY_APPEARANCE_FAIRY;
+    result = svc_config->get_int(
+        mod_ctx, g_fairyCompanionAppearance, &selectedAppearance);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to read Fairy Companion appearance setting");
+        return result;
+    }
+    maFairyCompanion_c::setSelectedAppearance(
+        selectedAppearance >= FAIRY_APPEARANCE_FAIRY &&
+                selectedAppearance <= FAIRY_APPEARANCE_MIDNA_REGULAR
+            ? static_cast<u8>(selectedAppearance)
+            : FAIRY_APPEARANCE_FAIRY);
 
     int64_t selectedColor = FAIRY_COLOR_BLUE;
     result = svc_config->get_int(mod_ctx, g_fairyCompanionColor, &selectedColor);
@@ -484,6 +529,7 @@ cPhs_Step maFairyCompanion_c::create() {
     mSwayPhase = 0.0f;
     mBobPhase = 1.5f; // Offset phase so bob does not sync with sway
     mColorId = sSelectedColor;
+    mAppearanceId = sSelectedAppearance;
     mParticleId = 0;
     mParticleTimer = 0;
     mSparkleId = 0;
@@ -530,12 +576,15 @@ int maFairyCompanion_c::Delete() {
 int maFairyCompanion_c::Execute() {
     sExecTick++;
     mColorId = sSelectedColor;
+    mAppearanceId = sSelectedAppearance;
     // The camera can leave NODRAW set after skipping this actor's draw callback.
     fopAcM_OffStatus(this, fopAcStts_NODRAW_e);
 
     daPy_py_c* player = daPy_getPlayerActorClass();
     daAlink_c* alink = daAlink_getAlinkActorClass();
     update_fairy_toggle_input(alink);
+    const bool midnaAppearance = mAppearanceId != FAIRY_APPEARANCE_FAIRY;
+    const bool ridingHorse = alink != NULL && alink->checkHorseRide();
 
     // Lock-on state
     dAttention_c* attention = dComIfGp_getAttention();
@@ -555,7 +604,9 @@ int maFairyCompanion_c::Execute() {
         wrapAngle(mOrbitAngle);
 
         constexpr f32 orbitRadius = 50.0f;
-        constexpr f32 orbitHeight = 100.0f;
+        const f32 orbitHeight = midnaAppearance
+            ? (ridingHorse ? 35.0f : 60.0f)
+            : 100.0f;
 
         const cXyz& centerPos = lockTarget->current.pos;
         cXyz hoverPos;
@@ -594,10 +645,14 @@ int maFairyCompanion_c::Execute() {
         // Bob vertical
         mBobPhase += 0.035f;
         wrapAngle(mBobPhase);
-        const f32 bob = 27.0f * std::sin(mBobPhase);
+        const f32 bobAmplitude = midnaAppearance
+            ? (ridingHorse ? 8.0f : 12.0f)
+            : 27.0f;
+        const f32 bob = bobAmplitude * std::sin(mBobPhase);
 
-        // Lower height offset when riding horseback / boar
-        const f32 heightOffset = (alink != NULL && alink->checkReinRide()) ? 80.0f : 160.0f;
+        const f32 heightOffset = midnaAppearance
+            ? (ridingHorse ? 35.0f : 60.0f)
+            : ((alink != NULL && alink->checkReinRide()) ? 80.0f : 160.0f);
 
         // Blend the normal flight target with the tuck-in point on Link
         const f32 flyY = player->current.pos.y + heightOffset + bob;
@@ -614,13 +669,24 @@ int maFairyCompanion_c::Execute() {
         shape_angle.y = fopAcM_searchPlayerAngleY(this);
     }
 
+    if (midnaAppearance && player != NULL) {
+        const f32 maxMidnaFlightHeight = ridingHorse ? 55.0f : 85.0f;
+        const f32 anchorY = alink != NULL
+            ? alink->current.pos.y
+            : player->current.pos.y;
+        const f32 maxY = anchorY + maxMidnaFlightHeight;
+        if (current.pos.y > maxY) current.pos.y = maxY;
+    }
+
     // --- Lighting & particles -----------------------------------------
     // Refresh ambient lighting
     tevStr.room_no = fopAcM_GetRoomNo(this);
     dKy_setLight_nowroom_actor(&tevStr);
 
     // Keep tint available for the rest of Execute()
-    const FairyTint_s& tint = getFairyTint(mColorId);
+    const u8 tintColor = mAppearanceId != FAIRY_APPEARANCE_FAIRY
+        ? FAIRY_COLOR_BLUE : mColorId;
+    const FairyTint_s& tint = getFairyTint(tintColor);
 
     // Automatic dynamic fairy light
     if (sLightEnabled && s_hideBlend < 0.5f) {
@@ -697,8 +763,8 @@ void maFairyCompanion_c::setBaseMtx() {
 // Rendering & Material Tinting
 // ---------------------------------------------------------------------------
 
-void maFairyCompanion_c::applyFairyTint(J3DModel* i_model) {
-    const FairyTint_s& tint = getFairyTint(mColorId);
+void maFairyCompanion_c::applyFairyTint(J3DModel* i_model, u8 colorId) {
+    const FairyTint_s& tint = getFairyTint(colorId);
     J3DModelData* modelData = i_model->getModelData();
     const u16 matNum = modelData->getMaterialNum();
 
@@ -723,6 +789,13 @@ int maFairyCompanion_c::Draw() {
         return 1;
     }
 
+    if (mAppearanceId != FAIRY_APPEARANCE_FAIRY) {
+        coop_draw_local_companion_midna(
+            current.pos.x, current.pos.y, current.pos.z, shape_angle.y, scale.x,
+            mAppearanceId == FAIRY_APPEARANCE_MIDNA_REGULAR);
+        return 1;
+    }
+
     J3DModel* model = mpModelMorf->getModel();
 
     // 1) Environment system sets up lighting structure
@@ -732,7 +805,7 @@ int maFairyCompanion_c::Draw() {
     g_env_light.setLightTevColorType_MAJI(model, &tevStr);
 
     // 3) Apply our custom fairy hue over register 1
-    applyFairyTint(model);
+    applyFairyTint(model, mColorId);
 
     mpModelMorf->entryDL();
     return 1;
