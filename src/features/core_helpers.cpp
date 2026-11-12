@@ -782,6 +782,11 @@ u8 selected_item_for_button(int button) {
     }
 
     const u8 mixItem = dComIfGs_getItem(mixItemSlot, false);
+    if ((selectedItem == dItemNo_BOW_e && mixItem == dItemNo_KANTERA_e) ||
+        (selectedItem == dItemNo_KANTERA_e && mixItem == dItemNo_BOW_e))
+    {
+        return dItemNo_BOW_e;
+    }
     if (selectedItem == dItemNo_BOW_e) {
         switch (mixItem) {
         case dItemNo_NORMAL_BOMB_e:

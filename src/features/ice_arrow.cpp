@@ -149,18 +149,18 @@ void hold_ice_arrow_target_in_place(ModContext*, void* args, void*, void*) {
 
 HookAction begin_ice_arrow_actor_execute(ModContext*, void* args, void*, void*) {
     auto* leaf = mods::arg<leafdraw_class*>(args, 0);
-    if (leaf == nullptr ||
-        g_iceArrowActorExecuteDepth >=
-            sizeof(g_iceArrowPreviousExecutingActorIds) /
-                sizeof(g_iceArrowPreviousExecutingActorIds[0]))
-    {
-        return HOOK_CONTINUE;
+    constexpr u32 kTrackedDepth =
+        sizeof(g_iceArrowPreviousExecutingActorIds) /
+        sizeof(g_iceArrowPreviousExecutingActorIds[0]);
+    if (g_iceArrowActorExecuteDepth < kTrackedDepth) {
+        g_iceArrowPreviousExecutingActorIds[g_iceArrowActorExecuteDepth] =
+            g_iceArrowExecutingActorId;
+        if (leaf != nullptr) {
+            g_iceArrowExecutingActorId =
+                fopAcM_GetID(reinterpret_cast<fopAc_ac_c*>(leaf));
+        }
     }
-
-    g_iceArrowPreviousExecutingActorIds[g_iceArrowActorExecuteDepth++] =
-        g_iceArrowExecutingActorId;
-    g_iceArrowExecutingActorId =
-        fopAcM_GetID(reinterpret_cast<fopAc_ac_c*>(leaf));
+    ++g_iceArrowActorExecuteDepth;
     return HOOK_CONTINUE;
 }
 
@@ -168,8 +168,14 @@ void end_ice_arrow_actor_execute(ModContext*, void*, void*, void*) {
     if (g_iceArrowActorExecuteDepth == 0) {
         return;
     }
-    g_iceArrowExecutingActorId =
-        g_iceArrowPreviousExecutingActorIds[--g_iceArrowActorExecuteDepth];
+    --g_iceArrowActorExecuteDepth;
+    if (g_iceArrowActorExecuteDepth <
+        sizeof(g_iceArrowPreviousExecutingActorIds) /
+            sizeof(g_iceArrowPreviousExecutingActorIds[0]))
+    {
+        g_iceArrowExecutingActorId =
+            g_iceArrowPreviousExecutingActorIds[g_iceArrowActorExecuteDepth];
+    }
 }
 
 HookAction suppress_ice_frozen_enemy_attack(ModContext*, void* args, void*, void*) {

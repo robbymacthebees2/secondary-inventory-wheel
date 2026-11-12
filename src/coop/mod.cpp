@@ -1420,7 +1420,7 @@ void handle_udp_payload(const mods::net::Event& event) {
 }
 
 uint8_t detect_local_outfit() {
-
+    if (sumo_hides_equipment(coop_net_local_id())) return kPuppetOutfitSumo;
     const uint8_t clothes = dComIfGs_getSelectEquipClothes();
     if (clothes == dItemNo_WEAR_CASUAL_e) return kPuppetOutfitCasual;
     if (clothes == dItemNo_WEAR_ZORA_e) return kPuppetOutfitZora;

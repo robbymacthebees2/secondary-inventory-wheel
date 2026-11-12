@@ -1,0 +1,3 @@
+name=KePa - Wolf Link TP
+by=XModxGodX
+about=KePa - Wolf Link TP human-form outfits, ported with permission from GameBanana mod 723967.

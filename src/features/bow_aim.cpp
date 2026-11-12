@@ -2,6 +2,7 @@
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_method.h"
 #include "f_pc/f_pc_name.h"
+#include "m_Do/m_Do_ext.h"
 
 #include <array>
 #include <chrono>
@@ -20,23 +21,26 @@ DEFINE_HOOK(&daAlink_c::modelCalc, BowModelCalc);
 DEFINE_HOOK(&daArrow_c::arrowShooting, BowArrowShooting);
 DEFINE_HOOK_SYMBOL("fopAc_Execute", int(void*), BulletTimeActorExecute);
 DEFINE_HOOK(&fpcMtd_Execute, BulletTimeProcessExecute);
+DEFINE_HOOK(&fopAcM_calcSpeed, BulletTimeCalcSpeed);
+DEFINE_HOOK(&fopAcM_posMove, BulletTimePosMove);
 DEFINE_HOOK(&daAlink_c::posMove, BulletTimeLinkPosMove);
 
 constexpr f32 kSimulationPeriod = 1.0f / 30.0f;
 constexpr f32 kEnemyTimeScale = 0.1f;
-constexpr f32 kArrowTimeScale = 0.2f;
 constexpr f32 kLinkTimeScale = 0.1f;
 constexpr f32 kFreeBowCameraDegreesPerFrame = 4.0f;
 constexpr f32 kFreeBowCameraPitchLimit = 89.0f;
-constexpr auto kBulletTimeDuration = std::chrono::seconds(5);
 constexpr auto kManualJumpTimeout = std::chrono::seconds(7);
 constexpr f32 kPi = 3.14159265358979323846f;
 constexpr std::size_t kActorClockCapacity = 256;
 constexpr std::size_t kActorExecuteStackCapacity = 8;
+constexpr std::size_t kMovementHookStackCapacity = 16;
+constexpr std::size_t kAnimationHookStackCapacity = 16;
 
 struct BulletTimeState {
     daAlink_c* owner = nullptr;
     std::chrono::steady_clock::time_point started{};
+    f32 verticalSpeed = 0.0f;
     bool active = false;
     bool usedForJump = false;
 };
@@ -51,7 +55,30 @@ struct SlowActorClock {
 struct LinkPositionStep {
     daAlink_c* link = nullptr;
     cXyz startPosition{};
+    cXyz lastGenericPosition{};
     f32 gravity = 0.0f;
+    bool genericStepApplied = false;
+    bool gravityChanged = false;
+    bool active = false;
+};
+
+struct EnemyGravityStep {
+    fopAc_ac_c* actor = nullptr;
+    f32 gravity = 0.0f;
+    bool active = false;
+};
+
+struct EnemyPositionStep {
+    fopAc_ac_c* actor = nullptr;
+    cXyz speed{};
+    cXyz startPosition{};
+    bool linkPosition = false;
+    bool active = false;
+};
+
+struct EnemyAnimationStep {
+    mDoExt_morf_c* morf = nullptr;
+    f32 playSpeed = 0.0f;
     bool active = false;
 };
 
@@ -69,7 +96,13 @@ bool g_manualJumpBowAimRequested = false;
 bool g_manualJumpBowAimActive = false;
 std::array<SlowActorClock, kActorClockCapacity> g_actorClocks{};
 std::array<fopAc_ac_c*, kActorExecuteStackCapacity> g_actorExecuteStack{};
+std::array<EnemyGravityStep, kMovementHookStackCapacity> g_enemyGravitySteps{};
+std::array<EnemyPositionStep, kMovementHookStackCapacity> g_enemyPositionSteps{};
+std::array<EnemyAnimationStep, kAnimationHookStackCapacity> g_enemyAnimationSteps{};
 std::size_t g_actorExecuteDepth = 0;
+std::size_t g_enemyGravityDepth = 0;
+std::size_t g_enemyPositionDepth = 0;
+std::size_t g_enemyAnimationDepth = 0;
 std::uint64_t g_slowMotionFrame = 0;
 LinkPositionStep g_linkPositionStep{};
 BowPoseCorrection g_bowPoseCorrection{};
@@ -79,7 +112,7 @@ f32 g_thirdPersonDistance = 300.0f;
 f32 g_thirdPersonHeight = 130.0f;
 f32 g_thirdPersonFovy = 45.0f;
 f32 g_cameraFovyBeforeRun = 45.0f;
-bool g_cameraFovyBeforeRunValid = false;
+dCamera_c* g_cameraFovyBeforeRunCamera = nullptr;
 dCamera_c* g_zoomCamera = nullptr;
 f32 g_zoomBaseFovy = 45.0f;
 bool g_zoomApplied = false;
@@ -92,11 +125,15 @@ bool custom_camera_enabled() {
     return aimMode() != 0;
 }
 
+bool is_bow_or_slingshot(u16 item) {
+    return daAlink_c::checkBowItem(item) || item == dItemNo_PACHINKO_e;
+}
+
 bool bow_subject_active(const daAlink_c* link) {
     return link != nullptr && !link->checkWolf() &&
            (link->mProcID == daAlink_c::PROC_BOW_SUBJECT ||
             (g_manualJumpBowAimActive && g_manualJumpOwner == link &&
-             daAlink_c::checkBowItem(link->mEquipItem)));
+             is_bow_or_slingshot(link->mEquipItem)));
 }
 
 bool vanilla_air_bow_camera_active(const daAlink_c* link) {
@@ -110,6 +147,11 @@ bool is_hawkeye_bow(const daAlink_c* link) {
 
 camera_process_class* player_camera(daAlink_c* link) {
     return link == nullptr ? nullptr : dComIfGp_getCamera(link->field_0x317c);
+}
+
+bool is_player_camera(dCamera_c* camera, daAlink_c* link) {
+    if (!coop_ptr_looks_live(camera) || !coop_ptr_looks_live(link)) return false;
+    return camera->mpPlayerActor == link;
 }
 
 bool face_camera_view_yaw(daAlink_c* link) {
@@ -399,9 +441,17 @@ bool update_bullet_time_bow_aim(daAlink_c* link) {
 }
 
 void stop_bullet_time() {
+    if (g_bulletTime.active && g_bulletTime.owner != nullptr &&
+        g_bulletTime.owner == daAlink_getAlinkActorClass())
+    {
+        g_bulletTime.owner->speed.y =
+            g_bulletTime.owner->mLinkAcch.ChkGroundHit()
+                ? 0.0f : g_bulletTime.verticalSpeed;
+    }
     g_bulletTime.active = false;
     g_bulletTime.owner = nullptr;
     g_bulletTime.started = {};
+    g_bulletTime.verticalSpeed = 0.0f;
     g_actorClocks = {};
     g_linkPositionStep = {};
 }
@@ -444,7 +494,7 @@ bool selected_bow_button_requested(daAlink_c* link) {
         SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
     for (const u8 slot : slots) {
         if ((buttons & (1u << slot)) != 0 &&
-            daAlink_c::checkBowItem(dComIfGp_getSelectItem(slot)))
+            is_bow_or_slingshot(dComIfGp_getSelectItem(slot)))
         {
             return true;
         }
@@ -458,7 +508,7 @@ bool selected_bow_button_triggered(daAlink_c* link) {
         SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
     for (const u8 slot : slots) {
         if ((static_cast<u32>(link->mItemTrigger) & (1u << slot)) != 0 &&
-            daAlink_c::checkBowItem(dComIfGp_getSelectItem(slot)))
+            is_bow_or_slingshot(dComIfGp_getSelectItem(slot)))
         {
             return true;
         }
@@ -467,14 +517,14 @@ bool selected_bow_button_triggered(daAlink_c* link) {
 }
 
 bool bow_aim_requested(daAlink_c* link) {
-    return link != nullptr && daAlink_c::checkBowItem(link->mEquipItem) &&
+    return link != nullptr && is_bow_or_slingshot(link->mEquipItem) &&
            link->checkReadyItem() &&
            (selected_bow_button_requested(link) || link->itemTrigger() ||
             link->itemButton());
 }
 
 bool equip_selected_bow_for_bullet_time(daAlink_c* link) {
-    if (link == nullptr || daAlink_c::checkBowItem(link->mEquipItem)) return false;
+    if (link == nullptr || is_bow_or_slingshot(link->mEquipItem)) return false;
     const u32 buttons =
         static_cast<u32>(link->mItemTrigger) |
         static_cast<u32>(link->mItemButton);
@@ -483,12 +533,12 @@ bool equip_selected_bow_for_bullet_time(daAlink_c* link) {
     for (const u8 slot : slots) {
         if ((buttons & (1u << slot)) == 0) continue;
         const u16 item = dComIfGp_getSelectItem(slot);
-        if (!daAlink_c::checkBowItem(item)) continue;
+        if (!is_bow_or_slingshot(item)) continue;
         link->mSelectItemId = slot;
         link->itemEquip(item);
         if (link->field_0x2fde != item) return false;
         link->commonChangeItem();
-        if (!daAlink_c::checkBowItem(link->mEquipItem)) return false;
+        if (!is_bow_or_slingshot(link->mEquipItem)) return false;
         link->setBowReadyAnime();
         link->mItemMode = 0;
         link->setBowOrSlingStatus();
@@ -498,7 +548,7 @@ bool equip_selected_bow_for_bullet_time(daAlink_c* link) {
 }
 
 void prepare_bow_aim(daAlink_c* link) {
-    if (link == nullptr || !daAlink_c::checkBowItem(link->mEquipItem) ||
+    if (link == nullptr || !is_bow_or_slingshot(link->mEquipItem) ||
         !link->checkReadyItem())
     {
         return;
@@ -520,6 +570,7 @@ void start_bullet_time(daAlink_c* link) {
     }
     g_bulletTime.owner = link;
     g_bulletTime.started = std::chrono::steady_clock::now();
+    g_bulletTime.verticalSpeed = link->speed.y;
     g_bulletTime.active = true;
     g_bulletTime.usedForJump = true;
 }
@@ -529,7 +580,8 @@ void update_bullet_time_before_jump(daAlink_c* link) {
     const auto now = std::chrono::steady_clock::now();
     if ((!manualJumpEnabled() && !revalisGaleEnabled()) ||
         !manual_jump_is_airborne(link) ||
-        now - g_manualJumpStarted >= kManualJumpTimeout ||
+        (!g_bulletTime.active &&
+         now - g_manualJumpStarted >= kManualJumpTimeout) ||
         link->checkEventRun() || dComIfGp_event_runCheck() ||
         dComIfGp_isPauseFlag() || dComIfGp_isEnableNextStage())
     {
@@ -540,7 +592,7 @@ void update_bullet_time_before_jump(daAlink_c* link) {
     if (selected_bow_button_triggered(link)) {
         g_manualJumpBowAimRequested = true;
         g_manualJumpBowAimActive = true;
-        if (!daAlink_c::checkBowItem(link->mEquipItem)) {
+        if (!is_bow_or_slingshot(link->mEquipItem)) {
             g_bowBulletTimePending =
                 equip_selected_bow_for_bullet_time(link);
         }
@@ -552,20 +604,18 @@ void update_bullet_time_before_jump(daAlink_c* link) {
         return;
     }
 
-    if (g_bulletTime.active &&
-        (link->doTrigger() || now - g_bulletTime.started >= kBulletTimeDuration))
-    {
+    if (g_bulletTime.active && link->doTrigger()) {
         stop_bullet_time();
     }
     if (!g_bulletTime.active && !g_bulletTime.usedForJump) {
         if (!g_bowBulletTimePending && selected_bow_button_requested(link) &&
-            !daAlink_c::checkBowItem(link->mEquipItem))
+            !is_bow_or_slingshot(link->mEquipItem))
         {
             g_bowBulletTimePending =
                 equip_selected_bow_for_bullet_time(link);
         }
         if ((g_bowBulletTimePending || bow_aim_requested(link)) &&
-            daAlink_c::checkBowItem(link->mEquipItem) && link->checkReadyItem() &&
+            is_bow_or_slingshot(link->mEquipItem) && link->checkReadyItem() &&
             link->checkBowAnime())
         {
             start_bullet_time(link);
@@ -603,7 +653,7 @@ void update_manual_jump_bow_aim(daAlink_c* link) {
         return;
     }
 
-    if (!daAlink_c::checkBowItem(link->mEquipItem)) {
+    if (!is_bow_or_slingshot(link->mEquipItem)) {
         g_manualJumpBowAimRequested = false;
         g_manualJumpBowAimActive = false;
         return;
@@ -670,14 +720,14 @@ f32 actor_time_scale(fopAc_ac_c* actor) {
     switch (fopAcM_GetName(actor)) {
     case fpcNm_ALINK_e:
         return 1.0f;
-    case fpcNm_ARROW_e:
-        if (fopAcM_GetParam(actor) == 0) {
-            return 1.0f;
-        }
-        return kArrowTimeScale;
     default:
         return kEnemyTimeScale;
     }
+}
+
+bool is_slow_motion_target(const fopAc_ac_c* actor) {
+    return actor != nullptr &&
+        (actor->group == fopAc_ENEMY_e || actor->group == fopAc_NPC_e);
 }
 
 SlowActorClock* actor_clock(fopAc_ac_c* actor) {
@@ -780,8 +830,18 @@ HookAction scale_actor_execution(ModContext*, void* args, void* retval, void*) {
     const auto* methods =
         reinterpret_cast<const process_method_class*>(actor->sub_method);
     if (mods::arg<const process_method_class*>(args, 0) != methods ||
-        !should_skip_slow_actor(actor))
+        !g_bulletTime.active)
     {
+        return HOOK_CONTINUE;
+    }
+
+    if (fopAcM_GetName(actor) == fpcNm_ARROW_e ||
+        is_slow_motion_target(actor))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    if (!should_skip_slow_actor(actor)) {
         return HOOK_CONTINUE;
     }
 
@@ -789,6 +849,162 @@ HookAction scale_actor_execution(ModContext*, void* args, void* retval, void*) {
         *static_cast<int*>(retval) = 1;
     }
     return HOOK_SKIP_ORIGINAL;
+}
+
+HookAction scale_enemy_gravity(ModContext*, void* args, void*, void*) {
+    const std::size_t depth = g_enemyGravityDepth++;
+    if (!g_bulletTime.active || depth >= g_enemyGravitySteps.size()) {
+        return HOOK_CONTINUE;
+    }
+
+    auto* actor = mods::arg<fopAc_ac_c*>(args, 0);
+    const bool isLink = actor == g_bulletTime.owner;
+    if (!isLink && !is_slow_motion_target(actor)) {
+        return HOOK_CONTINUE;
+    }
+
+    g_enemyGravitySteps[depth] = {
+        .actor = actor,
+        .gravity = actor->gravity,
+        .active = true,
+    };
+    actor->gravity *= isLink ? 0.0f : kEnemyTimeScale;
+    return HOOK_CONTINUE;
+}
+
+void restore_enemy_gravity(ModContext*, void* args, void*, void*) {
+    if (g_enemyGravityDepth == 0) {
+        return;
+    }
+
+    const std::size_t depth = --g_enemyGravityDepth;
+    if (depth >= g_enemyGravitySteps.size()) {
+        return;
+    }
+
+    EnemyGravityStep& step = g_enemyGravitySteps[depth];
+    auto* actor = mods::arg<fopAc_ac_c*>(args, 0);
+    if (step.active && actor == step.actor) {
+        actor->gravity = step.gravity;
+    }
+    step = {};
+}
+
+HookAction scale_enemy_position_step(ModContext*, void* args, void*, void*) {
+    const std::size_t depth = g_enemyPositionDepth++;
+    if (!g_bulletTime.active || depth >= g_enemyPositionSteps.size()) {
+        return HOOK_CONTINUE;
+    }
+
+    auto* actor = mods::arg<fopAc_ac_c*>(args, 0);
+    if (actor == g_bulletTime.owner) {
+        g_enemyPositionSteps[depth] = {
+            .actor = actor,
+            .startPosition = actor->current.pos,
+            .linkPosition = true,
+            .active = true,
+        };
+        return HOOK_CONTINUE;
+    }
+    if (!is_slow_motion_target(actor)) {
+        return HOOK_CONTINUE;
+    }
+
+    EnemyPositionStep& step = g_enemyPositionSteps[depth];
+    step = {
+        .actor = actor,
+        .speed = actor->speed,
+        .active = true,
+    };
+    actor->speed.x *= kEnemyTimeScale;
+    actor->speed.y *= kEnemyTimeScale;
+    actor->speed.z *= kEnemyTimeScale;
+    return HOOK_CONTINUE;
+}
+
+void restore_enemy_position_step(ModContext*, void* args, void*, void*) {
+    if (g_enemyPositionDepth == 0) {
+        return;
+    }
+
+    const std::size_t depth = --g_enemyPositionDepth;
+    if (depth >= g_enemyPositionSteps.size()) {
+        return;
+    }
+
+    EnemyPositionStep& step = g_enemyPositionSteps[depth];
+    auto* actor = mods::arg<fopAc_ac_c*>(args, 0);
+    if (step.active && actor == step.actor) {
+        if (step.linkPosition) {
+            const cXyz displacement = actor->current.pos - step.startPosition;
+            actor->current.pos.x =
+                step.startPosition.x + displacement.x * kLinkTimeScale;
+            actor->current.pos.z =
+                step.startPosition.z + displacement.z * kLinkTimeScale;
+            actor->current.pos.y = step.startPosition.y;
+            actor->old.pos.y = step.startPosition.y;
+            if (g_linkPositionStep.active && g_linkPositionStep.link == actor) {
+                g_linkPositionStep.genericStepApplied = true;
+                g_linkPositionStep.lastGenericPosition = actor->current.pos;
+            }
+        } else {
+            actor->speed = step.speed;
+        }
+    }
+    step = {};
+}
+
+HookAction scale_enemy_animation(ModContext*, void* args, void*, void*) {
+    const std::size_t depth = g_enemyAnimationDepth++;
+    if (!g_bulletTime.active || depth >= g_enemyAnimationSteps.size() ||
+        g_actorExecuteDepth == 0 ||
+        g_actorExecuteDepth > g_actorExecuteStack.size())
+    {
+        return HOOK_CONTINUE;
+    }
+
+    fopAc_ac_c* actor = g_actorExecuteStack[g_actorExecuteDepth - 1];
+    if (!is_slow_motion_target(actor)) {
+        return HOOK_CONTINUE;
+    }
+
+    for (const auto& frozenTarget : g_iceArrowFrozenTargets) {
+        if (frozenTarget.active &&
+            frozenTarget.actorId == g_iceArrowExecutingActorId)
+        {
+            return HOOK_CONTINUE;
+        }
+    }
+
+    auto* morf = mods::arg<mDoExt_morf_c*>(args, 0);
+    if (morf == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    g_enemyAnimationSteps[depth] = {
+        .morf = morf,
+        .playSpeed = morf->getPlaySpeed(),
+        .active = true,
+    };
+    morf->setPlaySpeed(morf->getPlaySpeed() * kEnemyTimeScale);
+    return HOOK_CONTINUE;
+}
+
+void restore_enemy_animation(ModContext*, void*, void*, void*) {
+    if (g_enemyAnimationDepth == 0) {
+        return;
+    }
+
+    const std::size_t depth = --g_enemyAnimationDepth;
+    if (depth >= g_enemyAnimationSteps.size()) {
+        return;
+    }
+
+    EnemyAnimationStep& step = g_enemyAnimationSteps[depth];
+    if (step.active && step.morf != nullptr) {
+        step.morf->setPlaySpeed(step.playSpeed);
+    }
+    step = {};
 }
 
 HookAction slow_link_movement(ModContext*, void* args, void*, void*) {
@@ -801,10 +1017,13 @@ HookAction slow_link_movement(ModContext*, void* args, void*, void*) {
     g_linkPositionStep = {
         .link = link,
         .startPosition = link->current.pos,
+        .lastGenericPosition = link->current.pos,
         .gravity = link->gravity,
+        .gravityChanged = true,
         .active = true,
     };
-    link->gravity *= kLinkTimeScale;
+    link->speed.y = 0.0f;
+    link->gravity = 0.0f;
     return HOOK_CONTINUE;
 }
 
@@ -814,13 +1033,20 @@ void finish_slow_link_movement(ModContext*, void* args, void*, void*) {
         return;
     }
 
-    link->current.pos.x = g_linkPositionStep.startPosition.x +
-        (link->current.pos.x - g_linkPositionStep.startPosition.x) * kLinkTimeScale;
-    link->current.pos.y = g_linkPositionStep.startPosition.y +
-        (link->current.pos.y - g_linkPositionStep.startPosition.y) * kLinkTimeScale;
-    link->current.pos.z = g_linkPositionStep.startPosition.z +
-        (link->current.pos.z - g_linkPositionStep.startPosition.z) * kLinkTimeScale;
-    link->gravity = g_linkPositionStep.gravity;
+    const cXyz startPosition = g_linkPositionStep.genericStepApplied
+                                   ? g_linkPositionStep.lastGenericPosition
+                                   : g_linkPositionStep.startPosition;
+    const cXyz displacement = link->current.pos - startPosition;
+    link->current.pos.x =
+        startPosition.x + displacement.x * kLinkTimeScale;
+    link->current.pos.z =
+        startPosition.z + displacement.z * kLinkTimeScale;
+    link->current.pos.y = startPosition.y;
+    link->old.pos.y = startPosition.y;
+    link->speed.y = 0.0f;
+    if (g_linkPositionStep.gravityChanged) {
+        link->gravity = g_linkPositionStep.gravity;
+    }
     g_linkPositionStep = {};
 }
 
@@ -940,7 +1166,7 @@ void adjust_third_person_bow_camera(ModContext*, void* args, void*, void*) {
 
 HookAction prepare_bow_aim_camera(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
-    g_cameraFovyBeforeRunValid = camera != nullptr;
+    g_cameraFovyBeforeRunCamera = nullptr;
     if (camera == nullptr) {
         return HOOK_CONTINUE;
     }
@@ -948,6 +1174,10 @@ HookAction prepare_bow_aim_camera(ModContext*, void* args, void*, void*) {
         camera->mFovy = g_zoomBaseFovy;
         g_zoomApplied = false;
     }
+    if (!is_player_camera(camera, daAlink_getAlinkActorClass())) {
+        return HOOK_CONTINUE;
+    }
+    g_cameraFovyBeforeRunCamera = camera;
     g_cameraFovyBeforeRun = camera->mFovy;
     return HOOK_CONTINUE;
 }
@@ -1011,10 +1241,11 @@ void apply_unconstrained_bow_camera(dCamera_c* camera, daAlink_c* link) {
 void adjust_bow_aim_camera(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     auto* link = daAlink_getAlinkActorClass();
-    if (camera == nullptr || !g_cameraFovyBeforeRunValid) {
+    if (camera == nullptr || camera != g_cameraFovyBeforeRunCamera) {
         return;
     }
-    if (camera == nullptr ||
+    g_cameraFovyBeforeRunCamera = nullptr;
+    if (!is_player_camera(camera, link) ||
         (!custom_camera_enabled() && !vanilla_air_bow_camera_active(link)) ||
         !bow_subject_active(link))
     {
@@ -1175,18 +1406,15 @@ void update_bullet_time_for_player(daAlink_c* link) {
     clear_bow_aim_state(link);
     if (g_manualJumpOwner != nullptr &&
         (link != g_manualJumpOwner || !manual_jump_is_airborne(link) ||
-         std::chrono::steady_clock::now() - g_manualJumpStarted >=
-             kManualJumpTimeout ||
+         (!g_bulletTime.active &&
+          std::chrono::steady_clock::now() - g_manualJumpStarted >=
+              kManualJumpTimeout) ||
          link->checkEventRun() || dComIfGp_event_runCheck() ||
          dComIfGp_isPauseFlag() || dComIfGp_isEnableNextStage()))
     {
         clear_manual_jump(g_manualJumpOwner);
     }
-    if (g_bulletTime.active &&
-        (bulletTimeMode() == 0 ||
-         std::chrono::steady_clock::now() - g_bulletTime.started >=
-             kBulletTimeDuration))
-    {
+    if (g_bulletTime.active && bulletTimeMode() == 0) {
         stop_bullet_time();
     }
 }
@@ -1204,7 +1432,7 @@ void stop_bow_bullet_time() {
     g_manualJumpBowAimActive = false;
     g_zoomCamera = nullptr;
     g_zoomApplied = false;
-    g_cameraFovyBeforeRunValid = false;
+    g_cameraFovyBeforeRunCamera = nullptr;
     g_freeBowCamera = nullptr;
     g_freeBowCameraOwner = nullptr;
 }

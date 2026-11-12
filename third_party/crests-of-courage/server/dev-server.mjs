@@ -87,7 +87,12 @@ const env = {
       if (!lobby) {
         const ctx = new RoomContext();
         const store = new Map();
-        ctx.storage = { get: async (k) => store.get(k), put: async (k, v) => void store.set(k, v) };
+        ctx.storage = {
+          get: async (k) => store.get(k),
+          put: async (k, v) => void store.set(k, v),
+          setAlarm: async (at) => void store.set("__alarm", at),
+          deleteAlarm: async () => void store.delete("__alarm"),
+        };
         lobby = new Global(ctx, {});
         lobby.__ctx = ctx;
       }

@@ -9,6 +9,7 @@ enum PuppetOutfit : uint8_t {
     kPuppetOutfitMagicArmor = 3,
 
     kPuppetOutfitWolf = 4,
+    kPuppetOutfitSumo = 5,
 };
 
 enum PuppetSwordModel : uint8_t {

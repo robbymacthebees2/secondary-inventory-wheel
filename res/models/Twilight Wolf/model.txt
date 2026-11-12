@@ -1,0 +1,4 @@
+name=Twilight Wolf
+preset=false
+author=Misc
+about=Shadow Beast-inspired Wolf Link model ported with permission from com.misc_custom_twilight_wolf.

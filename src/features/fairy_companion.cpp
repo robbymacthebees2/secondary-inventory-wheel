@@ -19,9 +19,6 @@
 #include "f_op/f_op_actor_mng.h"
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
-#include "m_Do/m_Do_audio.h"
-
-#include "Z2AudioLib/Z2SeMgr.h"
 
 DEFINE_HOOK_SYMBOL(
     "dMeter2Draw_c::getActionString", char*(dMeter2Draw_c*, u8, u8, u8*),
@@ -44,6 +41,10 @@ static constexpr int64_t kFairyToggleButtonLeftBumper = 1;
 static constexpr int64_t kFairyToggleButtonR = 2;
 static constexpr int64_t kFairyToggleButtonR3 = 3;
 static constexpr int64_t kFairyToggleButtonL3 = 4;
+static constexpr int64_t kFairyToggleButtonRAndA = 5;
+static constexpr int64_t kFairyToggleButtonRAndLeftBumper = 6;
+static constexpr int64_t kFairyToggleButtonRAndR3 = 7;
+static constexpr int64_t kFairyToggleButtonRAndL3 = 8;
 
 // Particle update intervals
 static constexpr u8 k_particleInterval = 8;
@@ -105,11 +106,11 @@ static constexpr f32 k_emergeRate = 0.12f;
 
 // State
 static f32  s_hideBlend = 1.0f;  // 0 = out flying, 1 = fully tucked into Link
-static f32  s_baseScale = 0.0f;  // Normal model scale, captured on first Execute
+static f32  s_baseScale = 1.0f;
 
 static void resetHideState() {
     s_hideBlend = maFairyCompanion_c::isCalled() ? 0.0f : 1.0f;
-    s_baseScale = 0.0f;
+    s_baseScale = 1.0f;
 }
 
 static f32 updateHideBlend() {
@@ -138,14 +139,6 @@ u32         maFairyCompanion_c::sExecTick = 0;
 s16         maFairyCompanion_c::sProcName = -1;
 ActorHandle maFairyCompanion_c::sActorHandle = -1;
 
-void maFairySfx_play() {
-    daAlink_c* player = daAlink_getAlinkActorClass();
-    if (player == nullptr) return;
-    mDoAud_seStart(
-        Z2SE_FAIRY_HANE_OP, &player->current.pos, 0,
-        dComIfGp_getReverb(fopAcM_GetRoomNo(player)));
-}
-
 void maFairyCompanion_c::setSelectedColor(u8 colorId) {
     sSelectedColor = (colorId < k_fairyTintCount) ? colorId : FAIRY_COLOR_BLUE;
 }
@@ -157,14 +150,14 @@ bool s_fairyActorActive = false;
 ActorId s_fairyActorId = 0;
 u16 s_fairySpawnRetryFrames = 0;
 bool s_fairyActionPromptActive = false;
-bool s_fairyToggleButtonWasHeld[5] = {};
+bool s_fairyToggleButtonWasHeld[9] = {};
 bool s_fairyToggleUiQueryFailed = false;
 char s_fairyCallLabel[] = "Call";
 char s_fairyPutAwayLabel[] = "Put Away";
 
 int64_t fairy_toggle_binding() {
     return get_int_option(g_fairyCompanionToggleBinding, kFairyToggleButtonA,
-        kFairyToggleButtonA, kFairyToggleButtonL3);
+        kFairyToggleButtonA, kFairyToggleButtonRAndL3);
 }
 
 bool can_use_fairy_action(daAlink_c* player) {
@@ -219,42 +212,65 @@ bool toggle_fairy_for_binding(daAlink_c* player, int64_t binding) {
     s_fairyToggleUiQueryFailed = false;
     if (documentVisible) return false;
 
-    maFairyCompanion_c::setCalled(!maFairyCompanion_c::isCalled());
-    maFairySfx_play();
+    const bool showFairy = !maFairyCompanion_c::isCalled();
+    maFairyCompanion_c::setCalled(showFairy);
+    s_hideBlend = showFairy ? 0.0f : 1.0f;
+    s_baseScale = 1.0f;
     return true;
 }
 
 void intercept_fairy_a_toggle(ModContext*, void* args, void*, void*) {
-    if (fairy_toggle_binding() != kFairyToggleButtonA) return;
-    auto* player = mods::arg<daAlink_c*>(args, 0);
-    if (player == nullptr || !s_fairyActorActive ||
-        (player->mItemTrigger & daAlink_c::BTN_A) == 0)
+    const int64_t binding = fairy_toggle_binding();
+    if (binding != kFairyToggleButtonA &&
+        binding != kFairyToggleButtonRAndA)
     {
         return;
     }
-    if (!toggle_fairy_for_binding(player, kFairyToggleButtonA)) return;
+    auto* player = mods::arg<daAlink_c*>(args, 0);
+    if (player == nullptr || !s_fairyActorActive ||
+        (player->mItemTrigger & daAlink_c::BTN_A) == 0 ||
+        (binding == kFairyToggleButtonRAndA &&
+         mDoCPd_c::getHoldLockR(PAD_1) == 0))
+    {
+        return;
+    }
+    if (!toggle_fairy_for_binding(player, binding)) return;
 
-    player->mItemTrigger &= static_cast<u8>(~daAlink_c::BTN_A);
-    player->mItemButton &= static_cast<u8>(~daAlink_c::BTN_A);
+    if (!player->checkHorseRide()) {
+        player->mItemTrigger &= static_cast<u8>(~daAlink_c::BTN_A);
+        player->mItemButton &= static_cast<u8>(~daAlink_c::BTN_A);
+    }
 }
 
 void update_fairy_toggle_input(daAlink_c* player) {
     const u32 extendedButtons = JUTGamePad::mPadStatus[PAD_1].extButton;
-    const bool held[5] = {
+    const bool baseHeld[5] = {
         mDoCPd_c::getHoldA(PAD_1) != 0,
         native_left_bumper_held(),
         mDoCPd_c::getHoldLockR(PAD_1) != 0,
         (extendedButtons & PAD_BUTTON_RIGHT_STICK) != 0,
         (extendedButtons & PAD_BUTTON_LEFT_STICK) != 0,
     };
-    bool pressed[5] = {};
-    for (size_t i = 0; i < 5; ++i) {
+    const bool rightBumperHeld = baseHeld[kFairyToggleButtonR];
+    bool held[9] = {
+        baseHeld[0], baseHeld[1], baseHeld[2], baseHeld[3], baseHeld[4],
+        rightBumperHeld && baseHeld[0],
+        rightBumperHeld && baseHeld[1],
+        rightBumperHeld && baseHeld[3],
+        rightBumperHeld && baseHeld[4],
+    };
+    bool pressed[9] = {};
+    for (size_t i = 0; i < 9; ++i) {
         pressed[i] = held[i] && !s_fairyToggleButtonWasHeld[i];
         s_fairyToggleButtonWasHeld[i] = held[i];
     }
 
     const int64_t binding = fairy_toggle_binding();
-    if (binding == kFairyToggleButtonA) return;
+    if (binding == kFairyToggleButtonA ||
+        binding == kFairyToggleButtonRAndA)
+    {
+        return;
+    }
     const bool triggered = pressed[binding];
     if (triggered) toggle_fairy_for_binding(player, binding);
 }
@@ -449,6 +465,9 @@ maFairyCompanion_c::~maFairyCompanion_c() {
 cPhs_Step maFairyCompanion_c::create() {
     fopAcM_ct(this, maFairyCompanion_c);
 
+    scale.x = scale.y = scale.z = 1.0f;
+    s_baseScale = 1.0f;
+
     if (!fopAcM_entrySolidHeap(this, createHeapCallBack, k_heapSize)) {
         return cPhs_ERROR_e;
     }
@@ -511,11 +530,8 @@ int maFairyCompanion_c::Delete() {
 int maFairyCompanion_c::Execute() {
     sExecTick++;
     mColorId = sSelectedColor;
-
-    // Remember the normal model scale (before hide shrinking touches it)
-    if (s_baseScale <= 0.0f && scale.x > 0.01f) {
-        s_baseScale = scale.x;
-    }
+    // The camera can leave NODRAW set after skipping this actor's draw callback.
+    fopAcM_OffStatus(this, fopAcStts_NODRAW_e);
 
     daPy_py_c* player = daPy_getPlayerActorClass();
     daAlink_c* alink = daAlink_getAlinkActorClass();
@@ -750,8 +766,8 @@ const ActorProfileDesc maFairyCompanion_c::sProfile = {
     .name = MFAIRYC_NAME,
     .priority_group = 7,
     .process_size = sizeof(maFairyCompanion_c),
-    .draw_priority = fpcDwPi_OBJ_LBOX_e,
-    .status = fopAcStts_UNK_0x40000_e | fopAcStts_UNK_0x4000_e | fopAcStts_CULL_e,
+    .draw_priority = fpcDwPi_Obj_Yousei_e,
+    .status = fopAcStts_UNK_0x80000_e | fopAcStts_UNK_0x40000_e,
     .group = fopAc_ACTOR_e,
     .cull_type = fopAc_CULLBOX_CUSTOM_e,
     .create_function = maFairyCompanion_Create,

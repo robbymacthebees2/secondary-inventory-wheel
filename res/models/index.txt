@@ -279,3 +279,44 @@ Zora Link/zora/body.bmd
 Zora Link/zora/face.bmd
 Zora Link/zora/hands.bmd
 Zora Link/zora/head.bmd
+Twilight Wolf/model.txt
+Twilight Wolf/wolf/body.bmd
+Concept Art Wolf/model.txt
+Concept Art Wolf/textures/tex1_64x64_03fdf79966d4e757_5.dds
+Concept Art Wolf/textures/tex1_64x64_171938e733404060_5.dds
+Concept Art Wolf/textures/tex1_64x64_4ebe8cd08a691816_5.dds
+Concept Art Wolf/textures/tex1_64x64_a4b1a9c9309ccada_14.dds
+Concept Art Wolf/textures/tex1_64x64_e62c32395af93458_14.dds
+Concept Art Wolf/textures/tex1_512x512_af8808933de861f2_14.dds
+Concept Art Wolf/textures/tex1_512x512_e351617d88e29fc8_14.dds
+Concept Art Wolf/textures/tex1_64x64_03fdf79966d4e757_5.gxrgba
+Concept Art Wolf/textures/tex1_64x64_171938e733404060_5.gxrgba
+Concept Art Wolf/textures/tex1_64x64_4ebe8cd08a691816_5.gxrgba
+Concept Art Wolf/textures/tex1_64x64_a4b1a9c9309ccada_14.gxrgba
+Concept Art Wolf/textures/tex1_64x64_e62c32395af93458_14.gxrgba
+Concept Art Wolf/textures/tex1_512x512_af8808933de861f2_14.gxrgba
+Concept Art Wolf/textures/tex1_512x512_e351617d88e29fc8_14.gxrgba
+KePa - Wolf Link TP/model.txt
+KePa - Wolf Link TP/body.bmd
+KePa - Wolf Link TP/face.bmd
+KePa - Wolf Link TP/head.bmd
+KePa - Wolf Link TP/hands.bmd
+KePa - Wolf Link TP/ordon/body.bmd
+KePa - Wolf Link TP/ordon/face.bmd
+KePa - Wolf Link TP/ordon/head.bmd
+KePa - Wolf Link TP/ordon/hands.bmd
+KePa - Wolf Link TP/zora/body.bmd
+KePa - Wolf Link TP/zora/face.bmd
+KePa - Wolf Link TP/zora/head.bmd
+KePa - Wolf Link TP/zora/hands.bmd
+KePa - Wolf Link TP/magic/body.bmd
+KePa - Wolf Link TP/magic/face.bmd
+KePa - Wolf Link TP/magic/head.bmd
+KePa - Wolf Link TP/magic/hands.bmd
+KePa - Wolf Link TP/sumo/body.bmd
+KePa - Wolf Link TP/sumo/head.bmd
+KePa - Wolf Link TP/sumo/hands.bmd
+KePa - Wolf Link TP/textures/tex1_256x128_ba1f16324b4be55d_14.gxrgba
+KePa - Wolf Link TP/textures/tex1_256x256_640f8eb7ad1e90fc_14.gxrgba
+KePa - Wolf Link TP/textures/tex1_256x256_c1a9fb137618f0e3_14.gxrgba
+KePa - Wolf Link TP/textures/tex1_64x64_e3bc7a1f1438a4ca_14.gxrgba

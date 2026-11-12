@@ -29,9 +29,11 @@ This routes room-code rendezvous and Hyrule Online peer discovery through your d
 Hyrule Online chat uses the same `/global` WebSocket as player discovery. Messages and renames are
 sent only to connected players in the same game stage and combined-mod version; blocked peers do
 not receive them. The server validates and filters text, limits messages to 100 characters and
-one per two seconds per connection, and does not store or log chat history. Room-code co-op chat
-continues over the existing encrypted direct peer connection. The combined Wheel no longer
-connects to Remia's Co-op chat relay; it uses this Worker's `/global` endpoint instead.
+one per two seconds per connection, and does not store or log chat history. Hyrule Online sessions
+refresh their presence periodically; inactive sessions expire, and reconnects replace an older
+session with the same installation identity. Room-code co-op chat continues over the existing
+encrypted direct peer connection. The combined Wheel no longer connects to Remia's Co-op chat
+relay; it uses this Worker's `/global` endpoint instead.
 
 ## Try it without deploying anything
 

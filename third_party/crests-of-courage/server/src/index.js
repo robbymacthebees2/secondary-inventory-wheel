@@ -348,6 +348,7 @@ const GLOBAL_PEERS = 15;
 const GLOBAL_MAX = 400;
 const GLOBAL_AREA = /^[A-Za-z0-9_]{0,8}$/;
 const GLOBAL_AREA_CHANGES = 30;
+const GLOBAL_PRESENCE_TIMEOUT_MS = 60_000;
 
 const GLOBAL_CHAT_MAX = 100;
 const GLOBAL_CHAT_GAP_MS = 2000;
@@ -501,6 +502,14 @@ export class Global {
     return { total, here, same };
   }
 
+  broadcastCounts(exclude = null) {
+    for (const ws of this.all()) {
+      if (ws === exclude) continue;
+      const info = ws.deserializeAttachment();
+      if (info?.hello) send(ws, { op: "count", ...this.counts(info.area, info.v) });
+    }
+  }
+
   broadcastRoster(exclude = null) {
     const players = [];
     for (const ws of this.all()) {
@@ -561,6 +570,7 @@ export class Global {
   }
 
   async fetch(request) {
+    await this.pruneExpired();
     if (this.all().length >= GLOBAL_MAX) {
       return new Response("Hyrule Online is full", { status: 503 });
     }
@@ -570,9 +580,17 @@ export class Global {
     const id = this.newId();
     server.serializeAttachment({
       id, ip: request.headers.get("CF-Connecting-IP") || "", hello: false, v: 0, ep: "", port: 0,
-      lan: "", area: "", peers: [], window: Date.now(), changes: 0,
+      lan: "", area: "", peers: [], window: Date.now(), changes: 0, lastSeen: Date.now(),
+      heartbeat: false,
     });
-    send(server, { op: "welcome", id, stun: await stunServers(), total: this.counts("").total });
+    send(server, {
+      op: "welcome",
+      id,
+      stun: await stunServers(),
+      total: this.counts("").total,
+      heartbeat: true,
+    });
+    await this.scheduleCleanup();
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -586,6 +604,13 @@ export class Global {
     }
     const info = ws.deserializeAttachment();
     if (!info) return;
+    info.lastSeen = Date.now();
+    ws.serializeAttachment(info);
+    await this.scheduleCleanup();
+    if (msg.op === "ping" && info.hello) {
+      send(ws, { op: "pong" });
+      return;
+    }
     if (msg.op === "hello" && !info.hello) {
       info.hello = true;
       info.v = Number(msg.v) || 0;
@@ -594,10 +619,28 @@ export class Global {
       info.lan = isPrivateIpv4(msg.lan) ? msg.lan : "";
       info.name = cleanName(printable(msg.name, 16)) || "Player";
       info.tag = await tagOf(msg.key);
+      info.heartbeat = msg.heartbeat === true;
+      if (info.tag) {
+        for (const other of this.all()) {
+          if (other === ws) continue;
+          const theirs = other.deserializeAttachment();
+          if (!theirs?.hello || theirs.tag !== info.tag) continue;
+          this.part(other, theirs);
+          theirs.hello = false;
+          other.serializeAttachment(theirs);
+          try {
+            send(other, { op: "superseded" });
+            other.close(4001, "replaced by newer session");
+          } catch {
+          }
+        }
+      }
       this.introduce(ws, info);
       ws.serializeAttachment(info);
       send(ws, { op: "count", ...this.counts(info.area, info.v) });
       this.broadcastRoster();
+      this.broadcastCounts(ws);
+      await this.scheduleCleanup();
       return;
     }
     if (msg.op === "area") {
@@ -615,6 +658,7 @@ export class Global {
       }
       ws.serializeAttachment(info);
       send(ws, { op: "count", ...this.counts(info.area, info.v) });
+      this.broadcastCounts(ws);
       return;
     }
     if (msg.op === "chat" && info.hello) {
@@ -641,11 +685,70 @@ export class Global {
     const info = ws.deserializeAttachment();
     if (info) {
       this.part(ws, info);
+      info.hello = false;
+      ws.serializeAttachment(info);
       this.broadcastRoster(ws);
+      this.broadcastCounts(ws);
     }
+    await this.scheduleCleanup();
   }
 
   async webSocketError(ws) {
     await this.webSocketClose(ws, 1011);
+  }
+
+  async scheduleCleanup() {
+    let next = null;
+    const now = Date.now();
+    for (const ws of this.all()) {
+      const info = ws.deserializeAttachment();
+      if (!info) continue;
+      if (info.hello && !info.heartbeat) continue;
+      const lastSeen = Number.isFinite(info.lastSeen)
+        ? info.lastSeen
+        : Number.isFinite(info.window) ? info.window : now;
+      if (info.lastSeen !== lastSeen) {
+        info.lastSeen = lastSeen;
+        ws.serializeAttachment(info);
+      }
+      const expiresAt = lastSeen + GLOBAL_PRESENCE_TIMEOUT_MS;
+      next = next === null ? expiresAt : Math.min(next, expiresAt);
+    }
+    if (next === null) {
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      await this.ctx.storage.setAlarm(Math.max(Date.now() + 1, next));
+    }
+  }
+
+  async pruneExpired() {
+    const now = Date.now();
+    let changed = false;
+    for (const ws of this.all()) {
+      const info = ws.deserializeAttachment();
+      if (!info) continue;
+      if (info.hello && !info.heartbeat) continue;
+      const lastSeen = Number.isFinite(info.lastSeen)
+        ? info.lastSeen
+        : Number.isFinite(info.window) ? info.window : now;
+      if (now - lastSeen < GLOBAL_PRESENCE_TIMEOUT_MS) continue;
+      this.part(ws, info);
+      info.hello = false;
+      ws.serializeAttachment(info);
+      try {
+        ws.close(4001, "presence timed out");
+      } catch {
+      }
+      changed = true;
+    }
+    if (changed) {
+      this.broadcastRoster();
+      this.broadcastCounts();
+    }
+  }
+
+  async alarm() {
+    await this.pruneExpired();
+    await this.scheduleCleanup();
   }
 }

@@ -33,11 +33,11 @@ function check(what, ok) {
   if (!ok) process.exitCode = 1;
 }
 
-async function nextOp(peer, op) {
+async function nextOp(peer, op, matches = () => true) {
   for (let i = 0; i < 10; ++i) {
     const msg = await peer.next();
     if (!msg) return null;
-    if (msg.op === op) return msg;
+    if (msg.op === op && matches(msg)) return msg;
   }
   return null;
 }
@@ -84,45 +84,80 @@ check("renames update every online roster",
   hasRoster(await nextOp(c, "roster"), [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]));
 
 a.send({ op: "area", stage: "F_SP103" });
-await a.next();
+await nextOp(a, "count");
 b.send({ op: "area", stage: "F_SP103" });
-const toB = await b.next();
-const toA = await a.next();
+const toB = await nextOp(b, "peer");
+const toA = await nextOp(a, "peer");
 check("same area: introduced to each other", toB.op === "peer" && toA.op === "peer" &&
   toB.id === wa.id && toA.id === wb.id && toA.key === toB.key && /^[0-9a-f]{64}$/.test(toA.key));
 check("a home address only goes to the same network", toA.sameNet || !toA.eps.some((e) => e.startsWith("192.168.")));
-await b.next();
 
 c.send({ op: "area", stage: "F_SP104" });
-const toC = await c.next();
+const toC = await nextOp(c, "count");
 check("other area: nobody introduced", toC.op === "count" && toC.here === 1 && toC.total === 3);
 
 b.send({ op: "area", stage: "F_SP104" });
-const goneA = await a.next();
-const msgsB = [await b.next(), await b.next(), await b.next()];
+const goneA = await nextOp(a, "gone");
+const joinedC = await nextOp(b, "peer");
 check("walking out: the old area hears gone", goneA && goneA.op === "gone" && goneA.id === wb.id);
 check("walking in: introduced to the new area",
-  msgsB.some((m) => m && m.op === "peer" && m.id === wc.id));
+  joinedC && joinedC.op === "peer" && joinedC.id === wc.id);
 
 b.send({ op: "block", id: wc.id });
-let cGone = await c.next();
-while (cGone && cGone.op !== "gone") cGone = await c.next();
-const blockMsgs = [await b.next(), cGone];
-check("blocking: both hear gone", blockMsgs[0] && blockMsgs[0].op === "gone" && blockMsgs[0].id === wc.id &&
-  blockMsgs[1] && blockMsgs[1].op === "gone" && blockMsgs[1].id === wb.id);
+const bGone = await nextOp(b, "gone");
+const cGone = await nextOp(c, "gone");
+check("blocking: both hear gone", bGone && bGone.id === wc.id &&
+  cGone && cGone.id === wb.id);
 b.send({ op: "unblock", id: wc.id });
-const unblockMsg = await b.next();
+const unblockMsg = await nextOp(b, "peer");
 check("unblocking: introduced again", unblockMsg && unblockMsg.op === "peer" && unblockMsg.id === wc.id);
-await c.next();
+await nextOp(c, "peer");
 
 c.close();
-const goneC = await b.next();
+const goneC = await nextOp(b, "gone");
 check("closing: the area hears gone", goneC && goneC.op === "gone" && goneC.id === wc.id);
 
 a.send({ op: "area", stage: "../etc" });
-const bad = await a.next();
+const bad = await nextOp(a, "count", (msg) => msg.here === 0);
 check("a bad area name is no area", bad && bad.op === "count" && bad.here === 0);
 
 a.close();
 b.close();
+
+const firstSession = await open();
+const firstSessionWelcome = await nextOp(firstSession, "welcome");
+firstSession.send({
+  op: "hello",
+  v: 99,
+  name: "Robin",
+  key: "0123456789abcdef0123456789abcdef",
+  heartbeat: true,
+  ep: "203.0.113.4:1004",
+  port: 1004,
+});
+await nextOp(firstSession, "roster");
+
+const replacementSession = await open();
+const replacementWelcome = await nextOp(replacementSession, "welcome");
+replacementSession.send({
+  op: "hello",
+  v: 99,
+  name: "Robin",
+  key: "0123456789abcdef0123456789abcdef",
+  heartbeat: true,
+  ep: "203.0.113.5:1005",
+  port: 1005,
+});
+const replacementCount = await nextOp(replacementSession, "count");
+const replacementRoster = await nextOp(replacementSession, "roster");
+const superseded = await nextOp(firstSession, "superseded");
+check("reconnecting with the same installation replaces its stale session",
+  firstSessionWelcome && replacementWelcome && replacementWelcome.heartbeat === true &&
+  replacementCount && replacementCount.total === 1 &&
+  hasRoster(replacementRoster, [[replacementWelcome.id, "Robin"]]) &&
+  superseded && superseded.op === "superseded");
+replacementSession.send({ op: "ping" });
+check("presence heartbeat is acknowledged",
+  (await nextOp(replacementSession, "pong"))?.op === "pong");
+replacementSession.close();
 setTimeout(() => process.exit(), 200);

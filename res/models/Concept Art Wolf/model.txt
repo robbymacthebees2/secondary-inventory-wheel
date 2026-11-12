@@ -1,0 +1,4 @@
+name=Concept Art Wolf
+about=Concept Art Wolf v2 textures on the game's Wolf Link mesh. Enable texture packs in Dusklight's video settings. The selected player's Wolf Link uses this texture without changing other players' Wolf Link textures.
+base=wolf
+preset=false
