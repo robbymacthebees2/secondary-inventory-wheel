@@ -387,7 +387,8 @@ void apply_ice_arrow_shader_after_tev_setup(ModContext*, void* args, void*, void
     do {                                                                                           \
         const ModResult hookResult = mods::hook::add_pre<HookType>(callback);                      \
         if (hookResult != MOD_OK) {                                                                \
-            svc_log->error(mod_ctx, "failed to install secondary wheel hook");                   \
+            svc_log->error(mod_ctx, "failed to install secondary wheel hook " #HookType);         \
+            set_mod_init_error(error, hookResult, "Secondary wheel hook " #HookType " unavailable"); \
             return hookResult;                                                                     \
         }                                                                                          \
     } while (false)
@@ -396,7 +397,8 @@ void apply_ice_arrow_shader_after_tev_setup(ModContext*, void* args, void*, void
     do {                                                                                           \
         const ModResult hookResult = mods::hook::add_post<HookType>(callback);                     \
         if (hookResult != MOD_OK) {                                                                \
-            svc_log->error(mod_ctx, "failed to install secondary wheel hook");                   \
+            svc_log->error(mod_ctx, "failed to install secondary wheel hook " #HookType);         \
+            set_mod_init_error(error, hookResult, "Secondary wheel hook " #HookType " unavailable"); \
             return hookResult;                                                                     \
         }                                                                                          \
     } while (false)

@@ -579,7 +579,14 @@ using manual_glider_visual::ManualGliderCarrierDraw;
 using manual_glider_visual::ManualGliderDrawHand;
 using manual_glider_visual::ManualGliderPlayerDraw;
 
-ModResult install_hooks() {
+void set_mod_init_error(ModError* error, ModResult result, const char* message) {
+    if (error == nullptr) return;
+    error->code = result;
+    std::snprintf(error->message, sizeof(error->message), "%s (result %d)", message,
+        static_cast<int>(result));
+}
+
+ModResult install_hooks(ModError* error) {
     ADD_PRE(OpenExplain, suppress_secondary_explain);
     ADD_POST(SetNameString, name_secondary_item);
     ADD_PRE(RingSetSelectItem, prepare_secondary_equip_icon);
@@ -594,7 +601,12 @@ ModResult install_hooks() {
     ADD_POST(ChangeTextureItemXY, finish_hover_boots_hud_icon);
     ADD_POST(MeterMidnaAlpha, update_z_slot_hud);
     ADD_POST(ZSlotAmmoDraw, draw_z_slot_ammo_numbers);
-    ADD_PRE(ZSlotAmmoMeterDelete, release_z_slot_ammo_digits);
+    const ModResult cleanupHookResult =
+        mods::hook::add_pre<ZSlotAmmoMeterDelete>(release_z_slot_ammo_digits);
+    if (cleanupHookResult != MOD_OK) {
+        svc_log->warn(mod_ctx,
+            "Z-slot ammo digit cleanup hook unavailable; continuing without it");
+    }
     ADD_POST(MeterMoveButtonXY, refresh_secondary_hud_assignments);
     ADD_PRE(ReadItemTexture, apply_hawk_grass_equip_icon);
     ADD_POST(ReadItemTexture, replace_secondary_custom_icon);
@@ -1294,11 +1306,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 
     result = register_fairy_companion_settings();
     if (result != MOD_OK) {
+        set_mod_init_error(error, result, "Fairy Companion settings initialization failed");
         return result;
     }
 
     result = fire_arrows::initialize();
     if (result != MOD_OK) {
+        set_mod_init_error(error, result, "Fire Arrows hook initialization failed");
         return result;
     }
 
@@ -1327,12 +1341,13 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         return result;
     }
 
-    result = install_hooks();
+    result = install_hooks(error);
     if (result != MOD_OK) {
         return result;
     }
     result = initialize_dark_link_visual_hooks(error);
     if (result != MOD_OK) {
+        set_mod_init_error(error, result, "Dark Link visual hook initialization failed");
         return result;
     }
     result = coop_mod_initialize(error);
