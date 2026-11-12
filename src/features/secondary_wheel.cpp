@@ -1765,14 +1765,41 @@ bool z_slot_item_ammo_count(u8 item, int& count) {
     }
 }
 
+bool z_slot_bow_lantern_combo(u8 item) {
+    if (item != dItemNo_BOW_e) {
+        return false;
+    }
+    const u8 selectedSlot = dComIfGs_getSelectItemIndex(kZItemSelectIndex);
+    const u8 mixSlot = dComIfGs_getMixItemIndex(kZItemSelectIndex);
+    if (selectedSlot == dItemNo_NONE_e || mixSlot == dItemNo_NONE_e) {
+        return false;
+    }
+    const u8 selectedItem = dComIfGs_getItem(selectedSlot, false);
+    const u8 mixItem = dComIfGs_getItem(mixSlot, false);
+    return (selectedItem == dItemNo_BOW_e && mixItem == dItemNo_KANTERA_e) ||
+           (selectedItem == dItemNo_KANTERA_e && mixItem == dItemNo_BOW_e);
+}
+
 void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
     g_secondaryZHudAmmoVisible = false;
-    g_secondaryZHudLanternVisible = item == dItemNo_KANTERA_e;
+    g_secondaryZHudLanternVisible =
+        item == dItemNo_KANTERA_e || z_slot_bow_lantern_combo(item);
     if (meter == nullptr || meter->mpScreen == nullptr ||
         meter->mpItemR == nullptr)
     {
         g_secondaryZHudAmmoVisible = false;
         return;
+    }
+
+    if (g_secondaryZHudAmmoDigitsOwner != meter ||
+        g_secondaryZHudAmmoScreen != meter->mpScreen)
+    {
+        // The meter's heap may have invalidated these pictures during a screen change.
+        g_secondaryZHudAmmoDigits.fill(nullptr);
+        g_secondaryZHudAmmoDigitsOwner = meter;
+        g_secondaryZHudAmmoScreen = meter->mpScreen;
+        g_secondaryZHudAmmoOwner = nullptr;
+        g_secondaryZHudAmmoDigitCount = 0;
     }
 
     int count = 0;
@@ -1786,6 +1813,11 @@ void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
     ResTIMG* zeroTexture = meter->getNumberTexture(0);
     if (zeroTexture == nullptr) {
         svc_log->error(mod_ctx, "failed to access the Z-slot ammo number texture");
+        return;
+    }
+
+    J2DPane* itemPane = meter->mpItemR->getPanePtr();
+    if (itemPane == nullptr) {
         return;
     }
 
@@ -1804,7 +1836,6 @@ void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
             JUtility::TColor(255, 255, 255, 255));
     }
 
-    J2DPane* itemPane = meter->mpItemR->getPanePtr();
     const Vec topLeft = itemPane->getGlbVtx(0);
     const Vec bottomRight = itemPane->getGlbVtx(3);
     const auto& numberParams =
@@ -1836,7 +1867,10 @@ void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
         J2DPicture* digit = g_secondaryZHudAmmoDigits[i];
         const int value = remaining % 10;
         remaining /= 10;
-        if (digit->changeTexture(meter->getNumberTexture(value), 0) == nullptr) {
+        ResTIMG* texture = meter->getNumberTexture(value);
+        if (digit == nullptr || texture == nullptr ||
+            digit->changeTexture(texture, 0) == nullptr)
+        {
             svc_log->error(mod_ctx, "failed to update a Z-slot ammo digit");
             g_secondaryZHudAmmoVisible = false;
             return;
@@ -1850,6 +1884,30 @@ void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
     g_secondaryZHudAmmoDigitSize = digitSize;
     g_secondaryZHudAmmoDigitCount = digitCount;
     g_secondaryZHudAmmoVisible = true;
+}
+
+DEFINE_HOOK_SYMBOL(
+    "dMeter2Draw_c::~dMeter2Draw_c", void(dMeter2Draw_c*),
+    ZSlotAmmoMeterDelete);
+
+HookAction release_z_slot_ammo_digits(ModContext*, void* args, void*, void*) {
+    auto* meter = mods::arg<dMeter2Draw_c*>(args, 0);
+    if (meter == nullptr || meter != g_secondaryZHudAmmoDigitsOwner) {
+        return HOOK_CONTINUE;
+    }
+
+    for (auto*& digit : g_secondaryZHudAmmoDigits) {
+        if (digit != nullptr) {
+            JKR_DELETE(digit);
+            digit = nullptr;
+        }
+    }
+    g_secondaryZHudAmmoDigitsOwner = nullptr;
+    g_secondaryZHudAmmoScreen = nullptr;
+    g_secondaryZHudAmmoOwner = nullptr;
+    g_secondaryZHudAmmoVisible = false;
+    g_secondaryZHudAmmoDigitCount = 0;
+    return HOOK_CONTINUE;
 }
 
 DEFINE_HOOK(&dMeter2Draw_c::draw, ZSlotAmmoDraw);
@@ -1908,6 +1966,13 @@ void draw_z_slot_ammo_numbers(ModContext*, void* args, void*, void*) {
 }
 
 void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
+    if (dComIfGp_isEnableNextStage()) {
+        g_secondaryZHudOwner = nullptr;
+        g_secondaryZHudPicture = nullptr;
+        g_secondaryZHudSlot = dItemNo_NONE_e;
+        g_secondaryZHudItem = dItemNo_NONE_e;
+        return;
+    }
     if (meter == nullptr || meter->mpScreen == nullptr) {
         return;
     }
@@ -1981,9 +2046,14 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         g_secondaryZHudSlot = dItemNo_NONE_e;
         g_secondaryZHudItem = dItemNo_NONE_e;
     }
-    const u8 displayItem = assigned
+    u8 displayItem = assigned
         ? secondaryDisplayItemForSlot(assignedSlot)
         : selected_item_for_button(kZItemSelectIndex);
+    if (displayItem == dItemNo_KANTERA_e &&
+        z_slot_bow_lantern_combo(dItemNo_BOW_e))
+    {
+        displayItem = dItemNo_BOW_e;
+    }
     if (displayItem != dItemNo_NONE_e) {
         meter->setItemParamZ(displayItem);
     }
@@ -2175,7 +2245,7 @@ HookAction assign_secondary_z_from_ring(ModContext*, void* args, void*, void*) {
                             mDoCPd_c::getTrigZ(PAD_1) != 0;
     const bool rTriggered = zItemSlotEnabled() &&
                             mDoCPd_c::getTrigR(PAD_1) != 0;
-    if ((zTriggered || rTriggered) &&
+    if (rTriggered && !zTriggered &&
         toggle_z_bow_combo(ring, selectedSlot, selectedItem))
     {
         return HOOK_SKIP_ORIGINAL;
@@ -2405,8 +2475,23 @@ void clear_secondary_assignment_for_vanilla_ring(ModContext*, void* args, void*,
         clear_secondary_assignment(button);
     }
     if (button < kZItemSelectIndex) {
+        const u8 pendingItem = ring->field_0x6b4[button];
+        const u8 pendingMixItem = ring->field_0x6b8[button];
+        const u8 pendingCursor =
+            button == 0 ? ring->mXButtonSlot : ring->mYButtonSlot;
+        // X/Y indices are committed after the item-set animation, so inspect
+        // the pending ring selection instead of the still-saved assignment.
         clear_duplicate_z_assignment_for_item(
-            ring, button, dItemNo_NONE_e, selected_item_for_button(button));
+            ring, button, dItemNo_NONE_e,
+            ring->getItem(pendingItem, pendingMixItem));
+        ring->field_0x6b4[button] = pendingItem;
+        ring->field_0x6b8[button] = pendingMixItem;
+        if (button == 0) {
+            ring->mXButtonSlot = pendingCursor;
+        } else {
+            ring->mYButtonSlot = pendingCursor;
+        }
+        ring->setSelectItem(button, ring->getItem(pendingItem, pendingMixItem));
     }
 }
 

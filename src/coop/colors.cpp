@@ -7,6 +7,7 @@
 #include "mods/svc/config.h"
 #include "mods/svc/host.h"
 #include "mods/svc/log.hpp"
+#include "mods/svc/resource.h"
 #include "print.hpp"
 #include "mods/svc/texture.h"
 
@@ -15,6 +16,7 @@
 #include "JSystem/J3DGraphBase/J3DPacket.h"
 #include "JSystem/J3DGraphBase/J3DTexture.h"
 #include "JSystem/JUtility/JUTNameTab.h"
+#include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 
 #include <cstdlib>
@@ -683,12 +685,14 @@ struct PuppetTexture {
     uint8_t* buffer = nullptr;
     uint32_t size = 0;
     uint32_t width = 0, height = 0, format = 0, mips = 1;
+    uint64_t sourceHash = 0;
     TextureReplacementHandle handle = 0;
     SlotColor applied;
+    int overrideIndex = -1;
     bool registered = false;
 };
 
-const int kMaxPuppetTextures = 8;
+const int kMaxPuppetTextures = 32;
 struct PuppetModelColors {
     J3DModel* model = nullptr;
 
@@ -697,6 +701,9 @@ struct PuppetModelColors {
 
     bool mine = false;
     uint8_t owner = kCoopNoPlayer;
+    bool wolf = false;
+    bool protectAll = false;
+    int outfit = -1;
     unsigned char* shadow = nullptr;
     TGXTexObj* texObjs = nullptr;
     u8** imgPtrs = nullptr;
@@ -708,6 +715,135 @@ struct PuppetModelColors {
 const int kMaxPuppetModels = kCoopMaxPlayers * 7 + 4;
 PuppetModelColors s_models[kMaxPuppetModels];
 
+struct ConceptArtTexture {
+    uint64_t sourceHash;
+    const char* path;
+};
+
+constexpr ConceptArtTexture kConceptArtTextures[] = {
+    {0x03fdf79966d4e757ull, "models/Concept Art Wolf/textures/tex1_64x64_03fdf79966d4e757_5.gxrgba"},
+    {0x171938e733404060ull, "models/Concept Art Wolf/textures/tex1_64x64_171938e733404060_5.gxrgba"},
+    {0x4ebe8cd08a691816ull, "models/Concept Art Wolf/textures/tex1_64x64_4ebe8cd08a691816_5.gxrgba"},
+    {0xa4b1a9c9309ccadaull, "models/Concept Art Wolf/textures/tex1_64x64_a4b1a9c9309ccada_14.gxrgba"},
+    {0xe62c32395af93458ull, "models/Concept Art Wolf/textures/tex1_64x64_e62c32395af93458_14.gxrgba"},
+    {0xaf8808933de861f2ull, "models/Concept Art Wolf/textures/tex1_512x512_af8808933de861f2_14.gxrgba"},
+    {0xe351617d88e29fc8ull, "models/Concept Art Wolf/textures/tex1_512x512_e351617d88e29fc8_14.gxrgba"},
+};
+
+constexpr ConceptArtTexture kKePaTextures[] = {
+    {0xba1f16324b4be55dull,
+        "models/KePa - Wolf Link TP/textures/tex1_256x128_ba1f16324b4be55d_14.gxrgba"},
+    {0x640f8eb7ad1e90fcull,
+        "models/KePa - Wolf Link TP/textures/tex1_256x256_640f8eb7ad1e90fc_14.gxrgba"},
+    {0xc1a9fb137618f0e3ull,
+        "models/KePa - Wolf Link TP/textures/tex1_256x256_c1a9fb137618f0e3_14.gxrgba"},
+    {0xe3bc7a1f1438a4caull,
+        "models/KePa - Wolf Link TP/textures/tex1_64x64_e3bc7a1f1438a4ca_14.gxrgba"},
+};
+
+constexpr int kConceptArtTextureCount =
+    sizeof(kConceptArtTextures) / sizeof(kConceptArtTextures[0]);
+constexpr int kKePaTextureCount = sizeof(kKePaTextures) / sizeof(kKePaTextures[0]);
+
+struct ConceptArtTextureAsset {
+    bool loaded = false;
+    bool failed = false;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    std::vector<uint8_t> data;
+};
+
+ConceptArtTextureAsset s_skinTextureAssets[kConceptArtTextureCount + kKePaTextureCount];
+
+bool concept_art_selected(const PuppetModelColors& model) {
+    if (!model.wolf) return false;
+    if (model.mine) {
+        return skins_local_slot(kSkinChoiceWolf) == "Concept Art Wolf";
+    }
+    return model.owner < kCoopMaxPlayers &&
+           std::strncmp(
+               features_peer_of(model.owner).skins.name[kSkinChoiceWolf],
+               "Concept Art Wolf", kSkinNameMax) == 0;
+}
+
+bool kepa_skin_selected(bool mine, uint8_t owner, int outfit) {
+    const int slot = skins_slot_for_outfit(outfit);
+    if (slot < 0 || slot >= kSkinChoiceCount) return false;
+    if (mine) return skins_local_slot(slot) == "KePa - Wolf Link TP";
+    return owner < kCoopMaxPlayers &&
+           std::strncmp(
+               features_peer_of(owner).skins.name[slot], "KePa - Wolf Link TP", kSkinNameMax) == 0;
+}
+
+int concept_art_override_for(
+    const PuppetModelColors& model, const PuppetTexture& texture)
+{
+    if (!concept_art_selected(model) || texture.buffer == nullptr) return -1;
+    for (size_t i = 0; i < sizeof(kConceptArtTextures) / sizeof(kConceptArtTextures[0]); ++i) {
+        if (kConceptArtTextures[i].sourceHash == texture.sourceHash) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+int skin_texture_override_for(const PuppetModelColors& model, const PuppetTexture& texture) {
+    const int conceptArtIndex = concept_art_override_for(model, texture);
+    if (conceptArtIndex >= 0) return conceptArtIndex;
+    if (texture.buffer == nullptr ||
+        !kepa_skin_selected(model.mine, model.owner, model.outfit))
+    {
+        return -1;
+    }
+    for (int i = 0; i < kKePaTextureCount; ++i) {
+        if (kKePaTextures[i].sourceHash == texture.sourceHash) {
+            return kConceptArtTextureCount + i;
+        }
+    }
+    return -1;
+}
+
+ConceptArtTextureAsset* skin_texture_asset(int index) {
+    if (index < 0 || index >= kConceptArtTextureCount + kKePaTextureCount) return nullptr;
+    ConceptArtTextureAsset& asset = s_skinTextureAssets[index];
+    if (asset.loaded || asset.failed) return asset.loaded ? &asset : nullptr;
+
+    ResourceBuffer buffer = RESOURCE_BUFFER_INIT;
+    const char* path = index < kConceptArtTextureCount
+        ? kConceptArtTextures[index].path
+        : kKePaTextures[index - kConceptArtTextureCount].path;
+    if (svc_resource == nullptr ||
+        svc_resource->load(mod_ctx, path, &buffer) != MOD_OK ||
+        buffer.data == nullptr || buffer.size < 8)
+    {
+        if (buffer.data != nullptr) svc_resource->free(mod_ctx, &buffer);
+        asset.failed = true;
+        coop_log::warn("coop_mod: [COLORS] failed to load skin texture '{}'", path);
+        return nullptr;
+    }
+
+    std::memcpy(&asset.width, buffer.data, sizeof(asset.width));
+    std::memcpy(
+        &asset.height,
+        static_cast<const uint8_t*>(buffer.data) + sizeof(asset.width),
+        sizeof(asset.height));
+    const size_t dataSize = buffer.size - 8;
+    if (asset.width == 0 || asset.height == 0 ||
+        dataSize != image_data_size(GX_TF_RGBA8, asset.width, asset.height, 1))
+    {
+        svc_resource->free(mod_ctx, &buffer);
+        asset.failed = true;
+        coop_log::warn(
+            "coop_mod: [COLORS] skin texture '{}' has invalid dimensions", path);
+        return nullptr;
+    }
+    const auto* data = static_cast<const uint8_t*>(buffer.data) + 8;
+    asset.data.assign(data, data + dataSize);
+    svc_resource->free(mod_ctx, &buffer);
+    asset.loaded = true;
+    return &asset;
+}
+
 SlotColor peer_color(uint8_t owner, int slot) {
     if ((!coop_net_connected() && !global_active()) || slot < 0 || slot >= kSlotCount) return SlotColor{};
     if (owner >= kCoopMaxPlayers) return SlotColor{};
@@ -716,8 +852,50 @@ SlotColor peer_color(uint8_t owner, int slot) {
 
 void apply_puppet_texture(PuppetModelColors& m, PuppetTexture& t) {
     if (svc_texture == nullptr) return;
-    const SlotColor want = m.mine ? effective_local(t.slot) : peer_color(m.owner, t.slot);
-    if (t.registered && want == t.applied) return;
+    const SlotColor want = t.slot < kSlotCount
+        ? (m.mine ? effective_local(t.slot) : peer_color(m.owner, t.slot))
+        : SlotColor{};
+    const int overrideIndex = skin_texture_override_for(m, t);
+    if (t.registered && t.overrideIndex == overrideIndex &&
+        (overrideIndex >= 0 || want == t.applied))
+    {
+        return;
+    }
+
+    if (t.handle != 0) svc_texture->unregister(mod_ctx, t.handle);
+    t.handle = 0;
+    t.registered = false;
+    if (overrideIndex >= 0) {
+        ConceptArtTextureAsset* asset = skin_texture_asset(overrideIndex);
+        if (asset != nullptr) {
+            TextureKey key = TEXTURE_KEY_INIT;
+            key.kind = TEXTURE_KEY_POINTER;
+            key.pointer = t.buffer;
+            key.width = t.width;
+            key.height = t.height;
+            key.gx_format = t.format;
+            TextureData data = TEXTURE_DATA_INIT;
+            data.data = asset->data.data();
+            data.size = asset->data.size();
+            data.width = asset->width;
+            data.height = asset->height;
+            data.mip_count = 1;
+            data.gx_format = GX_TF_RGBA8;
+            TextureReplacementHandle handle = 0;
+            if (svc_texture->register_data(mod_ctx, &key, &data, &handle) == MOD_OK) {
+                t.handle = handle;
+                t.applied = SlotColor{};
+                t.overrideIndex = overrideIndex;
+                t.registered = true;
+                GXDestroyTexObj(&m.texObjs[t.index]);
+                reinterpret_cast<J3DTexture*>(m.shadow)->loadGXTexObj(t.index);
+                return;
+            }
+            coop_log::warn(
+                "coop_mod: [COLORS] pointer replacement failed for skin texture {}",
+                overrideIndex);
+        }
+    }
 
     std::vector<uint8_t> pixels(t.buffer, t.buffer + t.size);
     uint32_t format = t.format;
@@ -746,9 +924,9 @@ void apply_puppet_texture(PuppetModelColors& m, PuppetTexture& t) {
         t.registered = true;
         return;
     }
-    if (t.handle != 0) svc_texture->unregister(mod_ctx, t.handle);
     t.handle = handle;
     t.applied = want;
+    t.overrideIndex = -1;
     t.registered = true;
 
     GXDestroyTexObj(&m.texObjs[t.index]);
@@ -757,7 +935,8 @@ void apply_puppet_texture(PuppetModelColors& m, PuppetTexture& t) {
 
 void release_model_colors(PuppetModelColors& m) {
 
-    if (m.model != nullptr && coop_ptr_looks_live(m.model) && m.model->getModelData() == m.data &&
+    // Link's outfit heap can reuse the model and material-packet addresses for the new BMD.
+    if (m.model != nullptr && coop_ptr_looks_live(m.model) &&
         m.model->getMatPacket(0) == m.packets) {
         J3DModelData* data = m.model->getModelData();
         if (coop_ptr_looks_live(data)) {
@@ -994,10 +1173,19 @@ void colors_on_message(const uint8_t* payload, size_t size, uint8_t from) {
 const uint8_t kSlotNone = 0xFF;
 
 void colors_attach_model(J3DModel* model, bool mine, uint8_t owner = kCoopNoPlayer,
-    bool protectAll = false) {
+    bool protectAll = false, bool wolf = false, int outfit = -1) {
     if (model == nullptr || svc_texture == nullptr) return;
-    for (const PuppetModelColors& m : s_models) {
-        if (m.model == model) return;
+    if (!coop_ptr_looks_live(model)) return;
+    J3DModelData* data = model->getModelData();
+    if (!coop_ptr_looks_live(data)) return;
+    for (PuppetModelColors& m : s_models) {
+        if (m.model != model) continue;
+        if (m.data == data && m.mine == mine && m.owner == (mine ? kCoopNoPlayer : owner) &&
+            m.wolf == wolf && m.protectAll == protectAll && m.outfit == outfit)
+        {
+            return;
+        }
+        release_model_colors(m);
     }
     PuppetModelColors* slot = nullptr;
     for (PuppetModelColors& m : s_models) {
@@ -1008,18 +1196,23 @@ void colors_attach_model(J3DModel* model, bool mine, uint8_t owner = kCoopNoPlay
     }
     if (slot == nullptr) return;
 
-    if (!coop_ptr_looks_live(model)) return;
-    J3DModelData* data = model->getModelData();
-    if (!coop_ptr_looks_live(data)) return;
     J3DTexture* original = data->getTexture();
     JUTNameTab* names = data->getTextureName();
     if (!coop_ptr_looks_live(original) || !coop_ptr_looks_live(names)) return;
     if (original->getNum() == 0) return;
+    if (protectAll && original->getNum() > kMaxPuppetTextures) {
+        coop_log::warn(
+            "coop_mod: [COLORS] model has {} textures; only the first {} can be protected",
+            original->getNum(), kMaxPuppetTextures);
+    }
 
     PuppetModelColors m;
     m.model = model;
     m.mine = mine;
     m.owner = mine ? kCoopNoPlayer : owner;
+    m.wolf = wolf;
+    m.protectAll = protectAll;
+    m.outfit = outfit;
     m.texNum = original->getNum();
     for (u16 i = 0; i < m.texNum && m.count < kMaxPuppetTextures; ++i) {
         int slotIndex = slot_for_texture(names->getName(i));
@@ -1065,6 +1258,10 @@ void colors_attach_model(J3DModel* model, bool mine, uint8_t owner = kCoopNoPlay
     for (int i = 0; i < m.count; ++i) {
         PuppetTexture& t = m.tex[i];
         std::memcpy(t.buffer, original->getImgDataPtr(t.index), t.size);
+        const size_t baseSize = image_data_size(t.format, t.width, t.height, 1);
+        if (baseSize <= t.size) {
+            t.sourceHash = xxh64(t.buffer, baseSize, 0);
+        }
         m.imgPtrs[t.index] = t.buffer;
     }
 
@@ -1082,16 +1279,23 @@ void colors_attach_model(J3DModel* model, bool mine, uint8_t owner = kCoopNoPlay
         static_cast<void*>(model), slot->count);
 }
 
-void colors_attach_puppet_model(J3DModel* model, uint8_t owner) {
-    colors_attach_model(model, false, owner);
+void colors_attach_puppet_model(J3DModel* model, uint8_t owner, int outfit) {
+    const bool wolf = puppet_hook_is_wolf_of(owner);
+    const bool kepa = kepa_skin_selected(false, owner, outfit);
+    colors_attach_model(model, false, owner, wolf || kepa, wolf, outfit);
 }
 
 void colors_protect_puppet_model(J3DModel* model, uint8_t owner) {
-    colors_attach_model(model, false, owner, true);
+    const bool wolf = puppet_hook_is_wolf_of(owner);
+    colors_attach_model(model, false, owner, true, wolf);
 }
 
 void colors_attach_local_model(J3DModel* model) {
-    colors_attach_model(model, true);
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    const bool wolf = link != nullptr && model == link->mpLinkModel && link->checkWolf();
+    const int outfit = local_skin_outfit();
+    const bool kepa = kepa_skin_selected(true, kCoopNoPlayer, outfit);
+    colors_attach_model(model, true, coop_net_local_id(), wolf || kepa, wolf, outfit);
 }
 
 void colors_detach_model(J3DModel* model) {

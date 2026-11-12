@@ -7,7 +7,8 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     static const char* kHoverPlaneLowerBindingOptions[] = {"L1", "L2", "L3", "R1", "R2", "R3"};
     static const char* kFairyColorOptions[] = {
         "Navi (Blue)", "Tatl (Orange)", "Tael (Purple)", "Green"};
-    static const char* kFairyToggleBindingOptions[] = {"A", "LB", "R", "R3", "L3"};
+    static const char* kFairyToggleBindingOptions[] = {
+        "A", "LB", "R", "R3", "L3", "R+A", "R+LB", "R+R3", "R+L3"};
     initialize_sit_music_options();
     UiControlDesc control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_DROPDOWN;
@@ -27,6 +28,7 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.label = "Fairy Companion Toggle Button";
     control.help_rml =
         "Press the selected button to toggle the fairy companion out or tucked away. "
+        "R+A, R+LB, R+R3, and R+L3 are modifier combinations. "
         "A only toggles while Link is stationary with no weapon or item drawn.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_fairyCompanionToggleBinding;
@@ -427,9 +429,10 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.kind = UI_CONTROL_DROPDOWN;
     control.label = "Bullet Time";
     control.help_rml =
-        "While aiming with the Bow in midair, Link's movement and non-Link actors slow to "
-        "10% and arrows to 20%. Always activates immediately; BOTW requires clearance above "
-        "twice the native standing-jump height. Lasts up to five seconds.";
+        "While aiming with the Bow in midair, Link's horizontal movement slows to 10% and "
+        "vertical movement to 50%; enemies and NPCs slow to 10% and arrows to 20%. Always "
+        "activates immediately; BOTW requires clearance above twice the native standing-jump "
+        "height. Lasts up to five seconds.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_bulletTimeMode;
     control.options = kBulletTimeModeOptions;
@@ -612,7 +615,12 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.max = kRupeeMagnetMaxRadiusPercent;
     control.step = 25;
     control.suffix = "%";
-    return svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    return fire_arrows::add_settings(panel);
 }
 
 ModResult build_robin_settings_tab(

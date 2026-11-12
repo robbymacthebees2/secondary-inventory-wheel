@@ -5,8 +5,6 @@
 #include "SSystem/SComponent/c_phase.h"
 #include "Z2AudioLib/Z2Creature.h"
 
-void maFairySfx_play();
-
 #define MFAIRYC_NAME "SIWFair"
 
 // Color identifier (indices into fairy tint table)

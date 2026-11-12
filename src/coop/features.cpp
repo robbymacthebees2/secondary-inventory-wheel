@@ -1972,6 +1972,9 @@ uint32_t local_skin_stamp() {
     for (size_t i = 0; i < sizeof(choices); ++i) {
         stamp = (stamp ^ bytes[i]) * 16777619u;
     }
+    for (unsigned char byte : skins_local_epona_skin()) {
+        stamp = (stamp ^ byte) * 16777619u;
+    }
     return stamp;
 }
 
@@ -1984,6 +1987,10 @@ void send_skin_choices() {
     std::memcpy(msg.name, choices.name, sizeof(msg.name));
     std::memcpy(msg.hash, choices.hash, sizeof(msg.hash));
     coop_net_send(kMsgSkinChoices, &msg, sizeof(msg));
+    MsgEponaSkin epona{};
+    const std::string eponaSkin = skins_local_epona_skin();
+    std::strncpy(epona.name, eponaSkin.c_str(), sizeof(epona.name) - 1);
+    coop_net_send(kMsgEponaSkin, &epona, sizeof(epona));
 }
 
 void on_skin_choices(const uint8_t* payload, size_t size, uint8_t from) {
@@ -2003,6 +2010,15 @@ void on_skin_choices(const uint8_t* payload, size_t size, uint8_t from) {
     }
 
     if (changed) puppet_hook_peer_skin_changed(from);
+}
+
+void on_epona_skin(const uint8_t* payload, size_t size, uint8_t from) {
+    if (size < sizeof(MsgEponaSkin) || from >= kCoopMaxPlayers) return;
+    MsgEponaSkin msg{};
+    std::memcpy(&msg, payload, sizeof(msg));
+    CoopPeer& peer = peer_slot(from);
+    std::memset(peer.eponaSkin, 0, sizeof(peer.eponaSkin));
+    std::strncpy(peer.eponaSkin, msg.name, sizeof(peer.eponaSkin) - 1);
 }
 
 void repair_skin_tpose() {
@@ -2031,6 +2047,8 @@ void repair_skin_tpose() {
 }
 
 void features_update() {
+
+    skins_texture_replacements_update();
 
     {
         static uint32_t s_memTick = 0;
@@ -2324,6 +2342,7 @@ void features_on_message(uint8_t type, const uint8_t* payload, size_t size, uint
     }
     case kMsgHello: on_hello(payload, size, from); break;
     case kMsgSkinChoices: on_skin_choices(payload, size, from); break;
+    case kMsgEponaSkin: on_epona_skin(payload, size, from); break;
     case kMsgSkinRequest: send_skin_choices(); break;
     case kMsgLogRequest: report_on_message(payload, size, from); break;
     case kMsgPause:

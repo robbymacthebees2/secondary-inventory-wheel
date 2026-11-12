@@ -39,6 +39,7 @@
 #include "d/actor/d_a_nbomb.h"
 #include "d/actor/d_a_npc_tk.h"
 #include "d/d_bomb.h"
+#include "d/d_cc_d.h"
 #include "SSystem/SComponent/c_cc_d.h"
 #include "SSystem/SComponent/c_cc_s.h"
 #include "d/d_com_inf_game.h"
@@ -57,7 +58,9 @@
 #include "d/d_meter_HIO.h"
 #include "d/d_msg_object.h"
 #include "d/d_kankyo.h"
+#include "d/d_item_data.h"
 #include "d/d_pane_class.h"
+#include "d/d_save.h"
 #include "d/d_select_cursor.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
 #include "Z2AudioLib/Z2SeMgr.h"
@@ -80,8 +83,10 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <new>
 #include <chrono>
@@ -356,7 +361,7 @@ std::array<IceArrowFrozenTarget, 32> g_iceArrowFrozenTargets{};
 cCcD_Obj* g_iceArrowSuppressedAttackCollider = nullptr;
 fpc_ProcID g_iceArrowExecutingActorId = fpcM_ERROR_PROCESS_ID_e;
 fpc_ProcID g_iceArrowPreviousExecutingActorIds[16]{};
-u8 g_iceArrowActorExecuteDepth = 0;
+u32 g_iceArrowActorExecuteDepth = 0;
 bool g_iceArrowSelected = false;
 bool g_lensOfTruthActive = false;
 bool g_secondaryItemInputHandled = false;
@@ -384,6 +389,8 @@ dMeter2Draw_c* g_secondaryZHudOwner = nullptr;
 J2DPicture* g_secondaryZHudPicture = nullptr;
 std::array<J2DPicture*, 4> g_secondaryZHudAmmoDigits{};
 dMeter2Draw_c* g_secondaryZHudAmmoOwner = nullptr;
+dMeter2Draw_c* g_secondaryZHudAmmoDigitsOwner = nullptr;
+J2DScreen* g_secondaryZHudAmmoScreen = nullptr;
 f32 g_secondaryZHudAmmoX = 0.0f;
 f32 g_secondaryZHudAmmoY = 0.0f;
 f32 g_secondaryZHudAmmoDigitSize = 0.0f;
@@ -504,6 +511,11 @@ void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
 void begin_deku_nut_use(daAlink_c* alink);
 void set_goron_tunic_active(bool active);
+namespace fire_arrows {
+ModResult add_settings(UiElementHandle panel);
+ModResult initialize();
+void update();
+}
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
 #include "features/hover_boots.cpp"
@@ -523,6 +535,7 @@ void set_goron_tunic_active(bool active);
 #include "features/fairy_companion.cpp"
 #include "features/settings.cpp"
 #include "features/ice_arrow.cpp"
+#include "features/fire_arrows.cpp"
 #include "features/deku_nut.cpp"
 #include "features/lens_of_truth.cpp"
 #include "features/truth_mask.cpp"
@@ -548,6 +561,7 @@ ModResult install_hooks() {
     ADD_POST(ChangeTextureItemXY, finish_hover_boots_hud_icon);
     ADD_POST(MeterMidnaAlpha, update_z_slot_hud);
     ADD_POST(ZSlotAmmoDraw, draw_z_slot_ammo_numbers);
+    ADD_PRE(ZSlotAmmoMeterDelete, release_z_slot_ammo_digits);
     ADD_POST(MeterMoveButtonXY, refresh_secondary_hud_assignments);
     ADD_PRE(ReadItemTexture, apply_hawk_grass_equip_icon);
     ADD_POST(ReadItemTexture, replace_secondary_custom_icon);
@@ -564,6 +578,10 @@ ModResult install_hooks() {
     ADD_POST(bow_aim::BulletTimeActorExecute, bow_aim::untrack_actor_execute);
     ADD_POST(bow_aim::BulletTimeActorExecute, manual_glider_visual::after_carrier_execute);
     ADD_PRE(bow_aim::BulletTimeProcessExecute, bow_aim::scale_actor_execution);
+    ADD_PRE(bow_aim::BulletTimeCalcSpeed, bow_aim::scale_enemy_gravity);
+    ADD_POST(bow_aim::BulletTimeCalcSpeed, bow_aim::restore_enemy_gravity);
+    ADD_PRE(bow_aim::BulletTimePosMove, bow_aim::scale_enemy_position_step);
+    ADD_POST(bow_aim::BulletTimePosMove, bow_aim::restore_enemy_position_step);
     ADD_PRE(bow_aim::BulletTimeLinkPosMove, bow_aim::slow_link_movement);
     ADD_POST(bow_aim::BulletTimeLinkPosMove, bow_aim::finish_slow_link_movement);
     ADD_PRE(bow_aim::BowSubject, bow_aim::replace_bow_subject);
@@ -609,6 +627,7 @@ ModResult install_hooks() {
     ADD_PRE(CheckAutoJumpAction, before_check_auto_jump_action);
     ADD_POST(CheckAutoJumpAction, after_check_auto_jump_action);
     ADD_PRE(DisableAutoJumpFallInit, preserve_sprint_speed_on_ledge_fall);
+    ADD_POST(DisableAutoJumpFallInit, finish_run_off_ledge_fall);
     ADD_PRE(DisableAutoJumpWolfFallInit, preserve_sprint_speed_on_ledge_fall);
     ADD_PRE(ProcHangStartInit, suppress_hover_ledge_grab);
     ADD_PRE(ProcHangFallStartInit, suppress_hover_ledge_grab);
@@ -713,6 +732,8 @@ ModResult install_hooks() {
     ADD_PRE(ChangeArrowType, apply_ice_arrow_bow_selection);
     ADD_PRE(ArrowAtHitCallBack, register_ice_arrow_hit);
     ADD_PRE(MorfFrameUpdate, freeze_ice_arrow_target_animation);
+    ADD_PRE(MorfFrameUpdate, bow_aim::scale_enemy_animation);
+    ADD_POST(MorfFrameUpdate, bow_aim::restore_enemy_animation);
     ADD_PRE(LeafExecute, begin_ice_arrow_actor_execute);
     ADD_PRE(LeafExecute, prepare_lens_poe_execute);
     ADD_POST(LeafExecute, reveal_lens_poe_after_execute);
@@ -1243,6 +1264,11 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         return result;
     }
 
+    result = fire_arrows::initialize();
+    if (result != MOD_OK) {
+        return result;
+    }
+
     UiModsPanelDesc panel = UI_MODS_PANEL_DESC_INIT;
     panel.build = build_panel;
     result = svc_ui->register_mods_panel(mod_ctx, &panel);
@@ -1322,6 +1348,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_goron_mask();
     update_giant_mask();
     update_armos_hammer();
+    fire_arrows::update();
     bow_aim::update_bullet_time_for_player(
         static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     return coop_mod_update(nullptr);

@@ -118,6 +118,7 @@ const OutfitFiles kOutfitFiles[] = {
       {"Zmdl", "zl.bmd", "zl_face.bmd", "zl_head.bmd", "al_hands.bmd", false, 0xFFFF, false},
       {"Mmdl", "ml.bmd", "al_face.bmd", "ml_head.bmd", "al_hands.bmd", false, 0xFFFF, false},
       {"Wmdl", nullptr, nullptr, nullptr, nullptr, false, dRes_INDEX_WMDL_BMD_WL_e, true},
+      {"alSumou", "bls.bmd", nullptr, "bls_head.bmd", "bls_hands.bmd", false, 0xFFFF, false},
 };
 
 const OutfitFiles& outfit_files(u8 outfit) {
@@ -126,6 +127,7 @@ const OutfitFiles& outfit_files(u8 outfit) {
 }
 
 u8 detect_local_outfit_change() {
+    if (sumo_hides_equipment(coop_net_local_id())) return kPuppetOutfitSumo;
     const u8 clothes = dComIfGs_getSelectEquipClothes();
     if (clothes == dItemNo_WEAR_CASUAL_e) return kPuppetOutfitCasual;
     if (clothes == dItemNo_WEAR_ZORA_e) return kPuppetOutfitZora;
@@ -2958,6 +2960,12 @@ bool skin_fits_counts(J3DModelData* mine, u16 refJoints, u16 refMats, const char
     const u16 myJoints = mine->getJointNum();
     const u16 myMats = mine->getMaterialNum();
     if (myJoints == refJoints && myMats == refMats) return true;
+    // KePa's Ordon head keeps four extra cap joints from its source rig.
+    if (what != nullptr && std::strcmp(what, "bl_head.bmd") == 0 &&
+        myJoints == 10 && refJoints == 6 && myMats == 2 && refMats == 1)
+    {
+        return true;
+    }
     coop_log::warn("coop_mod: [SKIN] '{}' mismatch joints={}/{} mats={}/{}, using game model",
         what, myJoints, refJoints, myMats, refMats);
     breadcrumb2("local: REFUSED mismatched part", what);
@@ -3033,6 +3041,7 @@ int puppet_wolf_standin();
 
 int puppet_skin_outfit() {
     switch (pup().outfit) {
+    case kPuppetOutfitSumo: return kSkinOutfitSumo;
     case kPuppetOutfitCasual: return kSkinOutfitOrdon;
     case kPuppetOutfitZora: return kSkinOutfitZora;
     case kPuppetOutfitMagicArmor: return kSkinOutfitMagic;
@@ -3215,7 +3224,7 @@ void retry_missing_parts() {
         if (pup().hatModel != nullptr) {
             enable_stage_count_diff(pup().hatModel);
             install_hat_tail_sway(pup().hatModel);
-            colors_attach_puppet_model(pup().hatModel, s_pupId);
+            colors_attach_puppet_model(pup().hatModel, s_pupId, puppet_skin_outfit());
         }
     }
     if (pup().handsModel == nullptr) {
@@ -4087,10 +4096,11 @@ void update_one_puppet(daAlink_c* alink) {
         }
         load_puppet_parts(files);
 
-        colors_attach_puppet_model(pup().model, s_pupId);
-        colors_attach_puppet_model(pup().hatModel, s_pupId);
-        colors_attach_puppet_model(pup().bootModels[0], s_pupId);
-        colors_attach_puppet_model(pup().bootModels[1], s_pupId);
+        const int outfit = puppet_skin_outfit();
+        colors_attach_puppet_model(pup().model, s_pupId, outfit);
+        colors_attach_puppet_model(pup().hatModel, s_pupId, outfit);
+        colors_attach_puppet_model(pup().bootModels[0], s_pupId, outfit);
+        colors_attach_puppet_model(pup().bootModels[1], s_pupId, outfit);
         coop_log::info("coop_mod: [DIAG] model={:p} outfit={} joints={} mats={} | [MEM] {}",
             static_cast<void*>(pup().model), pup().outfit,
             pup().model ? pup().model->getModelData()->getJointNum() : 0,
@@ -4293,6 +4303,7 @@ int local_skin_outfit() {
     if (alink == nullptr) return kSkinOutfitHero;
     if (alink->checkWolf()) return kSkinOutfitWolf;
     switch (detect_local_outfit_change()) {
+    case kPuppetOutfitSumo: return kSkinOutfitSumo;
     case kPuppetOutfitCasual: return kSkinOutfitOrdon;
     case kPuppetOutfitZora: return kSkinOutfitZora;
     case kPuppetOutfitMagicArmor: return kSkinOutfitMagic;
@@ -4456,14 +4467,10 @@ void local_skin_rebuild_link() {
     daAlink_c* alink = daAlink_getAlinkActorClass();
     if (alink == nullptr) return;
 
+    if (alink->checkWolf()) return;
     if (alink->mClothesChangeWaitTimer != 0) return;
     breadcrumb("local: rebuilding Link for a model change");
     local_skin_rebuild_equipment(alink);
-    if (alink->checkWolf()) {
-
-        coop_log::info("coop_mod: [SKIN] model change deferred until human");
-        return;
-    }
     alink->setClothesChange(0);
 }
 
@@ -6853,11 +6860,12 @@ void draw_one_puppet(daAlink_c* alink) {
 
 void puppet_hook_init() {
 
-    mods::hook::add_pre<PuppetAlinkExecuteHook>([](ModContext*, void*, void*, void*) -> HookAction {
-        fx_owner_window(true);
+    mods::hook::add_pre<PuppetAlinkExecuteHook>(
+        [](ModContext*, void*, void*, void*) -> HookAction {
+            fx_owner_window(true);
 
-        return HOOK_CONTINUE;
-    });
+            return HOOK_CONTINUE;
+        });
     const ModResult execResult =
         mods::hook::add_post<PuppetAlinkExecuteHook>(on_alink_execute_puppet_post);
     const ModResult drawResult =
@@ -6917,12 +6925,40 @@ void puppet_hook_init() {
             if (result == nullptr || *result == nullptr || s_loadingPuppetModels) return;
 
             const char* arc = mods::arg<const char*>(args, 0);
-            if (arc == nullptr || std::strcmp(arc, "Wmdl") != 0) return;
-            if (mods::arg<int>(args, 1) != dRes_INDEX_WMDL_BMD_WL_e) return;
-            J3DModelData* mine = skins_local_part_data(kSkinOutfitWolf, kSkinPartBody);
-            if (mine != nullptr) {
-                models_reset_for_game(mine, "wl.bmd");
-                *result = mine;
+            if (arc == nullptr) return;
+            const int index = mods::arg<int>(args, 1);
+            if (std::strcmp(arc, "Wmdl") == 0 &&
+                index == dRes_INDEX_WMDL_BMD_WL_e) {
+                J3DModelData* mine = skins_local_part_data(kSkinOutfitWolf, kSkinPartBody);
+                if (mine != nullptr) {
+                    models_reset_for_game(mine, "wl.bmd");
+                    *result = mine;
+                }
+                return;
+            }
+            if (std::strcmp(arc, "alSumou") != 0 ||
+                !sumo_hides_equipment(coop_net_local_id())) {
+                return;
+            }
+            int part = -1;
+            const char* file = nullptr;
+            if (index == 0x31) {
+                part = kSkinPartBody;
+                file = "bls.bmd";
+            } else if (index == 0x32) {
+                part = kSkinPartHands;
+                file = "bls_hands.bmd";
+            } else if (index == 0x33) {
+                part = kSkinPartHead;
+                file = "bls_head.bmd";
+            }
+            if (part >= 0) {
+                J3DModelData* mine = skins_local_part_data(kSkinOutfitSumo, part);
+                if (mine != nullptr &&
+                    skin_fits_original(mine, static_cast<J3DModelData*>(*result), file)) {
+                    models_reset_for_game(mine, file);
+                    *result = mine;
+                }
             }
         });
 

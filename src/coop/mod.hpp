@@ -175,6 +175,7 @@ enum SkinOutfit {
     kSkinOutfitZora,
     kSkinOutfitMagic,
     kSkinOutfitWolf,
+    kSkinOutfitSumo,
     kSkinOutfitCount,
 };
 
@@ -182,6 +183,7 @@ const size_t kSkinNameMax = 32;
 
 enum SkinChoiceSlot {
     kSkinChoiceHero = 0,
+    kSkinChoiceSumo,
     kSkinChoiceOrdon,
     kSkinChoiceZora,
     kSkinChoiceMagic,
@@ -233,6 +235,7 @@ struct CoopPeer {
     int16_t mapAngleY = 0;
 
     SkinChoices skins = {};
+    char eponaSkin[kSkinNameMax] = {};
     uint32_t skinStamp = 0;
 
     bool lifeKnown = false;
@@ -321,7 +324,7 @@ void skins_outfit_list(int index, std::vector<std::string>& out);
 
 std::string skins_folder_path();
 
-const char* const kCoopShippedModelsVersion = "2.0.0";
+const char* const kCoopShippedModelsVersion = "2.0.8";
 
 void skins_cycle_update();
 
@@ -349,7 +352,10 @@ void skins_warn_update(int outfit);
 
 std::string skins_local_slot(int slot);
 void skins_set_local_slot(int slot, const char* name);
+std::string skins_local_epona_skin();
+void skins_set_local_epona_skin(const char* name);
 void skins_local_choices(SkinChoices* out);
+void skins_texture_replacements_update();
 
 void skins_set_local_all(const char* name);
 
@@ -510,7 +516,7 @@ ConfigVarHandle colors_slot_var(int slot);
 void colors_reset_mine();
 void colors_set_goron_tunic_active(bool active);
 
-void colors_attach_puppet_model(J3DModel* model, uint8_t owner);
+void colors_attach_puppet_model(J3DModel* model, uint8_t owner, int outfit);
 void colors_protect_puppet_model(J3DModel* model, uint8_t owner);
 
 void coop_crash_trail(const char* step);

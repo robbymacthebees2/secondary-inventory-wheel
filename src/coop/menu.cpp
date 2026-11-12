@@ -1409,6 +1409,9 @@ bool add_slot_dropdown(UiElementHandle pane, int slot) {
     desc.label = skins_slot_label(slot);
     desc.options = s_slotOptionPtrs[slot].data();
     desc.option_count = s_slotOptionPtrs[slot].size();
+    desc.help_rml = slot == kSkinChoiceWolf
+        ? "Wolf skin changes take effect the next time Link transforms into Wolf."
+        : nullptr;
     desc.user_data = reinterpret_cast<void*>(static_cast<intptr_t>(slot));
     desc.get = [](ModContext*, void* data, UiControlValue* value) {
         const int slot = static_cast<int>(reinterpret_cast<intptr_t>(data));
@@ -1427,6 +1430,35 @@ bool add_slot_dropdown(UiElementHandle pane, int slot) {
     };
     add_control(pane, desc);
     return true;
+}
+
+void add_epona_skin_dropdown(UiElementHandle pane) {
+    static const char* const options[] = {
+        "Default", "OOT Style Epona", "Twilight Epona", "Nightwalker Epona",
+    };
+
+    UiControlDesc desc = UI_CONTROL_DESC_INIT;
+    desc.kind = UI_CONTROL_DROPDOWN;
+    desc.label = "Epona";
+    desc.help_rml = "Each player's Epona uses that player's selected skin. Default uses "
+                    "Epona's original textures.";
+    desc.options = options;
+    desc.option_count = sizeof(options) / sizeof(options[0]);
+    desc.get = [](ModContext*, void*, UiControlValue* value) {
+        const std::string skin = skins_local_epona_skin();
+        value->int_value = skin == "OOT Style Epona" ? 1 :
+                           skin == "Twilight Epona" ? 2 :
+                           skin == "Nightwalker Epona" ? 3 : 0;
+    };
+    desc.set = [](ModContext*, void*, const UiControlValue* value) {
+        switch (value->int_value) {
+        case 1: skins_set_local_epona_skin("OOT Style Epona"); break;
+        case 2: skins_set_local_epona_skin("Twilight Epona"); break;
+        case 3: skins_set_local_epona_skin("Nightwalker Epona"); break;
+        default: skins_set_local_epona_skin(""); break;
+        }
+    };
+    add_control(pane, desc);
 }
 
 ModResult build_colors_detail(ModContext*, UiElementHandle pane, void*, ModError*) {
@@ -1466,6 +1498,7 @@ ModResult build_equipment_detail(ModContext*, UiElementHandle pane, void*, ModEr
 
 const char* outfit_heading(int outfit) {
     switch (outfit) {
+    case kSkinOutfitSumo: return "Has Sumo clothes";
     case kSkinOutfitOrdon: return "Has Ordon clothes";
     case kSkinOutfitZora: return "Has Zora armor";
     case kSkinOutfitMagic: return "Has Magic armor";
@@ -1611,6 +1644,7 @@ void build_models(UiElementHandle pane, SurfaceHandles& h, UiElementHandle detai
 
         if (slot == kSkinChoiceEquipment) continue;
         add_slot_dropdown(pane, slot);
+        if (slot == kSkinChoiceVoice) add_epona_skin_dropdown(pane);
     }
     svc_ui->pane_add_section(mod_ctx, pane, "Your models folder");
     if (skins_can_open_folder()) {

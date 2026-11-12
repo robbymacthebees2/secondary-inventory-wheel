@@ -48,6 +48,7 @@ const uint64_t kPunchForMs = 10000;
 const uint64_t kPunchEveryMs = 100;
 const uint64_t kQuietDropMs = 15000;
 const uint64_t kStunWaitMs = 2500;
+const uint64_t kPresenceHeartbeatMs = 15000;
 
 const int kMaxPacketsPerSecond = 400;
 const int kFloodStrikes = 3;
@@ -126,6 +127,9 @@ uint64_t s_retryAtMs = 0;
 uint64_t s_retryDelayMs = 5000;
 std::string s_status = "Off";
 uint32_t s_tick = 0;
+uint64_t s_lastPresenceHeartbeatMs = 0;
+bool s_superseded = false;
+bool s_presenceHeartbeatSupported = false;
 ConfigVarHandle s_enabledVar = 0;
 ConfigVarHandle s_pvpVar = 0;
 ConfigVarHandle s_pvpOnlyVar = 0;
@@ -435,7 +439,7 @@ bool clean_snapshot(PlayerSnapshot& s) {
         !sane_float(s.warpScroll, 1.0e5f) || !sane_float(s.warpDissolve, 1.0e5f)) {
         return false;
     }
-    if (s.outfit > kPuppetOutfitWolf) s.outfit = kPuppetOutfitDefault;
+    if (s.outfit > kPuppetOutfitSumo) s.outfit = kPuppetOutfitDefault;
     if (s.sword > kPuppetSwordWood) s.sword = kPuppetSwordNone;
     if (s.sheath > kPuppetSheathMaster) s.sheath = kPuppetSheathNone;
     if (s.chainKind > kPuppetChainRodLure) s.chainKind = kPuppetChainNone;
@@ -645,9 +649,11 @@ void say_hello() {
     s_sentName = features_local_name();
     hello += ",\"name\":\"" + json_text(s_sentName) + "\"";
     hello += ",\"key\":\"" + install_key() + "\"";
+    if (s_presenceHeartbeatSupported) hello += ",\"heartbeat\":true";
     send_json(hello + "}");
     chat_first_online();
     s_phase = Phase::Live;
+    s_lastPresenceHeartbeatMs = now_ms();
     s_area = "\x01";
     s_status = "Online";
     s_retryDelayMs = 5000;
@@ -659,8 +665,15 @@ void on_server_message(const std::string& text) {
     JsonReader reader(text);
     if (!reader.object(msg)) return;
     const std::string op = msg.str("op");
+    if (op == "superseded") {
+        s_superseded = true;
+        s_status = "This installation is active in another game session.";
+        s_retryAtMs = 0;
+        return;
+    }
     if (op == "welcome") {
         s_myId = static_cast<uint32_t>(std::strtoul(msg.str("id").c_str(), nullptr, 10));
+        s_presenceHeartbeatSupported = msg.boolean("heartbeat");
         s_stun = msg.list("stun");
         s_stunAsks.clear();
         s_mapped.clear();
@@ -817,6 +830,9 @@ void disconnect(const char* why) {
     s_myId = 0;
     s_total = 0;
     s_here = 0;
+    s_lastPresenceHeartbeatMs = 0;
+    s_superseded = false;
+    s_presenceHeartbeatSupported = false;
     s_area = "\x01";
     s_seen.clear();
     s_onlineRoster.clear();
@@ -1033,9 +1049,16 @@ void global_on_ws_event(const mods::ws::Event& event) {
         s_ws = mods::ws::Connection{};
         release_all("server connection closed");
         s_phase = Phase::Off;
-        s_status = "Lost the server, trying again...";
-        s_retryAtMs = now_ms() + s_retryDelayMs;
-        s_retryDelayMs = std::min<uint64_t>(s_retryDelayMs * 2, 120000);
+        s_superseded = s_superseded ||
+            event.closeReason == "replaced by newer session";
+        if (s_superseded) {
+            s_status = "This installation is active in another game session.";
+            s_retryAtMs = 0;
+        } else {
+            s_status = "Lost the server, trying again...";
+            s_retryAtMs = now_ms() + s_retryDelayMs;
+            s_retryDelayMs = std::min<uint64_t>(s_retryDelayMs * 2, 120000);
+        }
         coop_log::info("coop_mod: [GLOBAL] server closed: {} {}", event.message, event.closeReason);
         break;
     default:
@@ -1238,8 +1261,10 @@ void global_update() {
         }
         s_status = enabled() ? "Paused while in co-op" : "Off";
         s_retryAtMs = 0;
+        s_superseded = false;
         return;
     }
+    if (s_superseded) return;
     const uint64_t now = now_ms();
     if (s_phase == Phase::Off) {
         if (now >= s_retryAtMs) connect();
@@ -1257,6 +1282,12 @@ void global_update() {
         return;
     }
     if (s_phase != Phase::Live) return;
+    if (s_presenceHeartbeatSupported &&
+        now - s_lastPresenceHeartbeatMs >= kPresenceHeartbeatMs)
+    {
+        send_json("{\"op\":\"ping\"}");
+        s_lastPresenceHeartbeatMs = now;
+    }
     send_name_if_changed(now);
 
     const std::string area = current_area();

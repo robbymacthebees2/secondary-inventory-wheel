@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-const uint16_t kCoopProtocolVersion = 76;
+const uint16_t kCoopProtocolVersion = 77;
 
 #ifndef COOP_MOD_VERSION
 #define COOP_MOD_VERSION "0.0.0"
@@ -121,6 +121,7 @@ enum CoopMsgType : uint8_t {
     kMsgChat = 76,
     kMsgCatchUpWant = 77,
     kMsgCatchUp = 78,
+    kMsgEponaSkin = 79,
 };
 
 const int kBundleFlags = 16;
@@ -662,8 +663,12 @@ struct MsgWorldFull {
 };
 
 struct MsgSkinChoices {
-    char name[22][32];
-    uint32_t hash[22];
+    char name[23][32];
+    uint32_t hash[23];
+};
+
+struct MsgEponaSkin {
+    char name[32];
 };
 
 struct MsgEnemyClaim {

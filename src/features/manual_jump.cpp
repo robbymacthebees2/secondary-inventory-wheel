@@ -18,11 +18,20 @@ DEFINE_HOOK(&daNbomb_c::procWait, GlideBomblingWait);
 struct AutoJumpFlagScope {
     daAlink_c* link = nullptr;
     bool added = false;
+    bool groundMovement = false;
     f32 forwardSpeed = 0.0f;
     s16 moveAngle = 0;
 };
 
 thread_local std::vector<AutoJumpFlagScope> g_autoJumpFlagScopes;
+
+struct RunOffLedgeState {
+    daAlink_c* owner = nullptr;
+    u8 framesRemaining = 0;
+};
+
+constexpr u8 kRunOffLedgeAnimationFrames = 7;
+RunOffLedgeState g_runOffLedgeState{};
 
 bool disable_auto_jump_ground_movement_proc(daAlink_c* link) {
     switch (link->mProcID) {
@@ -64,6 +73,7 @@ HookAction before_check_auto_jump_action(ModContext*, void* args, void*, void*) 
     link->onEndResetFlg0(daPy_py_c::ERFLG0_NOT_AUTO_JUMP);
     AutoJumpFlagScope& scope = g_autoJumpFlagScopes.back();
     scope.added = true;
+    scope.groundMovement = disable_auto_jump_ground_movement_proc(link);
     scope.forwardSpeed = link->speedF;
     scope.moveAngle = link->current.angle.y;
     return HOOK_CONTINUE;
@@ -77,11 +87,17 @@ void after_check_auto_jump_action(ModContext*, void*, void*, void*) {
     g_autoJumpFlagScopes.pop_back();
     if (scope.added && scope.link != nullptr) {
         scope.link->mEndResetFlg0 &= ~daPy_py_c::ERFLG0_NOT_AUTO_JUMP;
+        if (g_runOffLedgeState.owner == scope.link &&
+            (scope.link->mProcID != daAlink_c::PROC_MOVE ||
+             scope.link->mLinkAcch.ChkGroundHit()))
+        {
+            g_runOffLedgeState = {};
+        }
     }
 }
 
 HookAction preserve_sprint_speed_on_ledge_fall(
-    ModContext*, void* args, void*, void*)
+    ModContext*, void* args, void* retval, void*)
 {
     if (g_autoJumpFlagScopes.empty()) {
         return HOOK_CONTINUE;
@@ -95,11 +111,65 @@ HookAction preserve_sprint_speed_on_ledge_fall(
         return HOOK_CONTINUE;
     }
 
-    mods::arg_ref<int>(args, 1) = 2;
-    link->mNormalSpeed = scope.forwardSpeed;
-    link->current.angle.y = scope.moveAngle;
-    link->speed.y = 0.0f;
+    if (link->checkWolf() || is_hover_boots_hovering(link))
+    {
+        g_runOffLedgeState = {};
+        mods::arg_ref<int>(args, 1) = 2;
+        link->mNormalSpeed = scope.forwardSpeed;
+        link->current.angle.y = scope.moveAngle;
+        link->speed.y = 0.0f;
+        return HOOK_CONTINUE;
+    }
+    if (link->mpHIO == nullptr || link->mProcID != daAlink_c::PROC_MOVE) {
+        return HOOK_CONTINUE;
+    }
+
+    const f32 runSpeed = link->mpHIO->mMove.m.mMaxSpeed;
+    if (runSpeed <= 0.0f || scope.forwardSpeed < runSpeed * 0.6f) {
+        g_runOffLedgeState = {};
+        return HOOK_CONTINUE;
+    }
+
+    if (g_runOffLedgeState.owner != link) {
+        g_runOffLedgeState.owner = link;
+        g_runOffLedgeState.framesRemaining = kRunOffLedgeAnimationFrames;
+    }
+    if (g_runOffLedgeState.framesRemaining > 0) {
+        --g_runOffLedgeState.framesRemaining;
+        const auto& jump = link->mpHIO->mAutoJump.m;
+        link->setSpecialGravity(jump.mGravity, jump.mMaxFallSpeed, TRUE);
+        link->speed.y = std::min(link->speed.y, -0.5f);
+        if (retval != nullptr) *static_cast<int*>(retval) = 1;
+        return HOOK_SKIP_ORIGINAL;
+    }
     return HOOK_CONTINUE;
+}
+
+void finish_run_off_ledge_fall(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr || g_autoJumpFlagScopes.empty()) {
+        return;
+    }
+    const AutoJumpFlagScope& scope = g_autoJumpFlagScopes.back();
+    if (!scope.added || !scope.groundMovement || scope.link != link ||
+        mods::arg<int>(args, 1) != 1 || link->checkWolf() ||
+        is_hover_boots_hovering(link) || link->mLinkAcch.ChkGroundHit() ||
+        link->mProcID != daAlink_c::PROC_FALL || link->mpHIO == nullptr)
+    {
+        return;
+    }
+
+    const bool running = g_runOffLedgeState.owner == link &&
+        g_runOffLedgeState.framesRemaining == 0;
+    if (running) {
+        link->mNormalSpeed = scope.forwardSpeed;
+        link->current.angle.y = scope.moveAngle;
+        g_runOffLedgeState = {};
+    }
+    link->setSingleAnimeBaseSpeed(
+        daAlink_c::ANM_DMG_FALL, 0.0f,
+        link->mpHIO->mDamage.mDamFall.m.mFallAnmMorf);
+    link->mProcVar2.field_0x300c = 1;
 }
 
 bool g_manualJumpPendingPress = false;
@@ -114,29 +184,89 @@ bool g_warnedMissingNativeButtonPoller = false;
 
 bool native_left_bumper_held() {
 #if TARGET_PC
-    using GetGamepadButton = bool (*)(SDL_Gamepad*, SDL_GamepadButton);
-    static GetGamepadButton getGamepadButton = [] {
+    using GetGamepadJoystick = SDL_Joystick* (*)(SDL_Gamepad*);
+    using GetGamepadBindings = SDL_GamepadBinding** (*)(SDL_Gamepad*, int*);
+    using GetJoystickButton = bool (*)(SDL_Joystick*, int);
+    using FreeSdlMemory = void (*)(void*);
+    struct SdlInputApi {
+        GetGamepadJoystick getGamepadJoystick = nullptr;
+        GetGamepadBindings getGamepadBindings = nullptr;
+        GetJoystickButton getJoystickButton = nullptr;
+        FreeSdlMemory freeMemory = nullptr;
+    };
+    static const SdlInputApi api = [] {
+        SdlInputApi result;
 #if defined(_WIN32)
         HMODULE module = GetModuleHandleA("SDL3.dll");
-        return module != nullptr
-            ? reinterpret_cast<GetGamepadButton>(
-                  GetProcAddress(module, "SDL_GetGamepadButton"))
-            : nullptr;
+        if (module != nullptr) {
+            result.getGamepadJoystick = reinterpret_cast<GetGamepadJoystick>(
+                GetProcAddress(module, "SDL_GetGamepadJoystick"));
+            result.getGamepadBindings = reinterpret_cast<GetGamepadBindings>(
+                GetProcAddress(module, "SDL_GetGamepadBindings"));
+            result.getJoystickButton = reinterpret_cast<GetJoystickButton>(
+                GetProcAddress(module, "SDL_GetJoystickButton"));
+            result.freeMemory = reinterpret_cast<FreeSdlMemory>(
+                GetProcAddress(module, "SDL_free"));
+        }
 #else
-        return reinterpret_cast<GetGamepadButton>(
-            dlsym(RTLD_DEFAULT, "SDL_GetGamepadButton"));
+        result.getGamepadJoystick = reinterpret_cast<GetGamepadJoystick>(
+            dlsym(RTLD_DEFAULT, "SDL_GetGamepadJoystick"));
+        result.getGamepadBindings = reinterpret_cast<GetGamepadBindings>(
+            dlsym(RTLD_DEFAULT, "SDL_GetGamepadBindings"));
+        result.getJoystickButton = reinterpret_cast<GetJoystickButton>(
+            dlsym(RTLD_DEFAULT, "SDL_GetJoystickButton"));
+        result.freeMemory = reinterpret_cast<FreeSdlMemory>(
+            dlsym(RTLD_DEFAULT, "SDL_free"));
 #endif
+        return result;
     }();
     const s32 controllerIndex = PADGetIndexForPort(PAD_1);
     SDL_Gamepad* controller = controllerIndex >= 0
         ? PADGetSDLGamepadForIndex(static_cast<u32>(controllerIndex))
         : nullptr;
-    if (getGamepadButton != nullptr && controller != nullptr) {
-        return getGamepadButton(controller, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    if (controller == nullptr || api.getGamepadJoystick == nullptr ||
+        api.getGamepadBindings == nullptr || api.getJoystickButton == nullptr ||
+        api.freeMemory == nullptr)
+    {
+        if (!g_warnedMissingNativeButtonPoller) {
+            svc_log->warn(mod_ctx, "could not poll the physical left-shoulder button");
+            g_warnedMissingNativeButtonPoller = true;
+        }
+        return false;
     }
-    if (!g_warnedMissingNativeButtonPoller) {
-        svc_log->warn(mod_ctx, "could not poll the native left-shoulder button");
-        g_warnedMissingNativeButtonPoller = true;
+
+    static SDL_Gamepad* mappedController = nullptr;
+    static SDL_Joystick* joystick = nullptr;
+    static std::vector<int> shoulderButtons;
+    if (controller != mappedController) {
+        mappedController = controller;
+        joystick = api.getGamepadJoystick(controller);
+        shoulderButtons.clear();
+        int bindingCount = 0;
+        SDL_GamepadBinding** bindings =
+            api.getGamepadBindings(controller, &bindingCount);
+        if (bindings != nullptr) {
+            for (int i = 0; i < bindingCount; ++i) {
+                const SDL_GamepadBinding* binding = bindings[i];
+                if (binding != nullptr &&
+                    binding->input_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
+                    binding->output_type == SDL_GAMEPAD_BINDTYPE_BUTTON &&
+                    binding->output.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)
+                {
+                    shoulderButtons.push_back(binding->input.button);
+                }
+            }
+            api.freeMemory(bindings);
+        }
+    }
+
+    if (joystick == nullptr) {
+        return false;
+    }
+    for (const int button : shoulderButtons) {
+        if (api.getJoystickButton(joystick, button)) {
+            return true;
+        }
     }
 #endif
     return false;
@@ -345,6 +475,7 @@ u8 item_button_mask(int button) {
 }
 
 bool track_falling_bombling(daNbomb_c* bomb);
+FallingBombling* falling_bombling(daNbomb_c* bomb);
 
 bool drop_bomb_during_manual_glide(daAlink_c* alink, int button, u8 itemId) {
     if (alink == nullptr || !alink->checkBombItem(itemId) ||
@@ -388,9 +519,14 @@ bool drop_bomb_during_manual_glide(daAlink_c* alink, int button, u8 itemId) {
     bomb->speed.set(0.0f, 0.0f, 0.0f);
     if (itemId == dItemNo_POKE_BOMB_e) {
         auto* bombling = static_cast<daNbomb_c*>(bomb);
-        bombling->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
-        const bool tracked = track_falling_bombling(bombling);
-        const bool waiting = bombling->procWaitInit();
+        const bool alreadyDeferred = falling_bombling(bombling) != nullptr;
+        const bool tracked =
+            alreadyDeferred || track_falling_bombling(bombling);
+        bool waiting = alreadyDeferred;
+        if (tracked && !alreadyDeferred) {
+            bombling->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
+            waiting = bombling->procWaitInit();
+        }
         if (!tracked || !waiting) {
             svc_log->error(mod_ctx, "failed to initialize a falling Bombling");
         }
@@ -440,23 +576,31 @@ HookAction defer_glide_bombling_explode(
     ModContext* context, void* args, void* retval, void*)
 {
     auto* bomb = mods::arg<daNbomb_c*>(args, 0);
-    if (!g_droppingBomblingFromGlide || bomb == nullptr ||
-        fopAcM_GetParam(bomb) != dBomb_c::PRM_INSECT_BOMB_PLAYER ||
-        !track_falling_bombling(bomb))
+    if (bomb == nullptr ||
+        fopAcM_GetParam(bomb) != dBomb_c::PRM_INSECT_BOMB_PLAYER)
     {
         return HOOK_CONTINUE;
     }
 
-    bomb->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
-    if (!bomb->procWaitInit()) {
-        for (FallingBombling& falling : g_fallingBomblings) {
-            if (falling.actor == bomb && falling.actorId == fopAcM_GetID(bomb)) {
-                falling = {};
-                break;
-            }
-        }
-        svc_log->error(context, "failed to initialize a falling Bombling");
+    const bool alreadyDeferred = falling_bombling(bomb) != nullptr;
+    if (!g_droppingBomblingFromGlide && !alreadyDeferred) {
         return HOOK_CONTINUE;
+    }
+    if (!alreadyDeferred) {
+        if (!track_falling_bombling(bomb)) {
+            return HOOK_CONTINUE;
+        }
+        bomb->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
+        if (!bomb->procWaitInit()) {
+            for (FallingBombling& falling : g_fallingBomblings) {
+                if (falling.actor == bomb && falling.actorId == fopAcM_GetID(bomb)) {
+                    falling = {};
+                    break;
+                }
+            }
+            svc_log->error(context, "failed to initialize a falling Bombling");
+            return HOOK_CONTINUE;
+        }
     }
     if (retval != nullptr) *static_cast<BOOL*>(retval) = TRUE;
     return HOOK_SKIP_ORIGINAL;
@@ -473,8 +617,36 @@ void finish_glide_bombling_fall(ModContext*, void* args, void*, void*) {
     }
     if (!bomb->mAcch.ChkGroundHit()) return;
 
+    bomb->current.angle.y = bomb->shape_angle.y;
+    bomb->field_0xbf0 = cXyz::BaseY;
+    bomb->field_0xbfc.set(
+        cM_ssin(bomb->shape_angle.y), 0.0f, cM_scos(bomb->shape_angle.y));
+    bomb->field_0xc08.set(bomb->field_0xbfc.z, 0.0f, -bomb->field_0xbfc.x);
+    mDoMtx_stack_c::transS(bomb->current.pos);
+    mDoMtx_stack_c::YrotM(bomb->shape_angle.y);
+    bomb->mpModel->setBaseTRMtx(mDoMtx_stack_c::get());
+    mDoMtx_inverse(bomb->mpModel->getBaseTRMtx(), bomb->field_0xa70);
+
+    cXyz start = bomb->current.pos + bomb->field_0xbf0 * 5.0f;
+    cXyz end = bomb->current.pos - bomb->field_0xbf0 * 100.0f;
+    bomb->mLineChk.Set(&start, &end, bomb);
+    int lineResult = bomb->insectLineCheck();
+    if (lineResult != 1) {
+        start = bomb->current.pos - bomb->field_0xbf0 * 5.0f;
+        end = start - bomb->field_0xbfc * 100.0f;
+        bomb->mLineChk.Set(&start, &end, bomb);
+        lineResult = bomb->insectLineCheck();
+    }
+
+    if (lineResult != 1) {
+        *falling = {};
+        bomb->procExplodeInit();
+        return;
+    }
+
     bomb->onStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
-    if (!bomb->procInsectMoveInit()) {
+    const bool started = bomb->procInsectMoveInit();
+    if (!started) {
         bomb->offStateFlg0(daNbomb_c::FLG0_INSECT_BOMB);
         svc_log->error(mod_ctx, "failed to start Bombling behavior after landing");
     }
@@ -1394,7 +1566,7 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
             const int itemId = secondaryItemAssigned(button)
                 ? secondaryItemIdForSlot(g_secondarySelectedItems[button])
                 : selected_item_for_button(button);
-            if (alink->checkBowItem(itemId)) {
+            if (alink->checkBowItem(itemId) || itemId == dItemNo_PACHINKO_e) {
                 release_manual_cucco_glide(alink);
                 if (g_manualJumpOwner != alink) {
                     g_manualJumpOwner = alink;
