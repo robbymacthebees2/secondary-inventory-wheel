@@ -34,6 +34,7 @@
 #include "net/seal.hpp"
 #include "net/reliable.hpp"
 #include "mod.hpp"
+#include "features/ma_fairy_companion.hpp"
 
 #include "res/Object/AlAnm.h"
 
@@ -58,6 +59,7 @@ void puppet_hook_on_network_snapshot(uint8_t playerId, float x, float y, float z
     const PlayerSnapshot& equipment);
 void puppet_hook_on_midna_snapshot(uint8_t playerId, const MidnaSnapshot& snap);
 void puppet_hook_on_horse_snapshot(uint8_t playerId, const HorseSnapshot& snap);
+void puppet_hook_on_companion_snapshot(uint8_t playerId, const CompanionSnapshot& snap);
 
 void puppet_hook_trigger_spawn();
 
@@ -976,6 +978,8 @@ ModResult start_joining(const std::string& rawAddress) {
 
 uint32_t g_lastMidnaSeq[kCoopMaxPlayers] = {};
 bool g_haveMidnaSeq[kCoopMaxPlayers] = {};
+uint32_t g_lastCompanionSeq[kCoopMaxPlayers] = {};
+bool g_haveCompanionSeq[kCoopMaxPlayers] = {};
 
 void handle_midna_datagram(const mods::net::Event& event) {
     MidnaSnapshot snap;
@@ -1008,6 +1012,48 @@ void handle_midna_datagram(const mods::net::Event& event) {
         }
     }
     puppet_hook_on_midna_snapshot(static_cast<uint8_t>(id), snap);
+}
+
+void handle_companion_datagram(const mods::net::Event& event) {
+    CompanionSnapshot snap;
+    std::memcpy(&snap, event.data.data(), sizeof(snap));
+    if (snap.magic != kCompanionSnapshotMagic ||
+        (snap.flags & ~kCompanionFlagActive) != 0 ||
+        snap.appearance > kCompanionAppearanceMax || snap.color > 3 ||
+        !std::isfinite(snap.x) || !std::isfinite(snap.y) ||
+        !std::isfinite(snap.z) || !std::isfinite(snap.scale) ||
+        std::fabs(snap.x) > 1000000.0f || std::fabs(snap.y) > 1000000.0f ||
+        std::fabs(snap.z) > 1000000.0f || snap.scale < 0.0f || snap.scale > 1.5f)
+    {
+        return;
+    }
+
+    int id = -1;
+    if (g_isHost) {
+        for (int i = 0; i < kCoopMaxPlayers; ++i) {
+            if (g_links[i].used && g_links[i].haveUdp && g_links[i].udpEndpoint == event.endpoint) {
+                id = i;
+                break;
+            }
+        }
+        if (id < 0) return;
+        snap.playerId = static_cast<uint8_t>(id);
+    } else {
+        id = snap.playerId;
+        if (id < 0 || id >= kCoopMaxPlayers || id == g_localId) return;
+    }
+
+    if (!fresh_seq(g_haveCompanionSeq[id], g_lastCompanionSeq[id], snap.seq)) return;
+
+    if (g_isHost) {
+        for (int i = 0; i < kCoopMaxPlayers; ++i) {
+            if (i == id || !g_links[i].used || !g_links[i].haveUdp) continue;
+            if (!worth_sending(static_cast<uint8_t>(id), i, snap.seq)) continue;
+            udp_send(g_links[i].udpEndpoint,
+                {reinterpret_cast<const std::byte*>(&snap), sizeof(snap)});
+        }
+    }
+    puppet_hook_on_companion_snapshot(static_cast<uint8_t>(id), snap);
 }
 
 const uint32_t kVoiceMagic = 0x31435643u;
@@ -1357,6 +1403,10 @@ void handle_udp_payload(const mods::net::Event& event) {
     g_ticksSinceRx = 0;
     if (is_voice_datagram(event)) {
         handle_voice_datagram(event);
+        return;
+    }
+    if (event.data.size() == sizeof(CompanionSnapshot)) {
+        handle_companion_datagram(event);
         return;
     }
     if (event.data.size() == sizeof(MidnaSnapshot)) {
@@ -2419,6 +2469,7 @@ void send_local_snapshot() {
 }
 
 uint32_t g_midnaSeq = 0;
+uint32_t g_companionSeq = 0;
 
 int g_midnaNoneToSend = 0;
 const int kMidnaNoneRepeats = 3;
@@ -2488,7 +2539,8 @@ void coop_voice_send(uint32_t sequence, const uint8_t* opus, size_t size) {
     std::memcpy(out.data() + sizeof(head), opus, size);
 
     while (out.size() == sizeof(PlayerSnapshot) || out.size() == sizeof(MidnaSnapshot) ||
-           out.size() == sizeof(HorseSnapshot)) {
+           out.size() == sizeof(HorseSnapshot) ||
+           out.size() == sizeof(CompanionSnapshot)) {
         out.push_back(std::byte{0});
     }
     for (int i = 0; i < kCoopMaxPlayers; ++i) {
@@ -2623,6 +2675,37 @@ void send_local_midna() {
     snap.hairK2[3] = midna->field_0x6ec.a;
 
     send_midna_datagram(snap);
+}
+
+void send_local_companion() {
+    if (!g_udp || g_localId == kCoopNoPlayer) return;
+    if (g_tickCounter % send_every_n_ticks() != 0) return;
+
+    FairyCompanionNetworkState state{};
+    if (!coop_fairy_companion_network_state(&state)) return;
+
+    CompanionSnapshot snap{};
+    snap.magic = kCompanionSnapshotMagic;
+    snap.seq = ++g_companionSeq;
+    snap.tick = g_tickCounter;
+    snap.playerId = g_localId;
+    snap.flags = state.active ? kCompanionFlagActive : 0;
+    snap.appearance = state.appearance;
+    snap.color = state.color;
+    snap.x = state.x;
+    snap.y = state.y;
+    snap.z = state.z;
+    snap.scale = state.scale;
+    snap.yaw = state.yaw;
+    snap.room = state.room;
+
+    global_send_companion(snap);
+    for (int i = 0; i < kCoopMaxPlayers; ++i) {
+        if (!g_links[i].used || !g_links[i].haveUdp) continue;
+        if (!worth_sending(g_localId, i, snap.seq)) continue;
+        udp_send(g_links[i].udpEndpoint,
+            {reinterpret_cast<const std::byte*>(&snap), sizeof(snap)});
+    }
 }
 
 uint32_t g_horseSeq = 0;
@@ -3468,6 +3551,7 @@ ModResult coop_mod_update(ModError*) {
     coop_stage("send");
     send_local_snapshot();
     send_local_midna();
+    send_local_companion();
     send_local_horse();
 
     flush_udp_links();

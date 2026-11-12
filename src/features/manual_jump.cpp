@@ -283,6 +283,10 @@ bool g_zSlotMidnaLeftTriggered = false;
 daAlink_c* g_midnaZTriggerOwner = nullptr;
 u8 g_midnaZTriggerPrevious = 0;
 
+bool z_slot_midna_left_triggered() {
+    return g_zSlotMidnaLeftTriggered;
+}
+
 void reset_manual_jump_input_state() {
     g_manualJumpPendingPress = false;
     g_manualJumpLeftStickWasHeld = false;

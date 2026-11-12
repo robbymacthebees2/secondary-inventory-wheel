@@ -44,6 +44,7 @@
 #include "net/messages.hpp"
 #include "net/protocol.hpp"
 #include "mod.hpp"
+#include "features/ma_fairy_companion.hpp"
 #include "res/Object/AlAnm.h"
 #include "res/Object/Alink.h"
 #include "res/Object/Wmdl.h"
@@ -65,6 +66,7 @@ extern const HookService* svc_hook;
 
 DEFINE_HOOK(&daAlink_c::execute, PuppetAlinkExecuteHook);
 DEFINE_HOOK(&daAlink_c::draw, PuppetAlinkDrawHook);
+DEFINE_HOOK(&daMidna_c::draw, CompanionMidnaDrawHook);
 
 DEFINE_HOOK_SYMBOL("dScnKy_env_light_c::exeKankyo", void(dScnKy_env_light_c*),
     PuppetKankyoExeHook);
@@ -204,21 +206,6 @@ struct PuppetAttachSlot {
     J3DModel* model = nullptr;
 
     u16 wireIdx = 0xFFFF;
-};
-
-struct MidnaTiredSave {
-    static const int kMax = 32;
-    struct Entry {
-        u16 mat;
-        u8 reg;
-        bool konst;
-        J3DGXColorS10 c;
-        J3DGXColor k;
-    };
-    Entry entries[kMax];
-    int count = 0;
-    bool saved = false;
-    bool applied = false;
 };
 
 struct PuppetRein {
@@ -361,8 +348,17 @@ struct Puppet {
     bool midnaActive = false;
     int midnaAge = 0;
 
+    CompanionSnapshot companion{};
+    bool companionActive = false;
+    int companionAge = 0;
+    uint32_t companionSeq = 0;
+    bool haveCompanionSeq = false;
+    J3DModel* companionFairyModel = nullptr;
+    mDoExt_bckAnm* midnaCompanionBck = nullptr;
+    u8* midnaCompanionBckBuffer = nullptr;
+    bool midnaCompanionAnimWarned = false;
+
     J3DModel* midnaSolid[4] = {};
-    MidnaTiredSave midnaTired[4];
     J3DModel* midnaShadow[5] = {};
 
     mDoExt_invisibleModel midnaInv[4];
@@ -527,6 +523,22 @@ void puppet_flush_pending_frees() {
 inline Puppet& pup() { return *s_pup; }
 
 uint8_t s_pupId = 0;
+daMidna_c* s_companionMidnaCallVisual = nullptr;
+f32 s_companionMidnaCallBlend = 0.0f;
+
+struct MidnaHairPoseCache {
+    daMidna_c* actor = nullptr;
+    J3DModel* body = nullptr;
+    bool valid = false;
+    Mtx relativeJoints[5];
+};
+
+MidnaHairPoseCache s_midnaHairPoseCache[2];
+bool s_midnaHairLastWolfForm = false;
+bool s_midnaHairWaitForHumanSettle = false;
+int s_midnaHairHumanStableFrames = 0;
+constexpr int kMidnaHairHumanSettleFrames = 30;
+void update_midna_hair_pose_state(daAlink_c* alink);
 
 struct PuppetScope {
     Puppet* saved;
@@ -751,16 +763,24 @@ const int kMidnaPartMask = 2;
 const int kMidnaPartHair = 3;
 const int kMidnaPartGokou = 4;
 
-const char* const kMidnaSolidFiles[4] = {"md.bmd", "md_hands.bmd", "md_mask.bmd",
-    "md_hair_hand.bmd"};
+const char* const kMidnaRegularArc = "Wmdl";
+const int kMidnaRegularRes[4] = {
+    dRes_INDEX_WMDL_BMD_MD_e,
+    dRes_INDEX_WMDL_BMD_MD_HANDS_e,
+    dRes_INDEX_WMDL_BMD_MD_MASK_e,
+    dRes_INDEX_WMDL_BMD_MD_HAIR_HAND_e,
+};
 
 const int kMidnaShadowRes[5] = {14, 7, 8, 15, 11};
 const char* const kMidnaArc = "Midna";
 
 const int kMidnaJntBackbone1 = 0x01;
 const int kMidnaJntHead = 0x04;
+const int kMidnaJntHair1 = 0x06;
+const int kMidnaJntHair5 = 0x0A;
 const int kMidnaJntHandL = 0x0F;
 const int kMidnaJntHandR = 0x13;
+const u16 kMidnaLeadWaitAnimationRes = 0x01CB;
 
 const int kMidnaStaleTicks = 20;
 
@@ -773,7 +793,6 @@ void release_midna_models() {
         pup().midnaInv[i].mModel = nullptr;
         pup().midnaInvReady[i] = false;
         puppet_free_later(pup().midnaSolid[i]);
-        pup().midnaTired[i] = MidnaTiredSave{};
     }
     for (int i = 0; i < 5; ++i) {
         puppet_free_later(pup().midnaShadow[i]);
@@ -820,13 +839,27 @@ void clear_installed_mtx_calc() {
 
 void retire_get_item_arc();
 
+void release_midna_companion_animation() {
+    if (pup().midnaCompanionBck != nullptr) {
+        JKR_DELETE(pup().midnaCompanionBck);
+        pup().midnaCompanionBck = nullptr;
+    }
+    if (pup().midnaCompanionBckBuffer != nullptr) {
+        JKRFreeToSysHeap(pup().midnaCompanionBckBuffer);
+        pup().midnaCompanionBckBuffer = nullptr;
+    }
+    pup().midnaCompanionAnimWarned = false;
+}
+
 void release_puppet_models_only() {
 
+    release_midna_companion_animation();
     release_midna_models();
     pup().midnaActive = false;
     J3DModel** const models[] = {
         &pup().model, &pup().faceModel, &pup().hatModel, &pup().handsModel,
         &pup().swordModel, &pup().sheathModel, &pup().shieldModel,
+        &pup().companionFairyModel,
     };
     for (J3DModel** m : models) puppet_free_later(*m);
     for (int i = 0; i < 2; ++i) puppet_free_later(pup().bootModels[i]);
@@ -864,6 +897,7 @@ void release_puppet_models_only() {
 void release_puppet() {
     if (pup().model == nullptr && pup().state == 0) return;
 
+    release_midna_companion_animation();
     release_midna_models();
     pup().midnaActive = false;
 
@@ -881,6 +915,7 @@ void release_puppet() {
     puppet_free_later(pup().swordModel);
     puppet_free_later(pup().sheathModel);
     puppet_free_later(pup().shieldModel);
+    puppet_free_later(pup().companionFairyModel);
     if (pup().shieldArc[0] != '\0') {
         private_arc_release(pup().shieldArc);
         pup().shieldArc[0] = '\0';
@@ -1874,6 +1909,7 @@ struct ShapeVisGuard {
 };
 
 bool shape_vis_force_show(J3DModel* model, ShapeVisGuard& guard);
+bool shape_vis_force_hide(J3DModel* model, ShapeVisGuard& guard);
 void shape_vis_restore(ShapeVisGuard& guard);
 void prep_equipment_model(J3DModel* model);
 
@@ -3915,6 +3951,7 @@ void on_alink_execute_puppet_post(ModContext*, void*, void*, void*) {
         return;
     }
 
+    update_midna_hair_pose_state(alink);
     if (release_puppets_for_link(alink)) return;
 
     for (int i = 0; i < kMaxPuppets; ++i) {
@@ -3928,6 +3965,9 @@ void update_one_puppet(daAlink_c* alink) {
 
     const int midnaStale = global_slot_present(s_pupId) ? 150 : kMidnaStaleTicks;
     if (pup().midnaActive && ++pup().midnaAge > midnaStale) pup().midnaActive = false;
+    if (pup().companionActive && ++pup().companionAge > midnaStale) {
+        pup().companionActive = false;
+    }
     if (pup().horseAge < (1 << 20)) ++pup().horseAge;
     net_clock_tick();
     horse_idle_tick();
@@ -4158,6 +4198,23 @@ void puppet_hook_on_midna_snapshot(uint8_t playerId, const MidnaSnapshot& snap) 
     pup().midna = snap;
     pup().midnaActive = snap.mode != kMidnaModeNone;
     pup().midnaAge = 0;
+}
+
+void puppet_hook_on_companion_snapshot(uint8_t playerId, const CompanionSnapshot& snap) {
+    if (playerId >= kMaxPuppets || playerId == coop_net_local_id()) return;
+    PuppetScope scope(playerId);
+    if (!pup().peerVisible) return;
+    if (pup().haveCompanionSeq &&
+        static_cast<int32_t>(snap.seq - pup().companionSeq) <= 0 &&
+        pup().companionSeq - snap.seq < 240)
+    {
+        return;
+    }
+    pup().haveCompanionSeq = true;
+    pup().companionSeq = snap.seq;
+    pup().companion = snap;
+    pup().companionActive = (snap.flags & kCompanionFlagActive) != 0;
+    pup().companionAge = 0;
 }
 
 void puppet_hook_on_network_snapshot(uint8_t playerId, float x, float y, float z, int16_t angleX,
@@ -4879,6 +4936,23 @@ bool shape_vis_force_show(J3DModel* model, ShapeVisGuard& guard) {
     return true;
 }
 
+bool shape_vis_force_hide(J3DModel* model, ShapeVisGuard& guard) {
+    if (model == nullptr) return false;
+    J3DModelData* modelData = model->getModelData();
+    if (modelData == nullptr || standin_owns_data(modelData)) return false;
+    const u16 num = modelData->getMaterialNum();
+    if (num > kMaxEquipShapes) return false;
+    guard.modelData = modelData;
+    guard.num = num;
+    for (u16 i = 0; i < num; ++i) {
+        J3DMaterial* mat = modelData->getMaterialNodePointer(i);
+        J3DShape* shp = (mat != nullptr) ? mat->getShape() : nullptr;
+        guard.wasHidden[i] = (shp != nullptr) && shp->checkFlag(J3DShpFlag_Visible);
+        if (shp != nullptr) shp->hide();
+    }
+    return true;
+}
+
 bool hand_index_is_body(u8 idx) { return idx != 0xFE && (idx & 0x80) != 0; }
 
 struct BodyHandGuard {
@@ -5434,29 +5508,34 @@ void warm_puppet_warp(daAlink_c* alink) {
     }
 }
 
-J3DModel* midna_model(int part, bool solid) {
-    if (solid) {
-        if (part >= 4) return nullptr;
-        if (pup().midnaSolid[part] == nullptr && !pup().midnaSolidFailed) {
+bool ensure_midna_solid_models() {
+    if (pup().midnaSolidFailed) return false;
+    if (loadObjectArchive(kMidnaRegularArc) != 0) return false;
 
-            if (pup().state != 2) return nullptr;
-            const cXyz unit(1.0f, 1.0f, 1.0f);
-            const char* arc = pup().heldArc;
-            for (int i = 0; i < 4; ++i) {
-                if (pup().midnaSolid[i] == nullptr) {
-                    pup().midnaSolid[i] = puppet_private_part(kMidnaSolidFiles[i], unit);
-                }
-            }
-            for (int i = 0; i < 4; ++i) {
-                if (pup().midnaSolid[i] == nullptr) {
-                    pup().midnaSolidFailed = true;
-                    coop_log::warn("coop_mod: [MIDNA] solid '{}' from '{}' failed, player {} solid form off",
-                        kMidnaSolidFiles[i], arc, static_cast<int>(s_pupId));
-                    break;
-                }
+    const cXyz unit(1.0f, 1.0f, 1.0f);
+    for (int i = 0; i < 4; ++i) {
+        if (pup().midnaSolid[i] == nullptr) {
+            pup().midnaSolid[i] = loadBmdFromArcIdx(kMidnaRegularArc, kMidnaRegularRes[i], unit);
+            if (pup().midnaSolid[i] == nullptr) {
+                pup().midnaSolidFailed = true;
+                coop_log::warn("coop_mod: [MIDNA] wolf-riding model part {} failed, regular form unavailable", i);
+                return false;
             }
         }
-        return pup().midnaSolidFailed ? nullptr : pup().midnaSolid[part];
+    }
+    J3DModelData* bodyData = pup().midnaSolid[kMidnaPartBody]->getModelData();
+    if (bodyData == nullptr || bodyData->getJointNum() != kMidnaJoints) {
+        pup().midnaSolidFailed = true;
+        coop_log::warn("coop_mod: [MIDNA] wolf-riding model skeleton mismatch; regular form unavailable");
+        return false;
+    }
+    return true;
+}
+
+J3DModel* midna_model(int part, bool solid) {
+    if (solid) {
+        if (part < 0 || part >= 4 || !ensure_midna_solid_models()) return nullptr;
+        return pup().midnaSolid[part];
     }
 
     if (part >= 5) return nullptr;
@@ -5570,12 +5649,12 @@ struct MidnaEyeAnmGuard {
     }
 };
 
-const Mtx* s_midnaPoseOverride[kMidnaJoints] = {};
+const Mtx* s_midnaPoseOverride[kPuppetMaxJoints] = {};
 
 int midna_pose_callback(J3DJoint* joint, int phase) {
     if (phase != 0) return 1;
     const u16 j = joint->getJntNo();
-    if (j >= kMidnaJoints || s_midnaPoseOverride[j] == nullptr) return 1;
+    if (j >= kPuppetMaxJoints || s_midnaPoseOverride[j] == nullptr) return 1;
     J3DModel* model = j3dSys.getModel();
     if (model == nullptr) return 1;
     Mtx m;
@@ -5585,171 +5664,117 @@ int midna_pose_callback(J3DJoint* joint, int phase) {
     return 1;
 }
 
-void midna_pose_ex(J3DModel* model, MtxP base, f32 scale, const Mtx* const* overrides) {
+void midna_pose_clear_callbacks(J3DModel* model) {
+    J3DModelData* data = model != nullptr ? model->getModelData() : nullptr;
+    if (data != nullptr) {
+        const u16 n = data->getJointNum() < kPuppetMaxJoints
+            ? data->getJointNum()
+            : kPuppetMaxJoints;
+        for (u16 i = 0; i < n; ++i) {
+            J3DJoint* joint = data->getJointNodePointer(i);
+            if (joint != nullptr && joint->getCallBack() == midna_pose_callback) {
+                joint->setCallBack(nullptr);
+            }
+        }
+    }
+    std::memset(s_midnaPoseOverride, 0, sizeof(s_midnaPoseOverride));
+}
+
+void midna_pose_ex(J3DModel* model, MtxP base, f32 scale,
+    const Mtx* const* overrides, u16 overrideCount, bool keepCallbacks = false) {
     model->setBaseScale(cXyz(scale, scale, scale));
     Mtx b;
     mDoMtx_copy(base, b);
     model->setBaseTRMtx(b);
     J3DModelData* data = model->getModelData();
-    const u16 n = data->getJointNum() < kMidnaJoints ? data->getJointNum() : kMidnaJoints;
-    bool any = false;
-    for (u16 j = 0; j < kMidnaJoints; ++j) {
-        s_midnaPoseOverride[j] = (overrides != nullptr && j < n) ? overrides[j] : nullptr;
-        if (s_midnaPoseOverride[j] != nullptr) any = true;
-    }
-    if (any) {
-        for (u16 j = 0; j < n; ++j) {
-            if (s_midnaPoseOverride[j] != nullptr) {
-                data->getJointNodePointer(j)->setCallBack(midna_pose_callback);
-            }
+    const u16 n = data->getJointNum() < kPuppetMaxJoints
+        ? data->getJointNum()
+        : kPuppetMaxJoints;
+    J3DJoint* callbackJoints[kPuppetMaxJoints] = {};
+    u16 callbackCount = 0;
+    std::memset(s_midnaPoseOverride, 0, sizeof(s_midnaPoseOverride));
+    for (u16 j = 0; j < kPuppetMaxJoints; ++j) {
+        if (overrides != nullptr && j < overrideCount) {
+            s_midnaPoseOverride[j] = overrides[j];
         }
+    }
+    for (u16 i = 0; i < n; ++i) {
+        J3DJoint* joint = data->getJointNodePointer(i);
+        if (joint == nullptr) continue;
+        const u16 jointNo = joint->getJntNo();
+        if (jointNo >= kPuppetMaxJoints || s_midnaPoseOverride[jointNo] == nullptr) continue;
+        joint->setCallBack(midna_pose_callback);
+        callbackJoints[callbackCount++] = joint;
     }
     model->calc();
-    if (any) {
-        for (u16 j = 0; j < n; ++j) {
-            if (s_midnaPoseOverride[j] != nullptr) data->getJointNodePointer(j)->setCallBack(nullptr);
-            s_midnaPoseOverride[j] = nullptr;
-        }
+    if (!keepCallbacks) {
+        for (u16 i = 0; i < callbackCount; ++i) callbackJoints[i]->setCallBack(nullptr);
+        std::memset(s_midnaPoseOverride, 0, sizeof(s_midnaPoseOverride));
     }
 }
 
-void midna_pose(J3DModel* model, MtxP base, f32 scale, const Mtx* joints) {
+void midna_pose(
+    J3DModel* model, MtxP base, f32 scale, const Mtx* joints, bool keepCallbacks = false) {
     if (joints == nullptr) {
-        midna_pose_ex(model, base, scale, nullptr);
+        midna_pose_ex(model, base, scale, nullptr, 0);
         return;
     }
-    const Mtx* ptrs[kMidnaJoints];
+    const Mtx* ptrs[kPuppetMaxJoints] = {};
     for (int j = 0; j < kMidnaJoints; ++j) ptrs[j] = &joints[j];
-    midna_pose_ex(model, base, scale, ptrs);
+    midna_pose_ex(model, base, scale, ptrs, kMidnaJoints, keepCallbacks);
 }
 
 void midna_pose_hands(J3DModel* hands, MtxP base, const Mtx joints[kMidnaJoints]) {
-    const Mtx* ptrs[kMidnaJoints] = {};
+    const Mtx* ptrs[kPuppetMaxJoints] = {};
     ptrs[1] = &joints[kMidnaJntHandL];
     ptrs[2] = &joints[kMidnaJntHandR];
-    midna_pose_ex(hands, base, 1.0f, ptrs);
+    midna_pose_ex(hands, base, 1.0f, ptrs, kMidnaJoints);
 }
 
-void midna_set_hair_colors(J3DModel* model, const MidnaSnapshot& snap, bool isHairhand) {
-    J3DModelData* data = model->getModelData();
-    if (data == nullptr) return;
-    J3DGXColorS10 c1;
-    c1.r = snap.hairColor[0];
-    c1.g = snap.hairColor[1];
-    c1.b = snap.hairColor[2];
-    c1.a = snap.hairColor[3];
-    J3DGXColor k1;
-    k1.r = snap.hairK1[0];
-    k1.g = snap.hairK1[1];
-    k1.b = snap.hairK1[2];
-    k1.a = snap.hairK1[3];
-    J3DGXColor k2;
-    k2.r = snap.hairK2[0];
-    k2.g = snap.hairK2[1];
-    k2.b = snap.hairK2[2];
-    k2.a = snap.hairK2[3];
-    if (isHairhand) {
-
-        const u16 n = data->getMaterialNum() < 3 ? data->getMaterialNum() : 3;
-        for (u16 i = 0; i < n; ++i) {
-            J3DMaterial* m = data->getMaterialNodePointer(i);
-            if (m == nullptr) continue;
-            m->setTevColor(1, &c1);
-            m->setTevKColor(1, &k1);
-            m->setTevKColor(2, &k2);
-        }
-    } else if (data->getMaterialNum() > 4) {
-
-        J3DMaterial* m = data->getMaterialNodePointer(4);
-        if (m != nullptr) {
-            m->setTevColor(1, &c1);
-            m->setTevKColor(1, &k1);
-        }
+void capture_midna_hair_pose(daMidna_c* midna, bool regular) {
+    if (midna == nullptr) return;
+    J3DModel* body = midna->mpShadowModel;
+    MidnaHairPoseCache& cache = s_midnaHairPoseCache[regular ? 1 : 0];
+    if (cache.actor != midna || cache.body != body) {
+        cache.actor = midna;
+        cache.body = body;
+        cache.valid = false;
     }
+    J3DModelData* bodyData = body != nullptr ? body->getModelData() : nullptr;
+    if (bodyData == nullptr || bodyData->getJointNum() <= kMidnaJntHair5) return;
+
+    Mtx inverseBody;
+    mDoMtx_inverse(body->getBaseTRMtx(), inverseBody);
+    for (int i = 0; i < 5; ++i) {
+        const int jointNo = kMidnaJntHair1 + i;
+        mDoMtx_concat(inverseBody, body->getAnmMtx(jointNo), cache.relativeJoints[i]);
+    }
+    cache.valid = true;
 }
 
-const int kMidnaTiredBrk[4] = {18, 20, 21, 19};
-
-void midna_apply_tired(J3DModel* model, int part, bool on) {
-    MidnaTiredSave& save = pup().midnaTired[part];
-    J3DModelData* data = model != nullptr ? model->getModelData() : nullptr;
-    if (data == nullptr) return;
-    if (!on) {
-        if (!save.applied) return;
-        for (int i = 0; i < save.count; ++i) {
-            const MidnaTiredSave::Entry& e = save.entries[i];
-            J3DMaterial* m = data->getMaterialNodePointer(e.mat);
-            if (m == nullptr) continue;
-            if (e.konst) {
-                m->setTevKColor(e.reg, &e.k);
-            } else {
-                m->setTevColor(e.reg, &e.c);
-            }
-        }
-        save.applied = false;
+void update_midna_hair_pose_state(daAlink_c* alink) {
+    if (alink == nullptr) return;
+    if (alink->checkWolf()) {
+        s_midnaHairLastWolfForm = true;
+        s_midnaHairWaitForHumanSettle = true;
+        s_midnaHairHumanStableFrames = 0;
         return;
     }
-    if (pup().heldArc[0] == 0) return;
-    auto* brk = static_cast<J3DAnmTevRegKey*>(dComIfG_getObjectRes(pup().heldArc, kMidnaTiredBrk[part]));
-    if (brk == nullptr) return;
-    const u16 matNum = data->getMaterialNum();
-    if (!save.saved) {
-        brk->searchUpdateMaterialID(data);
-        save.count = 0;
-        for (u16 i = 0; i < brk->getCRegUpdateMaterialNum() && save.count < MidnaTiredSave::kMax; ++i) {
-            const u16 id = brk->getCRegUpdateMaterialID(i);
-            const u8 reg = brk->getAnmCRegKeyTable()[i].mColorId;
-            J3DMaterial* m = id < matNum ? data->getMaterialNodePointer(id) : nullptr;
-            if (m == nullptr || reg >= 4 || m->getTevColor(reg) == nullptr) continue;
-            MidnaTiredSave::Entry& e = save.entries[save.count++];
-            e.mat = id;
-            e.reg = reg;
-            e.konst = false;
-            e.c = *m->getTevColor(reg);
-        }
-        for (u16 i = 0; i < brk->getKRegUpdateMaterialNum() && save.count < MidnaTiredSave::kMax; ++i) {
-            const u16 id = brk->getKRegUpdateMaterialID(i);
-            const u8 reg = brk->getAnmKRegKeyTable()[i].mColorId;
-            J3DMaterial* m = id < matNum ? data->getMaterialNodePointer(id) : nullptr;
-            if (m == nullptr || reg >= 4 || m->getTevKColor(reg) == nullptr) continue;
-            MidnaTiredSave::Entry& e = save.entries[save.count++];
-            e.mat = id;
-            e.reg = reg;
-            e.konst = true;
-            e.k = *m->getTevKColor(reg);
-        }
-        save.saved = true;
+
+    if (s_midnaHairLastWolfForm) {
+        s_midnaHairLastWolfForm = false;
+        s_midnaHairWaitForHumanSettle = true;
+        s_midnaHairHumanStableFrames = 0;
     }
-    brk->setFrame(1.0f);
-    for (u16 i = 0; i < brk->getCRegUpdateMaterialNum(); ++i) {
-        const u16 id = brk->getCRegUpdateMaterialID(i);
-        const u8 reg = brk->getAnmCRegKeyTable()[i].mColorId;
-        J3DMaterial* m = id < matNum ? data->getMaterialNodePointer(id) : nullptr;
-        if (m == nullptr || reg >= 4) continue;
-        GXColorS10 c;
-        brk->getTevColorReg(i, &c);
-        J3DGXColorS10 jc;
-        jc.r = c.r;
-        jc.g = c.g;
-        jc.b = c.b;
-        jc.a = c.a;
-        m->setTevColor(reg, &jc);
+    if (!s_midnaHairWaitForHumanSettle) return;
+    if (alink->mClothesChangeWaitTimer != 0) {
+        s_midnaHairHumanStableFrames = 0;
+        return;
     }
-    for (u16 i = 0; i < brk->getKRegUpdateMaterialNum(); ++i) {
-        const u16 id = brk->getKRegUpdateMaterialID(i);
-        const u8 reg = brk->getAnmKRegKeyTable()[i].mColorId;
-        J3DMaterial* m = id < matNum ? data->getMaterialNodePointer(id) : nullptr;
-        if (m == nullptr || reg >= 4) continue;
-        GXColor k;
-        brk->getTevKonstReg(i, &k);
-        J3DGXColor jk;
-        jk.r = k.r;
-        jk.g = k.g;
-        jk.b = k.b;
-        jk.a = k.a;
-        m->setTevKColor(reg, &jk);
+    if (++s_midnaHairHumanStableFrames >= kMidnaHairHumanSettleFrames) {
+        s_midnaHairWaitForHumanSettle = false;
+        s_midnaHairHumanStableFrames = 0;
     }
-    save.applied = true;
 }
 
 void draw_midna_solid(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
@@ -5761,14 +5786,11 @@ void draw_midna_solid(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
     if (body == nullptr || hands == nullptr || mask == nullptr || hair == nullptr) return;
 
     dKy_tevstr_c* tev = &alink->tevStr;
-    const bool tired = (snap.flags & kMidnaFlagTired) != 0;
 
     {
         PuppetGuard guard;
         if (puppet_guard_begin(body, guard)) {
-            midna_pose(body, base, snap.baseScale, joints);
-            midna_set_hair_colors(body, snap, false);
-            midna_apply_tired(body, kMidnaPartBody, tired);
+            midna_pose(body, base, snap.baseScale, joints, true);
             g_env_light.setLightTevColorType_MAJI(body, tev);
             MidnaShapeEdits vis;
 
@@ -5777,6 +5799,7 @@ void draw_midna_solid(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
             MidnaEyeAnmGuard eyes;
             eyes.begin(body);
             mDoExt_modelEntryDL(body);
+            midna_pose_clear_callbacks(body);
             eyes.end();
             vis.restore();
             puppet_guard_end(guard);
@@ -5787,7 +5810,6 @@ void draw_midna_solid(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
         PuppetGuard guard;
         if (puppet_guard_begin(hands, guard)) {
             midna_pose_hands(hands, base, joints);
-            midna_apply_tired(hands, kMidnaPartHands, tired);
             g_env_light.setLightTevColorType_MAJI(hands, tev);
             MidnaShapeEdits vis;
             const u16 n = hands->getModelData()->getMaterialNum() < 4
@@ -5810,8 +5832,6 @@ void draw_midna_solid(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
             Mtx world;
             mDoMtx_concat(base, rel, world);
             midna_pose(hair, world, 1.0f, nullptr);
-            midna_set_hair_colors(hair, snap, true);
-            midna_apply_tired(hair, kMidnaPartHair, tired);
             g_env_light.setLightTevColorType_MAJI(hair, tev);
             MidnaShapeEdits vis;
             for (u16 i = 0; i < 3; ++i) vis.set(hair, i, snap.hairShape == i);
@@ -5827,7 +5847,6 @@ void draw_midna_solid(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
             Mtx head;
             mDoMtx_copy(joints[kMidnaJntHead], head);
             midna_pose(mask, head, 1.0f, nullptr);
-            midna_apply_tired(mask, kMidnaPartMask, tired);
             g_env_light.setLightTevColorType_MAJI(mask, tev);
             mDoExt_modelEntryDL(mask);
             puppet_guard_end(guard);
@@ -5891,7 +5910,7 @@ void draw_midna_shadow(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
         PuppetGuard guard;
         if (!puppet_guard_begin(part.model, guard)) continue;
         if (part.posed) {
-            midna_pose(part.model, base, snap.baseScale, joints);
+            midna_pose(part.model, base, snap.baseScale, joints, true);
         } else if (part.model == mask) {
             Mtx head;
             mDoMtx_copy(joints[kMidnaJntHead], head);
@@ -5906,12 +5925,216 @@ void draw_midna_shadow(daAlink_c* alink, const MidnaSnapshot& snap, MtxP base,
             midna_pose(part.model, world, 1.0f, nullptr);
         }
         g_env_light.setLightTevColorType_MAJI(part.model, &tev);
-        pup().midnaInv[part.inv].entryDL(&key);
+        if (part.model == hair) {
+            MidnaShapeEdits vis;
+            for (u16 i = 0; i < 3; ++i) vis.set(hair, i, snap.hairShape == i);
+            pup().midnaInv[part.inv].entryDL(&key);
+            vis.restore();
+        } else {
+            pup().midnaInv[part.inv].entryDL(&key);
+        }
+        if (part.posed) midna_pose_clear_callbacks(part.model);
         puppet_guard_end(guard);
     }
 }
 
+void midna_companion_hair_joint_overrides(daMidna_c* midna, bool regular,
+    MtxP base, bool useNativePose, Mtx hairJointMatrices[kPuppetMaxJoints],
+    const Mtx* hairJointOverrides[kPuppetMaxJoints], u16& hairJointCount) {
+    hairJointCount = 0;
+    for (u16 j = 0; j < kPuppetMaxJoints; ++j) hairJointOverrides[j] = nullptr;
+    if (!useNativePose || midna == nullptr) return;
+
+    MidnaHairPoseCache& cache = s_midnaHairPoseCache[regular ? 1 : 0];
+    if (cache.actor != midna || !cache.valid) return;
+
+    for (int i = 0; i < 5; ++i) {
+        const u16 jointNo = static_cast<u16>(kMidnaJntHair1 + i);
+        mDoMtx_concat(base, cache.relativeJoints[i], hairJointMatrices[jointNo]);
+        hairJointOverrides[jointNo] = &hairJointMatrices[jointNo];
+    }
+    hairJointCount = kPuppetMaxJoints;
+}
+
+void midna_companion_set_hair_pose(daMidna_c* midna, bool regular, MtxP base,
+    const Mtx joints[kMidnaJoints], MidnaSnapshot& snap) {
+    Mtx hairWorld;
+    mDoMtx_stack_c::copy(joints[kMidnaJntHair5]);
+    mDoMtx_stack_c::transM(6.5f, 0.0f, 0.0f);
+    mDoMtx_copy(mDoMtx_stack_c::get(), hairWorld);
+    Mtx inverseBase;
+    mDoMtx_inverse(base, inverseBase);
+    Mtx hairRelative;
+    mDoMtx_concat(inverseBase, hairWorld, hairRelative);
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) snap.hairMtx[r * 4 + c] = hairRelative[r][c];
+    }
+
+    J3DModel* hair = midna != nullptr
+        ? (regular ? midna->mpHairhandBmd : midna->mpShadowHairhandBmd)
+        : nullptr;
+    J3DModel* targetHair = midna_model(kMidnaPartHair, regular);
+
+    J3DModelData* hairData = hair != nullptr ? hair->getModelData() : nullptr;
+    if (hairData != nullptr) {
+        const u16 materialCount = hairData->getMaterialNum() < 3 ? hairData->getMaterialNum() : 3;
+        u16 selected = 0;
+        for (u16 i = 0; i < materialCount; ++i) {
+            J3DMaterial* material = hairData->getMaterialNodePointer(i);
+            if (material != nullptr && material->getShape() != nullptr &&
+                !material->getShape()->checkFlag(J3DShpFlag_Visible))
+            {
+                selected = i;
+                break;
+            }
+        }
+        snap.hairShape = static_cast<u8>(selected);
+        J3DModelData* targetData =
+            targetHair != nullptr ? targetHair->getModelData() : nullptr;
+        JUTNameTab* sourceMaterialNames = hairData->getMaterialName();
+        JUTNameTab* targetMaterialNames =
+            targetData != nullptr ? targetData->getMaterialName() : nullptr;
+        if (sourceMaterialNames != nullptr && targetMaterialNames != nullptr &&
+            selected < hairData->getMaterialNum())
+        {
+            const char* selectedName = sourceMaterialNames->getName(selected);
+            if (selectedName != nullptr) {
+                const u16 targetCount = targetData->getMaterialNum() < 3
+                    ? targetData->getMaterialNum()
+                    : 3;
+                for (u16 i = 0; i < targetCount; ++i) {
+                    const char* name = targetMaterialNames->getName(i);
+                    if (name != nullptr && std::strcmp(name, selectedName) == 0) {
+                        snap.hairShape = static_cast<u8>(i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (midna != nullptr) {
+        snap.hairColor[0] = midna->field_0x6e0.r;
+        snap.hairColor[1] = midna->field_0x6e0.g;
+        snap.hairColor[2] = midna->field_0x6e0.b;
+        snap.hairColor[3] = midna->field_0x6e0.a;
+        snap.hairK1[0] = midna->field_0x6e8.r;
+        snap.hairK1[1] = midna->field_0x6e8.g;
+        snap.hairK1[2] = midna->field_0x6e8.b;
+        snap.hairK1[3] = midna->field_0x6e8.a;
+        snap.hairK2[0] = midna->field_0x6ec.r;
+        snap.hairK2[1] = midna->field_0x6ec.g;
+        snap.hairK2[2] = midna->field_0x6ec.b;
+        snap.hairK2[3] = midna->field_0x6ec.a;
+    }
+}
+
+bool midna_companion_pose(J3DModel* body, bool regular, MtxP base,
+    MidnaSnapshot& snap, Mtx joints[kMidnaJoints], bool useNativeHair,
+    Mtx hairJointMatrices[kPuppetMaxJoints],
+    const Mtx* hairJointOverrides[kPuppetMaxJoints], u16& hairJointCount) {
+    J3DModelData* data = body != nullptr ? body->getModelData() : nullptr;
+    if (data == nullptr || data->getJointNum() != kMidnaJoints) return false;
+    daMidna_c* midna = daPy_py_c::getMidnaActor();
+
+    if (pup().midnaCompanionBck == nullptr) {
+        JKRArchive* archive = dComIfGp_getAnmArchive();
+        u32 bufferSize = 0;
+        u8* buffer = archive != nullptr
+            ? read_alanm_resource(kMidnaLeadWaitAnimationRes, 0x20, &bufferSize)
+            : nullptr;
+        J3DAnmTransform* anm = buffer != nullptr && bufferSize >= 0x20
+            ? static_cast<J3DAnmTransform*>(J3DAnmLoaderDataBase::load(buffer))
+            : nullptr;
+        auto* bck = anm != nullptr ? JKR_NEW mDoExt_bckAnm() : nullptr;
+        if (bck != nullptr && bck->init(anm, TRUE, -1, 1.0f, 0, -1, false)) {
+            pup().midnaCompanionBck = bck;
+            pup().midnaCompanionBckBuffer = buffer;
+        } else {
+            if (bck != nullptr) JKR_DELETE(bck);
+            if (buffer != nullptr) JKRFreeToSysHeap(buffer);
+            if (!pup().midnaCompanionAnimWarned) {
+                coop_log::warn("coop_mod: [MIDNA] companion lead-wait animation unavailable; using bind pose");
+                pup().midnaCompanionAnimWarned = true;
+            }
+        }
+    }
+
+    PuppetGuard guard;
+    if (!puppet_guard_begin(body, guard)) return false;
+    midna_companion_hair_joint_overrides(
+        midna, regular, base, useNativeHair, hairJointMatrices,
+        hairJointOverrides, hairJointCount);
+    if (pup().midnaCompanionBck != nullptr) {
+        pup().midnaCompanionBck->play();
+        pup().midnaCompanionBck->entry(data);
+    }
+    midna_pose_ex(
+        body, base, 1.0f, hairJointOverrides, hairJointCount);
+    for (int j = 0; j < kMidnaJoints; ++j) {
+        mDoMtx_copy(body->getAnmMtx(j), joints[j]);
+    }
+    puppet_guard_end(guard);
+
+    midna_companion_set_hair_pose(midna, regular, base, joints, snap);
+    return true;
+}
+
+bool companion_midna_call_visual_active(daMidna_c* midna) {
+    if (midna == nullptr || !fairy_companion_midna_is_out()) {
+        s_companionMidnaCallVisual = nullptr;
+        s_companionMidnaCallBlend = 0.0f;
+        return false;
+    }
+
+    daAlink_c* alink = daAlink_getAlinkActorClass();
+    if (alink != nullptr && daPy_py_c::getMidnaActor() == midna &&
+        dComIfGp_event_runCheck() && fopAcM_getTalkEventPartner(alink) == midna)
+    {
+        s_companionMidnaCallVisual = midna;
+        return true;
+    }
+
+    s_companionMidnaCallVisual = nullptr;
+    return false;
+}
+
+bool companion_hides_wolf_riding_midna(daMidna_c* midna) {
+    if (midna == nullptr || !fairy_companion_midna_is_out()) return false;
+
+    daAlink_c* alink = daAlink_getAlinkActorClass();
+    return alink != nullptr && alink->checkWolf() &&
+        daPy_py_c::getMidnaActor() == midna &&
+        !midna->checkStateFlg0(daMidna_c::FLG0_WOLF_NO_POS);
+}
+
+HookAction suppress_native_midna_call_draw(
+    ModContext*, void* args, void*, void*) {
+    auto* midna = mods::arg<daMidna_c*>(args, 0);
+    return companion_midna_call_visual_active(midna) ||
+        companion_hides_wolf_riding_midna(midna)
+        ? HOOK_SKIP_ORIGINAL
+        : HOOK_CONTINUE;
+}
+
+void capture_native_midna_hair_pose_post(ModContext*, void* args, void*, void*) {
+    auto* midna = mods::arg<daMidna_c*>(args, 0);
+    daAlink_c* alink = daAlink_getAlinkActorClass();
+    if (midna == nullptr || !fairy_companion_midna_is_out() ||
+        alink == nullptr || alink->checkWolf() || alink->mClothesChangeWaitTimer != 0 ||
+        s_midnaHairWaitForHumanSettle ||
+        companion_midna_call_visual_active(midna) ||
+        companion_hides_wolf_riding_midna(midna) || s_companionMidnaCallBlend > 0.001f)
+    {
+        return;
+    }
+    capture_midna_hair_pose(midna, true);
+    capture_midna_hair_pose(midna, false);
+}
+
 void draw_puppet_midna(daAlink_c* alink) {
+    uint8_t localId = coop_net_local_id();
+    if (localId >= kMaxPuppets) localId = 0;
+    if (s_pupId == localId && fairy_companion_midna_is_out()) return;
     if (!pup().midnaActive || pup().model == nullptr) return;
     if (!features_puppet_midna()) return;
     const MidnaSnapshot& snap = pup().midna;
@@ -5955,6 +6178,123 @@ void draw_puppet_midna(daAlink_c* alink) {
     }
     j3dSys.setDrawBuffer(saved0, 0);
     j3dSys.setDrawBuffer(saved1, 1);
+}
+
+void draw_companion_midna(
+    daAlink_c* alink, float x, float y, float z, int16_t yaw, float scale,
+    bool regular, bool localCompanion) {
+    if (alink == nullptr || scale <= 0.001f) return;
+    J3DModel* body = midna_model(kMidnaPartBody, regular);
+    J3DModelData* data = body != nullptr ? body->getModelData() : nullptr;
+    if (data == nullptr || data->getJointNum() != kMidnaJoints) return;
+
+    Mtx base;
+    Mtx joints[kMidnaJoints];
+    Mtx hairJointMatrices[kPuppetMaxJoints];
+    const Mtx* hairJointOverrides[kPuppetMaxJoints] = {};
+    u16 hairJointCount = 0;
+    MidnaSnapshot snap{};
+    snap.flags = kMidnaFlagMask | kMidnaFlagHairhand;
+    snap.leftHand = 0xFE;
+    snap.rightHand = 0xFE;
+    snap.hairShape = 0;
+    snap.baseScale = 1.0f;
+    const bool callVisual = localCompanion &&
+        companion_midna_call_visual_active(daPy_py_c::getMidnaActor());
+    if (localCompanion) {
+        const f32 targetBlend = callVisual ? 1.0f : 0.0f;
+        s_companionMidnaCallBlend +=
+            (targetBlend - s_companionMidnaCallBlend) * 0.08f;
+        if (std::fabs(targetBlend - s_companionMidnaCallBlend) < 0.001f) {
+            s_companionMidnaCallBlend = targetBlend;
+        }
+    }
+
+    if (localCompanion && s_companionMidnaCallBlend > 0.001f) {
+        const f32 frontDistance = alink->checkWolf() ? 250.0f : 50.0f;
+        const s16 talkYaw = alink->shape_angle.y + 0x8000;
+        const f32 talkX =
+            alink->current.pos.x + frontDistance * cM_ssin(alink->shape_angle.y);
+        const f32 talkZ =
+            alink->current.pos.z + frontDistance * cM_scos(alink->shape_angle.y);
+        const f32 blend = s_companionMidnaCallBlend;
+        const f32 drawX = x + (talkX - x) * blend;
+        const f32 drawY = y + (alink->current.pos.y - y) * blend;
+        const f32 drawZ = z + (talkZ - z) * blend;
+        const s16 yawDelta = static_cast<s16>(talkYaw - yaw);
+        const s16 drawYaw =
+            static_cast<s16>(yaw + static_cast<s16>(yawDelta * blend));
+        mDoMtx_stack_c::transS(
+            drawX, drawY, drawZ);
+        mDoMtx_stack_c::YrotM(drawYaw);
+        mDoMtx_stack_c::scaleM(scale, scale, scale);
+        mDoMtx_copy(mDoMtx_stack_c::get(), base);
+        if (!midna_companion_pose(
+                body, regular, base, snap, joints, localCompanion,
+                hairJointMatrices, hairJointOverrides, hairJointCount))
+        {
+            return;
+        }
+    } else {
+        mDoMtx_stack_c::transS(x, y, z);
+        mDoMtx_stack_c::YrotM(yaw);
+        mDoMtx_stack_c::scaleM(scale, scale, scale);
+        mDoMtx_copy(mDoMtx_stack_c::get(), base);
+        if (!midna_companion_pose(
+                body, regular, base, snap, joints, localCompanion,
+                hairJointMatrices, hairJointOverrides, hairJointCount))
+        {
+            return;
+        }
+    }
+
+    J3DDrawBuffer* saved0 = j3dSys.getDrawBuffer(0);
+    J3DDrawBuffer* saved1 = j3dSys.getDrawBuffer(1);
+    dComIfGd_setListDark();
+    if (regular) {
+        draw_midna_solid(alink, snap, base, joints);
+    } else {
+        draw_midna_shadow(alink, snap, base, joints);
+    }
+    j3dSys.setDrawBuffer(saved0, 0);
+    j3dSys.setDrawBuffer(saved1, 1);
+}
+
+void draw_puppet_companion(daAlink_c* alink) {
+    const CompanionSnapshot& snap = pup().companion;
+    if (!pup().companionActive || !(snap.flags & kCompanionFlagActive) ||
+        snap.scale <= 0.001f)
+    {
+        return;
+    }
+
+    if (snap.appearance == FAIRY_APPEARANCE_MIDNA ||
+        snap.appearance == FAIRY_APPEARANCE_MIDNA_REGULAR) {
+        draw_companion_midna(
+            alink, snap.x, snap.y, snap.z, snap.yaw, snap.scale,
+            snap.appearance == FAIRY_APPEARANCE_MIDNA_REGULAR, false);
+        return;
+    }
+    if (snap.appearance != FAIRY_APPEARANCE_FAIRY) return;
+
+    if (pup().companionFairyModel == nullptr) {
+        auto* data = static_cast<J3DModelData*>(dComIfG_getObjectRes("Always", 0x21));
+        if (data == nullptr) return;
+        pup().companionFairyModel = coop_create_model(data, 0x80000, coop_model_diff_flags());
+        if (pup().companionFairyModel == nullptr) return;
+    }
+
+    mDoMtx_stack_c::transS(snap.x, snap.y, snap.z);
+    mDoMtx_stack_c::YrotM(snap.yaw);
+    mDoMtx_stack_c::scaleM(snap.scale, snap.scale, snap.scale);
+    Mtx base;
+    mDoMtx_copy(mDoMtx_stack_c::get(), base);
+
+    PuppetGuard guard;
+    if (!puppet_guard_begin(pup().companionFairyModel, guard)) return;
+    coop_apply_fairy_tint(pup().companionFairyModel, snap.color);
+    renderModelAtMtx(pup().companionFairyModel, base, nullptr);
+    puppet_guard_end(guard);
 }
 
 void horse_hist_push(const HorseSnapshot& snap) {
@@ -6771,6 +7111,7 @@ void draw_one_puppet(daAlink_c* alink) {
 
     if (asGanon) {
         draw_puppet_midna(alink);
+        draw_puppet_companion(alink);
         return;
     }
     if (pup().faceModel != nullptr) {
@@ -6853,12 +7194,35 @@ void draw_one_puppet(daAlink_c* alink) {
     }
 
     draw_puppet_midna(alink);
+    draw_puppet_companion(alink);
 
 }
 
+}
+
+void coop_draw_local_companion_midna(
+    float x, float y, float z, int16_t yaw, float scale, bool regular)
+{
+    if (!std::isfinite(scale) || scale <= 0.001f) return;
+    daAlink_c* alink = daAlink_getAlinkActorClass();
+    if (alink == nullptr) return;
+    uint8_t localId = coop_net_local_id();
+    if (localId >= kMaxPuppets) localId = 0;
+    PuppetScope scope(localId);
+    draw_companion_midna(alink, x, y, z, yaw, scale, regular, true);
 }
 
 void puppet_hook_init() {
+    s_companionMidnaCallVisual = nullptr;
+    s_companionMidnaCallBlend = 0.0f;
+    s_midnaHairLastWolfForm = false;
+    s_midnaHairWaitForHumanSettle = false;
+    s_midnaHairHumanStableFrames = 0;
+    for (MidnaHairPoseCache& cache : s_midnaHairPoseCache) {
+        cache.actor = nullptr;
+        cache.body = nullptr;
+        cache.valid = false;
+    }
 
     mods::hook::add_pre<PuppetAlinkExecuteHook>(
         [](ModContext*, void*, void*, void*) -> HookAction {
@@ -6871,6 +7235,12 @@ void puppet_hook_init() {
     const ModResult drawResult =
         mods::hook::add_post<PuppetAlinkDrawHook>(on_alink_draw_puppet_post);
     const ModResult kankyoResult = mods::hook::add_post<PuppetKankyoExeHook>(on_kankyo_exe_post);
+    const ModResult midnaDrawResult =
+        mods::hook::add_pre<CompanionMidnaDrawHook>(suppress_native_midna_call_draw);
+    const ModResult midnaHairPoseResult =
+        mods::hook::add_post<CompanionMidnaDrawHook>(capture_native_midna_hair_pose_post);
+    coop_log::info("coop_mod: [MIDNA] native hair pose cache hook: {}",
+        midnaHairPoseResult == MOD_OK ? "attached" : "FAILED - using hair attachment fallback");
 
     mods::hook::add_post<LocalAramBmdHook>(
         [](ModContext*, void* args, void* retval, void*) {
@@ -6989,6 +7359,8 @@ void puppet_hook_init() {
     coop_log::info("coop_mod: [DIAG] puppet_hook_init: execHook={} drawHook={} kankyoHook={}",
         static_cast<int>(execResult), static_cast<int>(drawResult),
         static_cast<int>(kankyoResult));
+    coop_log::info("coop_mod: [MIDNA] companion talk draw hook={}",
+        static_cast<int>(midnaDrawResult));
 }
 
 bool puppet_hook_sword_mtx(uint8_t playerId, float out[3][4], bool* master) {

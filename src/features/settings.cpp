@@ -7,18 +7,34 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     static const char* kHoverPlaneLowerBindingOptions[] = {"L1", "L2", "L3", "R1", "R2", "R3"};
     static const char* kFairyColorOptions[] = {
         "Navi (Blue)", "Tatl (Orange)", "Tael (Purple)", "Green"};
+    static const char* kFairyAppearanceOptions[] = {
+        "Fairy", "Midna (Shadow)", "Midna (Regular)"};
     static const char* kFairyToggleBindingOptions[] = {
         "A", "LB", "R", "R3", "L3", "R+A", "R+LB", "R+R3", "R+L3"};
     initialize_sit_music_options();
     UiControlDesc control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_DROPDOWN;
+    control.label = "Fairy Companion Appearance";
+    control.help_rml =
+        "Choose the companion model. Midna (Shadow) uses the shadow form; Midna (Regular) uses the full-color wolf-riding model.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_fairyCompanionAppearance;
+    control.options = kFairyAppearanceOptions;
+    control.option_count = sizeof(kFairyAppearanceOptions) / sizeof(kFairyAppearanceOptions[0]);
+    ModResult result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_DROPDOWN;
     control.label = "Fairy Companion Color";
-    control.help_rml = "Choose the color of the flying fairy companion.";
+    control.help_rml = "Choose the color used when the Fairy appearance is selected.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_fairyCompanionColor;
     control.options = kFairyColorOptions;
     control.option_count = sizeof(kFairyColorOptions) / sizeof(kFairyColorOptions[0]);
-    ModResult result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
     if (result != MOD_OK) {
         return result;
     }

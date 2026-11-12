@@ -291,6 +291,7 @@ ConfigVarHandle g_sitHealingEnabled = 0;
 ConfigVarHandle g_disableSpinnerSurfaceBounce = 0;
 ConfigVarHandle g_spinnerAttackAlwaysActive = 0;
 ConfigVarHandle g_fairyCompanionColor = 0;
+ConfigVarHandle g_fairyCompanionAppearance = 0;
 ConfigVarHandle g_fairyCompanionLight = 0;
 ConfigVarHandle g_fairyCompanionToggleBinding = 0;
 std::array<std::array<char, 48>, kSitMusicOptionCount> g_sitMusicOptionLabelStorage{};
@@ -509,6 +510,7 @@ JKRExpHeap* g_armosHammerWheelItemHeap = nullptr;
 
 void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
+bool z_slot_midna_left_triggered();
 void begin_deku_nut_use(daAlink_c* alink);
 void set_goron_tunic_active(bool active);
 namespace fire_arrows {
@@ -541,6 +543,37 @@ void update();
 #include "features/truth_mask.cpp"
 #include "features/goron_mask.cpp"
 #include "features/giant_mask.cpp"
+
+}
+
+bool coop_fairy_companion_network_state(FairyCompanionNetworkState* out) {
+    if (out == nullptr) return false;
+
+    *out = {};
+    out->appearance = maFairyCompanion_c::getSelectedAppearance();
+    out->color = maFairyCompanion_c::getSelectedColor();
+    out->active = s_fairyActorActive ? 1 : 0;
+    if (!s_fairyActorActive) return true;
+
+    auto* actor = static_cast<maFairyCompanion_c*>(fopAcM_SearchByID(s_fairyActorId));
+    if (actor == nullptr) {
+        out->active = 0;
+        return true;
+    }
+    out->x = actor->current.pos.x;
+    out->y = actor->current.pos.y;
+    out->z = actor->current.pos.z;
+    out->scale = actor->scale.x;
+    out->yaw = actor->shape_angle.y;
+    out->room = fopAcM_GetRoomNo(actor);
+    return true;
+}
+
+void coop_apply_fairy_tint(J3DModel* model, uint8_t color) {
+    maFairyCompanion_c::applyFairyTint(model, color);
+}
+
+namespace {
 
 using manual_glider_visual::ManualGliderCarrierDraw;
 using manual_glider_visual::ManualGliderDrawHand;
@@ -1503,4 +1536,16 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     svc_log->info(mod_ctx, "secondary inventory wheel unloaded");
     return coopResult;
 }
+}
+
+bool fairy_companion_midna_is_out() {
+    const u8 appearance = maFairyCompanion_c::getSelectedAppearance();
+    return maFairyCompanion_c::isCalled() &&
+        (appearance == FAIRY_APPEARANCE_MIDNA ||
+            appearance == FAIRY_APPEARANCE_MIDNA_REGULAR);
+}
+
+bool fairy_companion_midna_is_regular() {
+    return maFairyCompanion_c::getSelectedAppearance() ==
+        FAIRY_APPEARANCE_MIDNA_REGULAR;
 }

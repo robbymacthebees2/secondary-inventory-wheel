@@ -42,6 +42,7 @@ enum GlobalType : uint8_t {
     kGlobalParticles = 9,
     kGlobalPvpHit = 10,
     kGlobalVoice = 11,
+    kGlobalCompanion = 12,
 };
 
 const uint64_t kPunchForMs = 10000;
@@ -99,6 +100,9 @@ struct Peer {
     uint32_t lastMidnaTick = 0;
     uint32_t lastMidnaSeq = 0;
     bool haveMidnaSeq = false;
+    uint32_t lastCompanionTick = 0;
+    uint32_t lastCompanionSeq = 0;
+    bool haveCompanionSeq = false;
 
     bool pvp = false;
     bool hidden = false;
@@ -463,7 +467,8 @@ void on_sealed(int slot, const uint8_t* data, size_t size) {
     const size_t len = size - 1;
     Peer& p = s_peers[slot];
 
-    if (p.hidden && (type == kGlobalMidna || type == kGlobalSounds || type == kGlobalParticles)) return;
+    if (p.hidden && (type == kGlobalMidna || type == kGlobalCompanion ||
+                     type == kGlobalSounds || type == kGlobalParticles)) return;
     switch (type) {
     case kGlobalPresence: {
         if (len != sizeof(MsgPresence)) return;
@@ -562,6 +567,31 @@ void on_sealed(int slot, const uint8_t* data, size_t size) {
         p.lastMidnaSeq = m.seq;
         m.playerId = static_cast<uint8_t>(slot);
         puppet_hook_on_midna_snapshot(static_cast<uint8_t>(slot), m);
+        break;
+    }
+    case kGlobalCompanion: {
+        if (len != sizeof(CompanionSnapshot)) return;
+        CompanionSnapshot c;
+        std::memcpy(&c, payload, sizeof(c));
+        if (c.magic != kCompanionSnapshotMagic ||
+            (c.flags & ~kCompanionFlagActive) != 0 ||
+            c.appearance > kCompanionAppearanceMax || c.color > 3 ||
+            !sane_float(c.x, 1000000.0f) || !sane_float(c.y, 1000000.0f) ||
+            !sane_float(c.z, 1000000.0f) || !sane_float(c.scale, 1.5f) ||
+            c.scale < 0.0f)
+        {
+            return;
+        }
+        if (p.haveCompanionSeq &&
+            static_cast<int32_t>(c.seq - p.lastCompanionSeq) <= 0 &&
+            p.lastCompanionSeq - c.seq < 240)
+        {
+            return;
+        }
+        p.haveCompanionSeq = true;
+        p.lastCompanionSeq = c.seq;
+        c.playerId = static_cast<uint8_t>(slot);
+        puppet_hook_on_companion_snapshot(static_cast<uint8_t>(slot), c);
         break;
     }
     case kGlobalSounds: {
@@ -1249,6 +1279,18 @@ void global_send_midna(const MidnaSnapshot& snap) {
         if (every > 2 && s_tick - p.lastMidnaTick < static_cast<uint32_t>(every)) continue;
         p.lastMidnaTick = s_tick;
         send_to(p, kGlobalMidna, &snap, sizeof(snap));
+    }
+}
+
+void global_send_companion(const CompanionSnapshot& snap) {
+    if (s_phase != Phase::Live) return;
+    for (int i = 1; i < kCoopMaxPlayers; ++i) {
+        Peer& p = s_peers[i];
+        if (!p.reached) continue;
+        const int every = send_interval(p, snap.x, snap.y, snap.z, snap.room);
+        if (every > 2 && s_tick - p.lastCompanionTick < static_cast<uint32_t>(every)) continue;
+        p.lastCompanionTick = s_tick;
+        send_to(p, kGlobalCompanion, &snap, sizeof(snap));
     }
 }
 

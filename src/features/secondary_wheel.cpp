@@ -1210,6 +1210,10 @@ HookAction remap_down_trigger(ModContext*, void*, void* retval, void*) {
 }
 
 HookAction remap_left_trigger(ModContext*, void*, void* retval, void*) {
+    if (z_slot_midna_left_triggered() && g_mapInputDepth > 0) {
+        *static_cast<BOOL*>(retval) = false;
+        return HOOK_SKIP_ORIGINAL;
+    }
     if (mapOpensDown() && g_keyWaitDepth > 0) {
         *static_cast<BOOL*>(retval) = false;
         return HOOK_SKIP_ORIGINAL;

@@ -11,6 +11,23 @@
 #include <string>
 #include <vector>
 
+class J3DModel;
+
+struct FairyCompanionNetworkState {
+    uint8_t active;
+    uint8_t appearance;
+    uint8_t color;
+    int8_t room;
+    float x;
+    float y;
+    float z;
+    float scale;
+    int16_t yaw;
+};
+
+bool coop_fairy_companion_network_state(FairyCompanionNetworkState* out);
+void coop_apply_fairy_tint(J3DModel* model, uint8_t color);
+
 extern "C" {
 ModResult coop_mod_initialize(ModError* error);
 ModResult coop_mod_update(ModError* error);
@@ -24,6 +41,8 @@ bool wheel_is_sit_seated();
 bool wheel_is_shield_surf_board(daAlink_c* alink, fopAc_ac_c* ride);
 bool wheel_is_armos_hammer_active();
 void features_draw_remote_armos_hammer(uint8_t playerId, const float matrix[12]);
+void coop_draw_local_companion_midna(
+    float x, float y, float z, int16_t yaw, float scale, bool regular);
 
 bool coop_net_connected();
 bool coop_net_connecting();
@@ -940,13 +959,16 @@ bool global_slot_position(uint8_t slot, float* x, float* y, float* z, int8_t* ro
 std::string global_slot_tag(uint8_t slot);
 struct HorseSnapshot;
 struct MidnaSnapshot;
+struct CompanionSnapshot;
 void global_send_horse(const HorseSnapshot& snap);
 void global_send_midna(const MidnaSnapshot& snap);
+void global_send_companion(const CompanionSnapshot& snap);
 struct MsgParticleEntry;
 void global_send_sounds(const uint8_t* payload, size_t size);
 void global_send_particles(const MsgParticleEntry* entries, int count);
 void puppet_hook_on_horse_snapshot(uint8_t playerId, const HorseSnapshot& snap);
 void puppet_hook_on_midna_snapshot(uint8_t playerId, const MidnaSnapshot& snap);
+void puppet_hook_on_companion_snapshot(uint8_t playerId, const CompanionSnapshot& snap);
 
 bool coop_global_udp_open(int* port);
 void coop_global_udp_close();

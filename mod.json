@@ -1,7 +1,7 @@
 {
   "id": "dev.twilitrealm.secondary_inventory_wheel",
   "name": "Secondary Inventory Wheel",
-  "version": "3.0.42",
+  "version": "3.1.1",
   "author": "RobinTheSoundsmith",
   "description": "Adds a secondary inventory wheel with custom items, co-op, bow aiming, a flying fairy companion, and more."
 }
