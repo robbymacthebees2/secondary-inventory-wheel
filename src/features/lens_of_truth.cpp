@@ -1,9 +1,13 @@
 struct LensPoeState {
     fpc_ProcID actorId = fpcM_ERROR_PROCESS_ID_e;
     decltype(e_po_class::field_0x5F4) originalAlpha{};
+    std::array<u32, 3> addedTargetAttackTypes{};
     bool originallyBattleTargetable = false;
     bool active = false;
 };
+
+constexpr u32 kPoeHumanAttackTypeMask =
+    ~static_cast<u32>(AT_TYPE_WOLF_ATTACK);
 
 std::array<LensPoeState, 32> g_lensPoeStates{};
 bool g_lensVisionActivated = false;
@@ -37,6 +41,14 @@ LensPoeState* capture_lens_poe_state(e_po_class* poe) {
         }
         state.actorId = actorId;
         state.originalAlpha = poe->field_0x5F4;
+        const std::array<u32, 3> originalTargetTypes = {
+            static_cast<u32>(poe->mCyl.GetTgType()),
+            static_cast<u32>(poe->mSph.GetTgType()),
+            static_cast<u32>(poe->mSph2.GetTgType())};
+        for (size_t i = 0; i < originalTargetTypes.size(); ++i) {
+            state.addedTargetAttackTypes[i] =
+                kPoeHumanAttackTypeMask & ~originalTargetTypes[i];
+        }
         state.originallyBattleTargetable =
             (poe->enemy.attention_info.flags & fopAc_AttnFlag_BATTLE_e) != 0;
         state.active = true;
@@ -46,11 +58,23 @@ LensPoeState* capture_lens_poe_state(e_po_class* poe) {
     return nullptr;
 }
 
+void allow_human_attacks_on_poe(e_po_class* poe) {
+    poe->mCyl.SetTgType(poe->mCyl.GetTgType() | kPoeHumanAttackTypeMask);
+    poe->mSph.SetTgType(poe->mSph.GetTgType() | kPoeHumanAttackTypeMask);
+    poe->mSph2.SetTgType(poe->mSph2.GetTgType() | kPoeHumanAttackTypeMask);
+}
+
 void restore_lens_poe_state(LensPoeState& state) {
     auto* actor = fopAcM_SearchByID(state.actorId);
     if (actor != nullptr && fopAcM_GetName(actor) == fpcNm_E_PO_e) {
         auto* poe = reinterpret_cast<e_po_class*>(actor);
         poe->field_0x5F4 = state.originalAlpha;
+        poe->mCyl.SetTgType(
+            poe->mCyl.GetTgType() & ~state.addedTargetAttackTypes[0]);
+        poe->mSph.SetTgType(
+            poe->mSph.GetTgType() & ~state.addedTargetAttackTypes[1]);
+        poe->mSph2.SetTgType(
+            poe->mSph2.GetTgType() & ~state.addedTargetAttackTypes[2]);
         if (state.originallyBattleTargetable) {
             poe->enemy.attention_info.flags |= fopAc_AttnFlag_BATTLE_e;
         } else {
@@ -67,6 +91,7 @@ void reveal_lens_poe(e_po_class* poe) {
 
     poe->field_0x5F4 = 315;
     poe->enemy.attention_info.flags |= fopAc_AttnFlag_BATTLE_e;
+    allow_human_attacks_on_poe(poe);
 }
 
 HookAction prepare_lens_poe_execute(ModContext*, void* args, void*, void*) {
@@ -117,6 +142,7 @@ void reveal_lens_poe_after_execute(ModContext*, void* args, void*, void*) {
     {
         poe->field_0x5F4 = 315;
         poe->enemy.attention_info.flags |= fopAc_AttnFlag_BATTLE_e;
+        allow_human_attacks_on_poe(poe);
     }
 }
 

@@ -1632,6 +1632,9 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     const u8 itemId = secondaryItemIdForSlot(g_secondarySelectedItems[button]);
     g_secondaryItemInputHandled = true;
     switch (itemId) {
+    case kIceLeafItemId:
+        request_ice_leaf_toggle(alink);
+        break;
     case kSitItemId:
         if (g_sitActionState == SitActionState::Inactive) {
             request_sit_action(alink);

@@ -460,6 +460,50 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     }
 
     control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Flurry Rush";
+    control.help_rml =
+        "While locked onto an enemy, a close dodge during an incoming attack triggers a "
+        "three-second slow-motion window. Link is protected during the dodge and can close "
+        "to melee range by starting a sword attack.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_flurryRushEnabled;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Bullet Time Arrow Damage";
+    control.help_rml =
+        "Set Link's arrow damage while Bullet Time is active. The default is 100%; "
+        "fractional damage is rounded up. Set to 0% to disable arrow damage.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_bulletTimeArrowDamageMultiplier;
+    control.min = kBulletTimeArrowDamageMinPercent;
+    control.max = kBulletTimeArrowDamageMaxPercent;
+    control.step = 1;
+    control.suffix = "%";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "OOT Style Hearts";
+    control.help_rml =
+        "Replace the heart-meter textures with the optional OOT Style Hearts texture set. "
+        "The original textures are restored when this option is turned off.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_ootStyleHeartsEnabled;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_DROPDOWN;
     control.label = "Music while sitting";
     control.help_rml =
@@ -571,6 +615,19 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Sword put-away flourish";
+    control.help_rml =
+        "Use the game's sword-unequip flourish whenever Link puts away a drawn sword. "
+        "Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_swordFlourishEnabled;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
     control.label = "Disable Spinner surface bouncing";
     control.help_rml =
         "When enabled, the Spinner slides along walls and steep surfaces instead of reflecting "
@@ -636,6 +693,10 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
         return result;
     }
 
+    result = enemy_spawner::add_settings(panel);
+    if (result != MOD_OK) {
+        return result;
+    }
     return fire_arrows::add_settings(panel);
 }
 
@@ -701,6 +762,9 @@ void open_combined_credits(ModContext* ctx, void*) {
         "included in the package)</p>"
         "<p>Bow aiming and selective Bullet Time based on Dawnlight by BeZide93 (CC0 1.0; "
         "license included in the package)</p>"
+        "<p>Flurry Rush and enemy spawner features based on Dawnlight by BeZide93 (CC0 1.0; "
+        "license included in the package)</p>"
+        "<p>OOT Style Hearts textures by HugAMuffin, included with permission.</p>"
         "<p>Fairy companion follow, color, and light features ported from Fairy Companion by "
         "AgustinFuac with permission; fairy abilities are omitted.</p>"
         "<p>Dawnlight Custom Glider texture by BeZide, used with permission.</p>"

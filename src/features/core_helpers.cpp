@@ -359,6 +359,9 @@ u8 shield_surf_display_item() {
 }
 
 u8 secondaryItemIdForSlot(u8 slotId) {
+    if (slotId == kIceLeafSlot) {
+        return kIceLeafItemId;
+    }
     if (slotId == kShieldSurfSlot) {
         return kShieldSurfItemId;
     }
@@ -379,6 +382,9 @@ u8 secondaryItemIdForSlot(u8 slotId) {
 }
 
 u8 secondaryDisplayItemForId(u8 itemId) {
+    if (itemId == kIceLeafItemId) {
+        return dItemNo_WOOD_STICK_e;
+    }
     if (itemId == kShieldSurfItemId) {
         return shield_surf_display_item();
     }
@@ -415,6 +421,9 @@ bool isHawkGrassSlot(u8 slotId) {
 }
 
 SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
+    if (slotId == kIceLeafSlot) {
+        return SecondaryIconContext::IceLeaf;
+    }
     if (slotId == kSitSlot) {
         return SecondaryIconContext::Sit;
     }
@@ -585,6 +594,9 @@ void update_ice_keese_resource() {
 }
 
 const char* secondaryItemNameForSlot(u8 slotId) {
+    if (slotId == kIceLeafSlot) {
+        return "Ice Leaf";
+    }
     if (slotId == kShieldSurfSlot) {
         return "Shield Surf";
     }
@@ -839,7 +851,8 @@ u8 selected_item_for_button(int button) {
 }
 
 bool isValidSecondaryAssignment(int64_t slotId) {
-    return slotId == dItemNo_NONE_e || slotId == kShieldSurfSlot ||
+    return slotId == dItemNo_NONE_e || slotId == kIceLeafSlot ||
+           slotId == kShieldSurfSlot ||
            slotId == kSitSlot || slotId == kGoronTunicSlot ||
            (slotId >= kSecondarySlotBase &&
             slotId < kSecondarySlotBase + MAX_ITEM_SLOTS);

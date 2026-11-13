@@ -61,6 +61,18 @@ void clear_sit_wheel_texture() {
     g_sitWheelItemHeap = nullptr;
 }
 
+void clear_ice_leaf_wheel_texture() {
+    if (g_iceLeafWheelItemTex != nullptr) {
+        JKR_DELETE(g_iceLeafWheelItemTex);
+        g_iceLeafWheelItemTex = nullptr;
+    }
+    if (g_iceLeafWheelItemHeap != nullptr && g_iceLeafWheelItemBuf != nullptr) {
+        g_iceLeafWheelItemHeap->free(g_iceLeafWheelItemBuf);
+    }
+    g_iceLeafWheelItemBuf = nullptr;
+    g_iceLeafWheelItemHeap = nullptr;
+}
+
 void clear_lens_of_truth_wheel_texture() {
     if (g_lensOfTruthWheelItemTex != nullptr) {
         JKR_DELETE(g_lensOfTruthWheelItemTex);
@@ -335,6 +347,46 @@ void load_sit_wheel_texture(dMenu_Ring_c* ring) {
     g_sitWheelItemTex->setBasePosition(J2DBasePosition_4);
 }
 
+void load_ice_leaf_wheel_texture(dMenu_Ring_c* ring) {
+    clear_ice_leaf_wheel_texture();
+    ResourceBuffer icon = RESOURCE_BUFFER_INIT;
+    const ModResult result =
+        svc_resource->load(mod_ctx, kIceLeafIconResource, &icon);
+    if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
+        svc_log->error(mod_ctx, "failed to load the Ice Leaf wheel icon");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    if (icon.size < sizeof(ResTIMG) || icon.size > kItemTextureBufferSize) {
+        svc_log->error(mod_ctx, "Ice Leaf wheel icon has an invalid texture size");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+
+    g_iceLeafWheelItemHeap = ring->mpHeap;
+    g_iceLeafWheelItemBuf = static_cast<ResTIMG*>(
+        g_iceLeafWheelItemHeap->alloc(kItemTextureBufferSize, 0x20));
+    if (g_iceLeafWheelItemBuf == nullptr) {
+        g_iceLeafWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to allocate the Ice Leaf wheel icon buffer");
+        svc_resource->free(mod_ctx, &icon);
+        return;
+    }
+    std::memcpy(g_iceLeafWheelItemBuf, icon.data, icon.size);
+    svc_resource->free(mod_ctx, &icon);
+    DCStoreRangeNoSync(g_iceLeafWheelItemBuf, kItemTextureBufferSize);
+
+    g_iceLeafWheelItemTex = JKR_NEW J2DPicture(g_iceLeafWheelItemBuf);
+    if (g_iceLeafWheelItemTex == nullptr) {
+        g_iceLeafWheelItemHeap->free(g_iceLeafWheelItemBuf);
+        g_iceLeafWheelItemBuf = nullptr;
+        g_iceLeafWheelItemHeap = nullptr;
+        svc_log->error(mod_ctx, "failed to create the Ice Leaf wheel icon picture");
+        return;
+    }
+    g_iceLeafWheelItemTex->setBasePosition(J2DBasePosition_4);
+}
+
 void load_shield_surf_wheel_textures(dMenu_Ring_c* ring) {
     clear_shield_surf_wheel_textures();
     g_shieldSurfWheelItemHeap = ring->mpHeap;
@@ -397,9 +449,10 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
     for (u8 slot = 0; slot < MAX_ITEM_SLOTS; ++slot) {
         g_secondaryWheelSlotIds[slot] = kSecondarySlotBase + slot;
     }
-    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS] = kShieldSurfSlot;
-    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 1] = kSitSlot;
-    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 2] = kGoronTunicSlot;
+    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS] = kIceLeafSlot;
+    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 1] = kShieldSurfSlot;
+    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 2] = kSitSlot;
+    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 3] = kGoronTunicSlot;
 
     ring->mItemsTotal = MAX_ITEM_SLOTS;
     ring->mTotalItemTexToAlloc = MAX_ITEM_SLOTS;
@@ -525,6 +578,7 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
         ring->mItemSlotParam2[index] =
             ring->mpItemBuf[index][0]->height / 48.0f * scale * kSecondaryIconScale;
     }
+    load_ice_leaf_wheel_texture(ring);
     load_shield_surf_wheel_textures(ring);
     load_sit_wheel_texture(ring);
     load_lens_of_truth_wheel_texture(ring);
@@ -993,6 +1047,17 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
         const f32 x = g_secondaryWheelSlotPosX[index] - 24.0f + pose.centerX;
         const f32 y = g_secondaryWheelSlotPosY[index] - 24.0f + pose.centerY;
         if (index == MAX_ITEM_SLOTS) {
+            if (g_iceLeafWheelItemTex != nullptr) {
+                constexpr f32 iconSize = 36.0f;
+                g_iceLeafWheelItemTex->setAlpha(pose.alpha * 255.0f);
+                g_iceLeafWheelItemTex->draw(
+                    x + (48.0f - iconSize) * 0.5f,
+                    y + (48.0f - iconSize) * 0.5f,
+                    iconSize, iconSize, 0, 0, 0);
+            }
+            continue;
+        }
+        if (index == MAX_ITEM_SLOTS + 1) {
             if (g_shieldSurfWheelItemBuf[0] != nullptr) {
                 const u8 shieldItem = shield_surf_display_item();
                 const f32 scale =
@@ -1010,7 +1075,7 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
             }
             continue;
         }
-        if (index == MAX_ITEM_SLOTS + 1) {
+        if (index == MAX_ITEM_SLOTS + 2) {
             if (g_sitWheelItemTex != nullptr) {
                 constexpr f32 iconSize = 36.0f;
                 g_sitWheelItemTex->setAlpha(pose.alpha * 255.0f);
@@ -1021,7 +1086,7 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
                 continue;
             }
         }
-        if (index == MAX_ITEM_SLOTS + 2) {
+        if (index == MAX_ITEM_SLOTS + 3) {
             if (g_tunicWheelItemBuf[0] == nullptr) {
                 continue;
             }
@@ -1260,6 +1325,7 @@ HookAction prepare_ring_delete(ModContext*, void* args, void*, void*) {
     g_deletingSecondaryRing = isSecondaryRing(window->mpMenuRing);
     if (g_deletingSecondaryRing) {
         forget_secondary_ring_pose(window->mpMenuRing);
+        clear_ice_leaf_wheel_texture();
         clear_shield_surf_wheel_textures();
         clear_sit_wheel_texture();
         clear_lens_of_truth_wheel_texture();
@@ -1538,7 +1604,8 @@ void count_z_item_as_assigned(ModContext*, void* args, void* retval, void*) {
 }
 
 void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
-    if ((g_secondaryIconContext != SecondaryIconContext::Sit &&
+    if ((g_secondaryIconContext != SecondaryIconContext::IceLeaf &&
+         g_secondaryIconContext != SecondaryIconContext::Sit &&
          g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
          g_secondaryIconContext != SecondaryIconContext::DarkLink &&
          g_secondaryIconContext != SecondaryIconContext::IceArrow &&
@@ -1609,6 +1676,8 @@ void finish_secondary_equip_icon(ModContext*, void*, void*, void*) {
 
 const char* secondary_custom_icon_resource(SecondaryIconContext context) {
     switch (context) {
+    case SecondaryIconContext::IceLeaf:
+        return kIceLeafIconResource;
     case SecondaryIconContext::Sit:
         return kSitIconResource;
     case SecondaryIconContext::IceArrow:
@@ -1653,6 +1722,7 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
     if (g_secondaryIconContext != SecondaryIconContext::Sit &&
+        g_secondaryIconContext != SecondaryIconContext::IceLeaf &&
         g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
         g_secondaryIconContext != SecondaryIconContext::DarkLink &&
         g_secondaryIconContext != SecondaryIconContext::IceArrow &&

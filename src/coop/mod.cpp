@@ -2153,8 +2153,14 @@ void send_local_snapshot() {
                 if (shieldSurf) {
                     Mtx inv;
                     Mtx local;
+                    mDoMtx_stack_c::copy(board->mpModel->getBaseTRMtx());
+                    mDoMtx_stack_c::XrotM(0x4000);
+                    mDoMtx_stack_c::ZrotM(0x8000);
+                    Mtx surfMatrix;
+                    MTXCopy(mDoMtx_stack_c::get(), surfMatrix);
+                    surfMatrix[1][3] += 15.0f;
                     mDoMtx_inverse(alink->mpLinkModel->getBaseTRMtx(), inv);
-                    mDoMtx_concat(inv, board->mpModel->getBaseTRMtx(), local);
+                    mDoMtx_concat(inv, surfMatrix, local);
                     for (int r = 0; r < 3; ++r) {
                         for (int c = 0; c < 4; ++c) {
                             snapshot.shieldSurfMtx[r * 4 + c] = local[r][c];

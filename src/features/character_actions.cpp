@@ -1,3 +1,21 @@
+DEFINE_HOOK(
+    &daAlink_c::checkItemChangeFromButton, SwordFlourishItemChange);
+
+HookAction enable_sword_putaway_flourish(ModContext*, void* args, void*, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (!get_bool_option(g_swordFlourishEnabled, false) || alink == nullptr ||
+        alink->checkWolf() || alink->checkEventRun() || !alink->checkSwordDraw() ||
+        alink->checkWoodSwordEquip() || alink->checkModeFlg(0x402))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    if (alink->mSwordFlourishTimer == 0) {
+        alink->mSwordFlourishTimer = 1;
+    }
+    return HOOK_CONTINUE;
+}
+
 HookAction handle_hover_boots_heavy_toggle(ModContext*, void* args, void* retval, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     if (alink == nullptr || !g_hoverBootsTransitionPending ||

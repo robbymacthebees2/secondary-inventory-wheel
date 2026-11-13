@@ -7,6 +7,7 @@
 #include "mods/svc/log.h"
 #include "mods/svc/resource.h"
 #include "mods/svc/save.h"
+#include "mods/svc/texture.h"
 #include "mods/svc/ui.h"
 #include "coop/mod.hpp"
 #include "twilit_essentials/stamina.h"
@@ -33,6 +34,7 @@
 #include "d/actor/d_a_ni.h"
 #include "d/actor/d_a_obj_glowSphere.h"
 #include "d/actor/d_a_spinner.h"
+#include "d/actor/d_a_e_zs.h"
 #include "d/actor/d_a_obj_iceleaf.h"
 #include "d/actor/d_a_npc_chin.h"
 #include "d/d_a_item_static.h"
@@ -71,6 +73,7 @@
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_actor_iter.h"
 #include "f_pc/f_pc_name.h"
+#include "f_pc/f_pc_layer.h"
 #include "f_pc/f_pc_leaf.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_ext.h"
@@ -91,6 +94,8 @@
 #include <new>
 #include <chrono>
 #include <mutex>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 DEFINE_MOD();
@@ -103,6 +108,7 @@ IMPORT_SERVICE(ResourceService, svc_resource);
 IMPORT_SERVICE(SaveService, svc_save);
 IMPORT_SERVICE(UiService, svc_ui);
 IMPORT_OPTIONAL_SERVICE(ActorService, s_manualJumpActorService);
+IMPORT_OPTIONAL_SERVICE(TextureService, s_ootHeartsTextureService);
 IMPORT_OPTIONAL_SERVICE_VERSION(
     TwilitEssentialsStaminaService, svc_te_stamina, 0);
 
@@ -143,6 +149,9 @@ constexpr int64_t kThirdPersonReticleDefaultY = 0;
 constexpr int64_t kThirdPersonReticleMinY = -40;
 constexpr int64_t kThirdPersonReticleMaxY = 40;
 constexpr int64_t kBulletTimeModeDefault = 1;
+constexpr int64_t kBulletTimeArrowDamageDefaultPercent = 100;
+constexpr int64_t kBulletTimeArrowDamageMinPercent = 0;
+constexpr int64_t kBulletTimeArrowDamageMaxPercent = 1000;
 constexpr int64_t kDarkLinkDamageMultiplierDefaultPercent = 200;
 constexpr int64_t kDarkLinkDamageMultiplierMinPercent = 0;
 constexpr int64_t kDarkLinkDamageMultiplierMaxPercent = 1000;
@@ -153,9 +162,11 @@ constexpr int64_t kHoverPlaneLowerDefaultBinding = 5;
 constexpr s32 kNativeLeftShoulderButton = 9;
 // SDL_GamepadButton::RIGHT_STICK.
 constexpr s32 kNativeRightStickButton = 8;
+constexpr u8 kIceLeafSlot = 0xFB;
 constexpr u8 kShieldSurfSlot = 0xFC;
 constexpr u8 kSitSlot = 0xFD;
 constexpr u8 kGoronTunicSlot = 0xFE;
+constexpr u8 kIceLeafItemId = 0xF0;
 constexpr u8 kShieldSurfItemId = 0xF7;
 constexpr u8 kSitItemId = 0xF9;
 constexpr u8 kGoronTunicItemId = 0xFB;
@@ -172,7 +183,7 @@ constexpr u8 kDekuNutItem = 0xF1;
 constexpr int kGiantMaskSwordDamageMultiplier = 11;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
-constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 3;
+constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 4;
 constexpr f32 kSecondaryIconScale = 0.55f;
 constexpr f32 kSecondaryCursorScale = 0.5f;
 constexpr u32 kHoverLandingRecoveryFrames = 30;
@@ -192,6 +203,7 @@ constexpr char kGoronMaskIconResource[] = "goron_mask.bti";
 constexpr char kGiantMaskIconResource[] = "giants_mask.bti";
 constexpr char kArmosHammerIconResource[] = "armos_hammer.bti";
 constexpr char kDekuNutIconResource[] = "deku_nut.bti";
+constexpr char kIceLeafIconResource[] = "ice_leaf.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
 constexpr u8 kGoronTunicDisplayItem = dItemNo_WEAR_KOKIRI_e;
@@ -232,6 +244,7 @@ constexpr SitMusicWaveMapping kSitMusicWaveMappings[] = {
 
 enum class SecondaryIconContext : u8 {
     None,
+    IceLeaf,
     Sit,
     GoronTunic,
     HawkGrass,
@@ -255,6 +268,10 @@ ConfigVarHandle g_wheelOpenDirection = 0;
 ConfigVarHandle g_secondaryWheelBindingEnabled = 0;
 ConfigVarHandle g_zItemSlotEnabled = 0;
 ConfigVarHandle g_darkLinkDamageMultiplier = 0;
+ConfigVarHandle g_bulletTimeArrowDamageMultiplier = 0;
+ConfigVarHandle g_flurryRushEnabled = 0;
+ConfigVarHandle g_ootStyleHeartsEnabled = 0;
+ConfigVarHandle g_enemySpawnerProfile = 0;
 ConfigVarHandle g_manualJumpEnabled = 0;
 ConfigVarHandle g_jumpButton = 0;
 ConfigVarHandle g_manualJumpHeightPercent = 0;
@@ -283,6 +300,7 @@ ConfigVarHandle g_twilightWard = 0;
 ConfigVarHandle g_hawkOneShotDamage = 0;
 ConfigVarHandle g_hoverBootsWaterWalking = 0;
 ConfigVarHandle g_shieldSurfRBoost = 0;
+ConfigVarHandle g_swordFlourishEnabled = 0;
 ConfigVarHandle g_rupeeMagnetEnabled = 0;
 ConfigVarHandle g_rupeeMagnetClawshotOrbs = 0;
 ConfigVarHandle g_rupeeMagnetRadiusPercent = 0;
@@ -328,6 +346,7 @@ bool g_goronTunicEquipped = false;
 u32 g_goronLavaContactFrames = 0;
 bool g_hoverBootsEquipped = false;
 bool g_shieldSurfActive = false;
+bool g_shieldSurfIsIceLeaf = false;
 bool g_shieldSurfStartPending = false;
 bool g_shieldSurfDismountPending = false;
 bool g_shieldSurfHoverPlaneActive = false;
@@ -465,6 +484,9 @@ JKRExpHeap* g_tunicWheelItemHeap = nullptr;
 J2DPicture* g_sitWheelItemTex = nullptr;
 ResTIMG* g_sitWheelItemBuf = nullptr;
 JKRExpHeap* g_sitWheelItemHeap = nullptr;
+J2DPicture* g_iceLeafWheelItemTex = nullptr;
+ResTIMG* g_iceLeafWheelItemBuf = nullptr;
+JKRExpHeap* g_iceLeafWheelItemHeap = nullptr;
 J2DPicture* g_lensOfTruthWheelItemTex = nullptr;
 ResTIMG* g_lensOfTruthWheelItemBuf = nullptr;
 JKRExpHeap* g_lensOfTruthWheelItemHeap = nullptr;
@@ -533,6 +555,10 @@ void update();
 #include "features/manual_jump.cpp"
 #include "features/sprint.cpp"
 #include "features/bow_aim.cpp"
+#include "features/flurry_rush.cpp"
+#include "features/arrow_damage.cpp"
+#include "features/oot_hearts.cpp"
+#include "features/enemy_spawner.cpp"
 #include "features/manual_glider_visual.cpp"
 #include "features/fairy_companion.cpp"
 #include "features/settings.cpp"
@@ -587,6 +613,10 @@ void set_mod_init_error(ModError* error, ModResult result, const char* message) 
 }
 
 ModResult install_hooks(ModError* error) {
+    using flurry_rush::FlurryColliderSet;
+    using flurry_rush::FlurryLinkDamageAction;
+    using arrow_damage::ArrowDamageAttackPower;
+
     ADD_PRE(OpenExplain, suppress_secondary_explain);
     ADD_POST(SetNameString, name_secondary_item);
     ADD_PRE(RingSetSelectItem, prepare_secondary_equip_icon);
@@ -637,9 +667,14 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(bow_aim::BowCameraRun, bow_aim::adjust_bow_aim_camera);
     ADD_PRE(bow_aim::BowModelCalc, bow_aim::correct_held_bow_pose);
     ADD_POST(bow_aim::BowModelCalc, bow_aim::restore_held_bow_pose);
+    ADD_PRE(bow_aim::BowModelDraw, bow_aim::hide_body_in_vanilla_aim);
     ADD_POST(bow_aim::BowArrowShooting, bow_aim::aim_arrow_at_bow_reticle);
     ADD_PRE(PlayerExecute, bow_aim::update_before_player_execute);
     ADD_POST(PlayerExecute, bow_aim::update_after_player_execute);
+    ADD_PRE(FlurryColliderSet, flurry_rush::before_collider_set_callback);
+    ADD_PRE(FlurryLinkDamageAction, flurry_rush::before_link_damage_action_callback);
+    ADD_PRE(PlayerExecute, flurry_rush::update);
+    ADD_POST(ArrowDamageAttackPower, arrow_damage::apply_modifier);
     ADD_PRE(WheelSprintCheckMoveDoAction, defer_sprint_roll_for_window);
     ADD_PRE(WheelSprintProcMove, before_sprint_proc_move);
     ADD_POST(WheelSprintProcMove, after_sprint_proc_move);
@@ -683,6 +718,7 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(CheckPolyDamage, suppress_lava_damage);
     ADD_PRE(ProcDamageInit, suppress_twilight_ward_hit_stun);
     ADD_PRE(ProcCoLargeDamageInit, prevent_shield_surf_collision_knockoff);
+    ADD_PRE(SwordFlourishItemChange, enable_sword_putaway_flourish);
     ADD_PRE(ProcCoLargeDamageInit, suppress_twilight_ward_hit_stun);
     ADD_PRE(ProcLargeDamageUpInit, suppress_twilight_ward_hit_stun);
     ADD_PRE(ProcCoLargeDamageWallInit, suppress_twilight_ward_hit_stun);
@@ -814,7 +850,8 @@ bool wheel_is_sit_seated() {
 }
 
 bool wheel_is_shield_surf_board(daAlink_c* alink, fopAc_ac_c* ride) {
-    return g_shieldSurfActive && alink != nullptr && alink->checkBoardRide() &&
+    return g_shieldSurfActive && !g_shieldSurfIsIceLeaf &&
+           alink != nullptr && alink->checkBoardRide() &&
            ride != nullptr && fopAcM_GetID(ride) == g_shieldSurfBoardId;
 }
 
@@ -897,6 +934,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     ModResult result = svc_config->register_var(mod_ctx, &config, &g_wheelOpenDirection);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register secondary wheel direction setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "swordFlourishEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_swordFlourishEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register sword put-away flourish setting");
         return result;
     }
 
@@ -1151,6 +1198,47 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
+    config.name = "bulletTimeArrowDamageMultiplier";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kBulletTimeArrowDamageDefaultPercent;
+    result = svc_config->register_var(
+        mod_ctx, &config, &g_bulletTimeArrowDamageMultiplier);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Bullet Time arrow damage setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "flurryRushEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_flurryRushEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Flurry Rush setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "ootStyleHeartsEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_ootStyleHeartsEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register OOT hearts setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "enemySpawnerProfile";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = 1;
+    result = svc_config->register_var(mod_ctx, &config, &g_enemySpawnerProfile);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register enemy spawner profile setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
     config.name = "infiniteLavaWalk";
     config.type = CONFIG_VAR_BOOL;
     config.default_bool = false;
@@ -1397,12 +1485,17 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_giant_mask();
     update_armos_hammer();
     fire_arrows::update();
+    enemy_spawner::update();
+    oot_hearts::update();
     bow_aim::update_bullet_time_for_player(
         static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     return coop_mod_update(nullptr);
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    flurry_rush::shutdown();
+    enemy_spawner::shutdown();
+    oot_hearts::shutdown();
     bow_aim::stop_bow_bullet_time();
     shutdown_fairy_companion();
     g_revaliGaleVisual.release();
