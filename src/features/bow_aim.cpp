@@ -18,6 +18,7 @@ DEFINE_HOOK(&dCamera_c::nextType, BowCameraNextType);
 DEFINE_HOOK(&dCamera_c::subjectCamera, BowSubjectCamera);
 DEFINE_HOOK(&dCamera_c::Run, BowCameraRun);
 DEFINE_HOOK(&daAlink_c::modelCalc, BowModelCalc);
+DEFINE_HOOK(&daAlink_c::modelDraw, BowModelDraw);
 DEFINE_HOOK(&daArrow_c::arrowShooting, BowArrowShooting);
 DEFINE_HOOK_SYMBOL("fopAc_Execute", int(void*), BulletTimeActorExecute);
 DEFINE_HOOK(&fpcMtd_Execute, BulletTimeProcessExecute);
@@ -28,6 +29,7 @@ DEFINE_HOOK(&daAlink_c::posMove, BulletTimeLinkPosMove);
 constexpr f32 kSimulationPeriod = 1.0f / 30.0f;
 constexpr f32 kEnemyTimeScale = 0.1f;
 constexpr f32 kLinkTimeScale = 0.1f;
+constexpr f32 kFlurryLinkTimeScale = 0.25f;
 constexpr f32 kFreeBowCameraDegreesPerFrame = 4.0f;
 constexpr f32 kFreeBowCameraPitchLimit = 89.0f;
 constexpr auto kManualJumpTimeout = std::chrono::seconds(7);
@@ -72,6 +74,7 @@ struct EnemyPositionStep {
     fopAc_ac_c* actor = nullptr;
     cXyz speed{};
     cXyz startPosition{};
+    f32 positionScale = 0.0f;
     bool linkPosition = false;
     bool active = false;
 };
@@ -89,6 +92,9 @@ struct BowPoseCorrection {
 };
 
 BulletTimeState g_bulletTime{};
+bool g_flurryRushSlowMotionActive = false;
+bool g_flurryRushLinkSlowed = false;
+daAlink_c* g_flurryRushOwner = nullptr;
 daAlink_c* g_manualJumpOwner = nullptr;
 std::chrono::steady_clock::time_point g_manualJumpStarted{};
 bool g_bowBulletTimePending = false;
@@ -452,8 +458,10 @@ void stop_bullet_time() {
     g_bulletTime.owner = nullptr;
     g_bulletTime.started = {};
     g_bulletTime.verticalSpeed = 0.0f;
-    g_actorClocks = {};
-    g_linkPositionStep = {};
+    if (!g_flurryRushSlowMotionActive) {
+        g_actorClocks = {};
+        g_linkPositionStep = {};
+    }
 }
 
 bool botw_bullet_time_height_ready(daAlink_c* link) {
@@ -563,6 +571,7 @@ void prepare_bow_aim(daAlink_c* link) {
 
 void start_bullet_time(daAlink_c* link) {
     if (link == nullptr || g_bulletTime.active ||
+        g_flurryRushSlowMotionActive ||
         g_bulletTime.usedForJump || bulletTimeMode() == 0 ||
         (bulletTimeMode() == 2 && !botw_bullet_time_height_ready(link)))
     {
@@ -713,7 +722,9 @@ void clear_manual_jump_impl(daAlink_c* link) {
 }
 
 f32 actor_time_scale(fopAc_ac_c* actor) {
-    if (!g_bulletTime.active || actor == nullptr) {
+    if ((!g_bulletTime.active && !g_flurryRushSlowMotionActive) ||
+        actor == nullptr)
+    {
         return 1.0f;
     }
 
@@ -830,7 +841,7 @@ HookAction scale_actor_execution(ModContext*, void* args, void* retval, void*) {
     const auto* methods =
         reinterpret_cast<const process_method_class*>(actor->sub_method);
     if (mods::arg<const process_method_class*>(args, 0) != methods ||
-        !g_bulletTime.active)
+        (!g_bulletTime.active && !g_flurryRushSlowMotionActive))
     {
         return HOOK_CONTINUE;
     }
@@ -853,13 +864,26 @@ HookAction scale_actor_execution(ModContext*, void* args, void* retval, void*) {
 
 HookAction scale_enemy_gravity(ModContext*, void* args, void*, void*) {
     const std::size_t depth = g_enemyGravityDepth++;
-    if (!g_bulletTime.active || depth >= g_enemyGravitySteps.size()) {
+    if ((!g_bulletTime.active && !g_flurryRushSlowMotionActive) ||
+        depth >= g_enemyGravitySteps.size())
+    {
         return HOOK_CONTINUE;
     }
 
     auto* actor = mods::arg<fopAc_ac_c*>(args, 0);
-    const bool isLink = actor == g_bulletTime.owner;
-    if (!isLink && !is_slow_motion_target(actor)) {
+    if (actor == g_bulletTime.owner && g_bulletTime.active) {
+        g_enemyGravitySteps[depth] = {
+            .actor = actor,
+            .gravity = actor->gravity,
+            .active = true,
+        };
+        actor->gravity = 0.0f;
+        return HOOK_CONTINUE;
+    }
+    if (actor == g_flurryRushOwner && g_flurryRushLinkSlowed) {
+        return HOOK_CONTINUE;
+    }
+    if (!is_slow_motion_target(actor)) {
         return HOOK_CONTINUE;
     }
 
@@ -868,7 +892,7 @@ HookAction scale_enemy_gravity(ModContext*, void* args, void*, void*) {
         .gravity = actor->gravity,
         .active = true,
     };
-    actor->gravity *= isLink ? 0.0f : kEnemyTimeScale;
+    actor->gravity *= kEnemyTimeScale;
     return HOOK_CONTINUE;
 }
 
@@ -892,15 +916,28 @@ void restore_enemy_gravity(ModContext*, void* args, void*, void*) {
 
 HookAction scale_enemy_position_step(ModContext*, void* args, void*, void*) {
     const std::size_t depth = g_enemyPositionDepth++;
-    if (!g_bulletTime.active || depth >= g_enemyPositionSteps.size()) {
+    if ((!g_bulletTime.active && !g_flurryRushSlowMotionActive) ||
+        depth >= g_enemyPositionSteps.size())
+    {
         return HOOK_CONTINUE;
     }
 
     auto* actor = mods::arg<fopAc_ac_c*>(args, 0);
-    if (actor == g_bulletTime.owner) {
+    if (actor == g_bulletTime.owner && g_bulletTime.active) {
         g_enemyPositionSteps[depth] = {
             .actor = actor,
             .startPosition = actor->current.pos,
+            .positionScale = kLinkTimeScale,
+            .linkPosition = true,
+            .active = true,
+        };
+        return HOOK_CONTINUE;
+    }
+    if (actor == g_flurryRushOwner && g_flurryRushLinkSlowed) {
+        g_enemyPositionSteps[depth] = {
+            .actor = actor,
+            .startPosition = actor->current.pos,
+            .positionScale = kFlurryLinkTimeScale,
             .linkPosition = true,
             .active = true,
         };
@@ -914,6 +951,7 @@ HookAction scale_enemy_position_step(ModContext*, void* args, void*, void*) {
     step = {
         .actor = actor,
         .speed = actor->speed,
+        .positionScale = kEnemyTimeScale,
         .active = true,
     };
     actor->speed.x *= kEnemyTimeScale;
@@ -938,9 +976,9 @@ void restore_enemy_position_step(ModContext*, void* args, void*, void*) {
         if (step.linkPosition) {
             const cXyz displacement = actor->current.pos - step.startPosition;
             actor->current.pos.x =
-                step.startPosition.x + displacement.x * kLinkTimeScale;
+                step.startPosition.x + displacement.x * step.positionScale;
             actor->current.pos.z =
-                step.startPosition.z + displacement.z * kLinkTimeScale;
+                step.startPosition.z + displacement.z * step.positionScale;
             actor->current.pos.y = step.startPosition.y;
             actor->old.pos.y = step.startPosition.y;
             if (g_linkPositionStep.active && g_linkPositionStep.link == actor) {
@@ -956,7 +994,8 @@ void restore_enemy_position_step(ModContext*, void* args, void*, void*) {
 
 HookAction scale_enemy_animation(ModContext*, void* args, void*, void*) {
     const std::size_t depth = g_enemyAnimationDepth++;
-    if (!g_bulletTime.active || depth >= g_enemyAnimationSteps.size() ||
+    if ((!g_bulletTime.active && !g_flurryRushSlowMotionActive) ||
+        depth >= g_enemyAnimationSteps.size() ||
         g_actorExecuteDepth == 0 ||
         g_actorExecuteDepth > g_actorExecuteStack.size())
     {
@@ -1368,6 +1407,17 @@ HookAction correct_held_bow_pose(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
+HookAction hide_body_in_vanilla_aim(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    auto* model = mods::arg<J3DModel*>(args, 1);
+    if (link == nullptr || model == nullptr || model != link->mpLinkModel ||
+        aimMode() != 0 || !bow_subject_active(link))
+    {
+        return HOOK_CONTINUE;
+    }
+    return HOOK_SKIP_ORIGINAL;
+}
+
 void restore_held_bow_pose(ModContext*, void* args, void*, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
     auto* model = mods::arg<J3DModel*>(args, 1);
@@ -1401,6 +1451,23 @@ void clear_manual_jump(daAlink_c* link) {
     clear_manual_jump_impl(link);
 }
 
+void set_flurry_rush_slow_motion(daAlink_c* owner, bool active, bool slowLink) {
+    const bool changed = g_flurryRushSlowMotionActive != active ||
+        g_flurryRushOwner != (active ? owner : nullptr) ||
+        g_flurryRushLinkSlowed != (active && slowLink);
+    g_flurryRushSlowMotionActive = active;
+    g_flurryRushOwner = active ? owner : nullptr;
+    g_flurryRushLinkSlowed = active && slowLink;
+    if (changed) {
+        g_actorClocks = {};
+        g_linkPositionStep = {};
+    }
+}
+
+bool bullet_time_active() {
+    return g_bulletTime.active;
+}
+
 void update_bullet_time_for_player(daAlink_c* link) {
     ++g_slowMotionFrame;
     clear_bow_aim_state(link);
@@ -1422,6 +1489,9 @@ void update_bullet_time_for_player(daAlink_c* link) {
 void stop_bow_bullet_time() {
     stop_bullet_time();
     g_bulletTime = {};
+    g_flurryRushSlowMotionActive = false;
+    g_flurryRushLinkSlowed = false;
+    g_flurryRushOwner = nullptr;
     g_actorExecuteStack = {};
     g_actorExecuteDepth = 0;
     g_slowMotionFrame = 0;

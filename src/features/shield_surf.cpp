@@ -73,6 +73,7 @@ void release_shield_surf_player_state(daAlink_c* alink) {
 void end_shield_surf_state(daAlink_c* alink) {
     release_shield_surf_player_state(alink);
     g_shieldSurfActive = false;
+    g_shieldSurfIsIceLeaf = false;
     g_shieldSurfStartPending = false;
     g_shieldSurfStartWaitFrames = 0;
     g_shieldSurfDismountPending = false;
@@ -192,7 +193,7 @@ HookAction prevent_shield_surf_collision_knockoff(
     return HOOK_SKIP_ORIGINAL;
 }
 
-void request_shield_surf_toggle(daAlink_c* alink) {
+void request_board_ride_toggle(daAlink_c* alink, bool useIceLeaf) {
     recover_shield_surf_state(alink);
     if (g_shieldSurfActive) {
         g_shieldSurfDismountPending = true;
@@ -200,35 +201,46 @@ void request_shield_surf_toggle(daAlink_c* alink) {
     }
     if (g_shieldSurfStartPending) {
         g_shieldSurfStartPending = false;
+        g_shieldSurfIsIceLeaf = false;
         g_shieldSurfStartWaitFrames = 0;
         g_shieldSurfHoverPlaneActive = false;
         g_shieldSurfPlaneRaisePending = false;
         delete_shield_surf_board();
-        svc_log->info(mod_ctx, "Shield Surf start canceled");
+        svc_log->info(mod_ctx, "Board ride start canceled");
         return;
     }
     if (alink == nullptr || alink->checkWolf() || alink->checkEventRun() ||
         alink->checkRideOn() || !has_shield_surf_surface(alink))
     {
-        svc_log->warn(
-            mod_ctx, "Shield Surf requires Link on walkable ground or a stable Hover Boots "
-                     "plane and not riding");
+        svc_log->warn(mod_ctx, "Board riding requires Link on walkable ground or a stable "
+                               "Hover Boots plane and not riding");
         return;
     }
-    if (dComIfGs_getSelectEquipShield() == dItemNo_NONE_e ||
-        alink->mShieldModel == nullptr)
+    if (!useIceLeaf &&
+        (dComIfGs_getSelectEquipShield() == dItemNo_NONE_e ||
+         alink->mShieldModel == nullptr))
     {
         svc_log->warn(mod_ctx, "Shield Surf requires an equipped shield");
         return;
     }
 
+    g_shieldSurfIsIceLeaf = useIceLeaf;
     g_shieldSurfStartPending = true;
     g_shieldSurfStartWaitFrames = 0;
     g_shieldSurfHoverPlaneActive =
         hoverBootsAirwalkingEnabled() && g_hoverBootsEquipped &&
         g_hoverGroundHeightValid;
     g_shieldSurfPlaneRaisePending = false;
-    svc_log->info(mod_ctx, "Shield Surf start requested");
+    svc_log->info(mod_ctx, useIceLeaf ? "Ice Leaf ride start requested" :
+                                       "Shield Surf start requested");
+}
+
+void request_shield_surf_toggle(daAlink_c* alink) {
+    request_board_ride_toggle(alink, false);
+}
+
+void request_ice_leaf_toggle(daAlink_c* alink) {
+    request_board_ride_toggle(alink, true);
 }
 
 void process_shield_surf_transition(ModContext*, void* args, void*, void*) {
@@ -239,8 +251,10 @@ void process_shield_surf_transition(ModContext*, void* args, void*, void*) {
 
     if (g_shieldSurfActive) {
         if (!is_riding_shield_surf_board(alink)) {
+            const bool wasIceLeafRide = g_shieldSurfIsIceLeaf;
             recover_shield_surf_state(alink);
-            svc_log->info(mod_ctx, "Shield Surf ended after Link left its board");
+            svc_log->info(mod_ctx, wasIceLeafRide ? "Ice Leaf ride ended after Link left its board" :
+                                                   "Shield Surf ended after Link left its board");
         } else if (g_shieldSurfDismountPending) {
             g_shieldSurfDismountPending = false;
             alink->setJumpMode();
@@ -253,13 +267,15 @@ void process_shield_surf_transition(ModContext*, void* args, void*, void*) {
     }
     if (alink->checkWolf() || alink->checkEventRun() || alink->checkRideOn() ||
         !has_shield_surf_surface(alink) ||
-        dComIfGs_getSelectEquipShield() == dItemNo_NONE_e ||
-        alink->mShieldModel == nullptr)
+        (!g_shieldSurfIsIceLeaf &&
+         (dComIfGs_getSelectEquipShield() == dItemNo_NONE_e ||
+          alink->mShieldModel == nullptr)))
     {
         g_shieldSurfStartPending = false;
+        g_shieldSurfIsIceLeaf = false;
         g_shieldSurfHoverPlaneActive = false;
         delete_shield_surf_board();
-        svc_log->warn(mod_ctx, "Shield Surf start canceled because Link is no longer ready");
+        svc_log->warn(mod_ctx, "Board ride start canceled because Link is no longer ready");
         return;
     }
 
@@ -270,6 +286,7 @@ void process_shield_surf_transition(ModContext*, void* args, void*, void*) {
             fopAcM_GetRoomNo(alink), &alink->shape_angle, nullptr, -1);
         if (g_shieldSurfBoardId == fpcM_ERROR_PROCESS_ID_e) {
             g_shieldSurfStartPending = false;
+            g_shieldSurfIsIceLeaf = false;
             g_shieldSurfHoverPlaneActive = false;
             svc_log->error(mod_ctx, "Failed to create the native Ice Leaf board actor");
             return;
@@ -288,9 +305,10 @@ void process_shield_surf_transition(ModContext*, void* args, void*, void*) {
     if (board == nullptr || board->mpModel == nullptr) {
         if (++g_shieldSurfStartWaitFrames >= 300) {
             g_shieldSurfStartPending = false;
+            g_shieldSurfIsIceLeaf = false;
             g_shieldSurfHoverPlaneActive = false;
             delete_shield_surf_board();
-            svc_log->error(mod_ctx, "Timed out loading the native Shield Surf board actor");
+            svc_log->error(mod_ctx, "Timed out loading the native Ice Leaf board actor");
         }
         return;
     }
@@ -299,9 +317,10 @@ void process_shield_surf_transition(ModContext*, void* args, void*, void*) {
     board->setAction(daObjIceLeaf_c::ACT_DEAD_e);
     if (!alink->procBoardWaitInit(board) || !alink->checkBoardRide()) {
         g_shieldSurfStartPending = false;
+        g_shieldSurfIsIceLeaf = false;
         g_shieldSurfHoverPlaneActive = false;
         delete_shield_surf_board();
-        svc_log->warn(mod_ctx, "The game rejected the Shield Surf board process");
+        svc_log->warn(mod_ctx, "The game rejected the native board ride process");
         return;
     }
 
@@ -309,7 +328,8 @@ void process_shield_surf_transition(ModContext*, void* args, void*, void*) {
     g_shieldSurfStartPending = false;
     g_shieldSurfActive = true;
     g_shieldSurfPlaneRaisePending = false;
-    svc_log->info(mod_ctx, "Shield Surf started using Link's equipped shield");
+    svc_log->info(mod_ctx, g_shieldSurfIsIceLeaf ? "Ice Leaf ride started" :
+                                                   "Shield Surf started using Link's equipped shield");
 }
 
 HookAction allow_shield_surf_on_any_ground(ModContext*, void* args, void* retval, void*) {
@@ -325,7 +345,8 @@ HookAction suppress_player_shield_draw_during_surf(
     ModContext*, void* args, void* retval, void*)
 {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
-    if (g_shieldSurfActive && alink != nullptr && alink->checkBoardRide()) {
+    if (g_shieldSurfActive && !g_shieldSurfIsIceLeaf &&
+        alink != nullptr && alink->checkBoardRide()) {
         *static_cast<bool*>(retval) = false;
         return HOOK_SKIP_ORIGINAL;
     }
@@ -498,7 +519,8 @@ void restore_shield_surf_hover_plane_board_common(
 void boost_shield_surf_speed(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     const BOOL canMove = mods::arg<BOOL>(args, 1);
-    if (!g_shieldSurfActive || !shieldSurfRBoostEnabled() || !canMove ||
+    if (!g_shieldSurfActive || g_shieldSurfIsIceLeaf ||
+        !shieldSurfRBoostEnabled() || !canMove ||
         alink == nullptr || !alink->checkBoardRide() ||
         mDoCPd_c::getHoldR(PAD_1) == 0)
     {
@@ -516,6 +538,10 @@ HookAction draw_shield_surf_on_native_board(
 {
     auto* board = mods::arg<daObjIceLeaf_c*>(args, 0);
     if (board == nullptr || fopAcM_GetID(board) != g_shieldSurfBoardId) {
+        return HOOK_CONTINUE;
+    }
+
+    if (g_shieldSurfIsIceLeaf) {
         return HOOK_CONTINUE;
     }
 

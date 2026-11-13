@@ -209,6 +209,18 @@ static constexpr f32 FIRE_ARROW_LIGHT_POW = 250.0f;
 static constexpr GXColor FIRE_ARROW_BOSSLIGHT_COLOR = {0xBC, 0x66, 0x42, 0xFF};
 static constexpr f32 FIRE_ARROW_BOSSLIGHT_REF_DIST = 0.5f;
 
+static bool hasBossLightAt(const cXyz& pos) {
+    for (int i = 1; i < 6; i++) {
+        const auto& light = g_env_light.field_0x0c18[i];
+        if (light.field_0x26 == 1 && light.mPos.x == pos.x && light.mPos.y == pos.y &&
+            light.mPos.z == pos.z)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 struct TrackedFireArrow {
     daArrow_c* arrow = nullptr;
     fpc_ProcID arrowId = fpcM_ERROR_PROCESS_ID_e;
@@ -444,8 +456,15 @@ static void updateFireArrowEffect(daArrow_c* arrow) {
 
             if (terrainLightingEnabled()) {
                 GXColor bossLightColor = FIRE_ARROW_BOSSLIGHT_COLOR;
-                dKy_BossLight_set(&arrow->field_0x9cc, &bossLightColor,
-                                  FIRE_ARROW_BOSSLIGHT_REF_DIST, 0);
+                int lightSet = dKy_BossLight_set(&arrow->field_0x9cc, &bossLightColor,
+                                                 FIRE_ARROW_BOSSLIGHT_REF_DIST, 0);
+                if (lightSet == 0 && !hasBossLightAt(arrow->field_0x9cc) && dKy_Indoor_check() &&
+                    g_env_light.field_0x0c18[0].field_0x26 == 0)
+                {
+                    // The shared Wolf Eye slot still illuminates rooms with no free BossLight slots.
+                    dKy_WolfEyeLight_set(&arrow->field_0x9cc, 0.0f, 0.0f, 50.0f,
+                                         &bossLightColor, 1.0f, 0, 3);
+                }
             }
 
             if (slot.igniteActive) {
