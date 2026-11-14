@@ -28,24 +28,30 @@ This routes room-code rendezvous and Hyrule Online peer discovery through your d
 
 Hyrule Online chat uses the same `/global` WebSocket as player discovery. Messages and renames are
 sent only to connected players in the same game stage and combined-mod version; blocked peers do
-not receive them. The server validates and filters text, limits messages to 100 characters and
-one per two seconds per connection, and does not store or log chat history. Hyrule Online sessions
-refresh their presence periodically and send an explicit leave when they shut down; inactive
-sessions expire, and reconnects replace an older session with the same installation identity.
-The player roster contains each online session's configured display name. Room-code co-op chat
-continues over the existing encrypted direct peer connection. The combined Wheel no longer
-connects to Remia's Co-op chat relay; it uses this Worker's `/global` endpoint instead.
+not receive them. Blocks use a stable per-install tag rather than a display name or temporary
+session ID, so renaming or restarting the game does not clear a block. This is not an account ban:
+clearing or replacing the installation key creates a new identity. The server validates and filters
+text, limits messages to 100 characters and one per two seconds per connection, and does not store
+or log chat history. Hyrule Online sessions refresh their presence periodically and send an explicit
+leave when they shut down; inactive sessions expire, and reconnects replace an older session with
+the same installation identity. The player roster contains each online session's configured display
+name. Room-code co-op chat continues over the existing encrypted direct peer connection. The
+combined Wheel no longer connects to Remia's Co-op chat relay; it uses this Worker's `/global`
+endpoint instead.
 
 ## Try it without deploying anything
 
 ```bash
 node dev-server.mjs
 node test-flow.mjs
+node test-global-blocks.mjs
 ```
 
 `dev-server.mjs` runs the same code on your own machine at `ws://127.0.0.1:8787`. Plain `ws://` is
 only allowed for localhost. `test-flow.mjs` plays a host and a joiner against it and checks they
-connect. To use it from the game, set `room_server` to `ws://127.0.0.1:8787`. Run
+connect. `test-global-blocks.mjs` exercises stable Hyrule Online blocks, including rename and
+restart cases, without starting a server. To use it from the game, set `room_server` to
+`ws://127.0.0.1:8787`. Run
 `node dev-server.mjs --code TEST22` to give every host the same code, which is handy for scripted
 tests.
 

@@ -11,7 +11,10 @@ const NAME_MAX = 24;
 const MAX_JOINERS_WAITING = 8;
 
 const HOST_KEY = /^[0-9a-f]{16,64}$/;
+const GLOBAL_TAG = /^[0-9a-f]{16}$/;
 const MAX_MESSAGE_BYTES = 1024;
+const MAX_GLOBAL_MESSAGE_BYTES = 65536;
+const GLOBAL_BLOCKED_TAGS = 3000;
 
 const STUN_HOSTS = [
   ["stun.l.google.com", 19302],
@@ -379,6 +382,7 @@ export class Global {
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env || {};
+    this.blockedTagsById = new Map();
   }
 
   banned(info) {
@@ -432,8 +436,10 @@ export class Global {
     return other;
   }
 
-  block(ws, info, id, on) {
-    if (!Number.isInteger(id) || id <= 0) return;
+  async block(ws, info, id, on, tag = "") {
+    const validId = Number.isInteger(id) && id > 0;
+    const validTag = typeof tag === "string" && GLOBAL_TAG.test(tag);
+    if (!validId && !validTag) return;
     const now = Date.now();
     if (now - (info.blockWindow || 0) > 60000) {
       info.blockWindow = now;
@@ -443,16 +449,72 @@ export class Global {
       ws.serializeAttachment(info);
       return;
     }
-    const blocks = (info.blocks || []).filter((b) => b !== id);
-    if (on) blocks.push(id);
-    info.blocks = blocks.slice(-200);
-    const other = on ? this.unpair(ws, info, id) : null;
+    if (validId) {
+      const blocks = (info.blocks || []).filter((b) => b !== id);
+      if (on) blocks.push(id);
+      info.blocks = blocks.slice(-200);
+    }
+    if (validTag) {
+      const blockedTags = new Set(this.blockedTagsById.get(info.id) || []);
+      if (on) blockedTags.add(tag);
+      else blockedTags.delete(tag);
+      await this.saveBlockedTags(info.id, [...blockedTags].slice(-GLOBAL_BLOCKED_TAGS));
+    }
+    const affected = [];
+    if (on) {
+      for (const otherWs of this.all()) {
+        if (otherWs === ws) continue;
+        const theirs = otherWs.deserializeAttachment();
+        if (!theirs?.hello || (validId && theirs.id !== id && (!validTag || theirs.tag !== tag))) continue;
+        if (!info.peers.includes(theirs.id)) continue;
+        const other = this.unpair(ws, info, theirs.id);
+        if (other) affected.push(other);
+      }
+    }
     this.introduce(ws, info);
     ws.serializeAttachment(info);
-    if (other) {
+    for (const other of affected) {
       const theirs = other.deserializeAttachment();
       this.introduce(other, theirs, ws);
       other.serializeAttachment(theirs);
+    }
+    this.broadcastRoster();
+  }
+
+  isBlocked(info, other) {
+    return (info.blocks || []).includes(other.id) ||
+      (other.blocks || []).includes(info.id) ||
+      (this.blockedTagsById.get(info.id)?.has(other.tag) || false) ||
+      (this.blockedTagsById.get(other.id)?.has(info.tag) || false);
+  }
+
+  blockedTagsKey(id) {
+    return `global-blocked:${id}`;
+  }
+
+  async saveBlockedTags(id, tags) {
+    await this.ctx.storage.put(this.blockedTagsKey(id), tags);
+    this.blockedTagsById.set(id, new Set(tags));
+  }
+
+  async restoreBlockedTags() {
+    const pending = this.all()
+      .map((ws) => ({ info: ws.deserializeAttachment() }))
+      .filter(({ info }) => info?.hello && !this.blockedTagsById.has(info.id));
+    for (let at = 0; at < pending.length; at += 128) {
+      const batch = pending.slice(at, at + 128);
+      const keys = batch.map(({ info }) => this.blockedTagsKey(info.id));
+      const stored = await this.ctx.storage.get(keys);
+      for (let i = 0; i < batch.length; ++i) {
+        const { info } = batch[i];
+        const tags = stored.get(keys[i]);
+        this.blockedTagsById.set(
+          info.id,
+          new Set(Array.isArray(tags)
+            ? tags.filter((tag) => typeof tag === "string" && GLOBAL_TAG.test(tag))
+            : []),
+        );
+      }
     }
   }
 
@@ -461,7 +523,7 @@ export class Global {
     for (const other of this.all()) {
       const theirs = other.deserializeAttachment();
       if (!theirs || !theirs.hello || theirs.area !== info.area || theirs.v !== info.v) continue;
-      if ((info.blocks || []).includes(theirs.id) || (theirs.blocks || []).includes(info.id)) continue;
+      if (this.isBlocked(info, theirs)) continue;
       send(other, msg);
     }
   }
@@ -511,15 +573,17 @@ export class Global {
   }
 
   broadcastRoster(exclude = null) {
-    const players = [];
     for (const ws of this.all()) {
-      if (ws === exclude) continue;
       const info = ws.deserializeAttachment();
-      if (info?.hello) players.push(String(info.id), info.name || "Player");
-    }
-    const roster = { op: "roster", players };
-    for (const ws of this.all()) {
-      if (ws !== exclude && ws.deserializeAttachment()?.hello) send(ws, roster);
+      if (ws === exclude || !info?.hello) continue;
+      const players = [];
+      for (const otherWs of this.all()) {
+        if (otherWs === exclude) continue;
+        const other = otherWs.deserializeAttachment();
+        if (!other?.hello || (otherWs !== ws && this.isBlocked(info, other))) continue;
+        players.push(String(other.id), other.name || "Player");
+      }
+      send(ws, { op: "roster", players });
     }
   }
 
@@ -545,10 +609,12 @@ export class Global {
     }
   }
 
-  removeGlobal(ws, info) {
+  async removeGlobal(ws, info) {
     const wasOnline = info.hello;
     this.part(ws, info);
     info.hello = false;
+    this.blockedTagsById.delete(info.id);
+    await this.ctx.storage.delete(this.blockedTagsKey(info.id));
     ws.serializeAttachment(info);
     if (wasOnline) {
       this.broadcastRoster(ws);
@@ -564,7 +630,7 @@ export class Global {
       const theirs = other.deserializeAttachment();
       if (!theirs || !theirs.hello || theirs.area !== info.area || theirs.v !== info.v) continue;
       if ((theirs.peers || []).length >= GLOBAL_PEERS || (theirs.peers || []).includes(info.id)) continue;
-      if ((info.blocks || []).includes(theirs.id) || (theirs.blocks || []).includes(info.id)) continue;
+      if (this.isBlocked(info, theirs)) continue;
       const token = newToken();
       const key = newKey();
       const outside = (ep) => (isEndpoint(ep) ? ep.slice(0, ep.lastIndexOf(":")) : "");
@@ -606,7 +672,11 @@ export class Global {
   }
 
   async webSocketMessage(ws, message) {
-    if (typeof message !== "string" || message.length > 512) return fail(ws, "bad_message");
+    if (typeof message !== "string" ||
+        new TextEncoder().encode(message).byteLength > MAX_GLOBAL_MESSAGE_BYTES)
+    {
+      return fail(ws, "bad_message");
+    }
     let msg;
     try {
       msg = JSON.parse(message);
@@ -615,11 +685,12 @@ export class Global {
     }
     const info = ws.deserializeAttachment();
     if (!info) return;
+    await this.restoreBlockedTags();
     info.lastSeen = Date.now();
     ws.serializeAttachment(info);
     await this.scheduleCleanup();
     if (msg.op === "bye") {
-      this.removeGlobal(ws, info);
+      await this.removeGlobal(ws, info);
       try {
         ws.close(1000, "left");
       } catch {
@@ -639,6 +710,11 @@ export class Global {
       info.lan = isPrivateIpv4(msg.lan) ? msg.lan : "";
       info.name = cleanName(printable(msg.name, 16)) || "Player";
       info.tag = await tagOf(msg.key);
+      const blockedTags = Array.isArray(msg.blocked)
+        ? [...new Set(msg.blocked.filter((tag) => typeof tag === "string" && GLOBAL_TAG.test(tag)))]
+            .slice(-GLOBAL_BLOCKED_TAGS)
+        : [];
+      await this.saveBlockedTags(info.id, blockedTags);
       info.heartbeat = msg.heartbeat === true;
       if (info.tag) {
         for (const other of this.all()) {
@@ -648,6 +724,8 @@ export class Global {
           this.part(other, theirs);
           theirs.hello = false;
           other.serializeAttachment(theirs);
+          this.blockedTagsById.delete(theirs.id);
+          await this.ctx.storage.delete(this.blockedTagsKey(theirs.id));
           try {
             send(other, { op: "superseded" });
             other.close(4001, "replaced by newer session");
@@ -690,7 +768,7 @@ export class Global {
       return;
     }
     if ((msg.op === "block" || msg.op === "unblock") && info.hello) {
-      this.block(ws, info, Number(msg.id), msg.op === "block");
+      await this.block(ws, info, Number(msg.id), msg.op === "block", msg.tag);
       return;
     }
     return fail(ws, "bad_message");
@@ -702,8 +780,9 @@ export class Global {
     } catch {
 
     }
+    await this.restoreBlockedTags();
     const info = ws.deserializeAttachment();
-    if (info) this.removeGlobal(ws, info);
+    if (info) await this.removeGlobal(ws, info);
     await this.scheduleCleanup();
   }
 
@@ -736,6 +815,7 @@ export class Global {
   }
 
   async pruneExpired() {
+    await this.restoreBlockedTags();
     const now = Date.now();
     let changed = false;
     for (const ws of this.all()) {
@@ -748,6 +828,8 @@ export class Global {
       if (now - lastSeen < GLOBAL_PRESENCE_TIMEOUT_MS) continue;
       this.part(ws, info);
       info.hello = false;
+      this.blockedTagsById.delete(info.id);
+      await this.ctx.storage.delete(this.blockedTagsKey(info.id));
       ws.serializeAttachment(info);
       try {
         ws.close(4001, "presence timed out");

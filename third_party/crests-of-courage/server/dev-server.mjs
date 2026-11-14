@@ -88,8 +88,11 @@ const env = {
         const ctx = new RoomContext();
         const store = new Map();
         ctx.storage = {
-          get: async (k) => store.get(k),
+          get: async (k) => Array.isArray(k)
+            ? new Map(k.filter((key) => store.has(key)).map((key) => [key, store.get(key)]))
+            : store.get(k),
           put: async (k, v) => void store.set(k, v),
+          delete: async (k) => store.delete(k),
           setAlarm: async (at) => void store.set("__alarm", at),
           deleteAlarm: async () => void store.delete("__alarm"),
         };

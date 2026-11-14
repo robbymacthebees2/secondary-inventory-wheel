@@ -106,12 +106,26 @@ check("walking in: introduced to the new area",
 b.send({ op: "block", id: wc.id });
 const bGone = await nextOp(b, "gone");
 const cGone = await nextOp(c, "gone");
-check("blocking: both hear gone", bGone && bGone.id === wc.id &&
-  cGone && cGone.id === wb.id);
+const rosterBlockedA = await nextOp(a, "roster");
+const rosterBlockedB = await nextOp(b, "roster");
+const rosterBlockedC = await nextOp(c, "roster");
+check("blocking: disconnects the pair and hides them from each other's roster",
+  bGone && bGone.id === wc.id && cGone && cGone.id === wb.id &&
+  hasRoster(rosterBlockedA, [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]) &&
+  hasRoster(rosterBlockedB, [[wa.id, "Alice Updated"], [wb.id, "Bob"]]) &&
+  hasRoster(rosterBlockedC, [[wa.id, "Alice Updated"], [wc.id, "Charlie"]]));
 b.send({ op: "unblock", id: wc.id });
 const unblockMsg = await nextOp(b, "peer");
-check("unblocking: introduced again", unblockMsg && unblockMsg.op === "peer" && unblockMsg.id === wc.id);
-await nextOp(c, "peer");
+const cUnblockMsg = await nextOp(c, "peer");
+const rosterUnblockedA = await nextOp(a, "roster");
+const rosterUnblockedB = await nextOp(b, "roster");
+const rosterUnblockedC = await nextOp(c, "roster");
+check("unblocking: peer is introduced and restored to every roster",
+  unblockMsg && unblockMsg.op === "peer" && unblockMsg.id === wc.id &&
+  cUnblockMsg && cUnblockMsg.op === "peer" && cUnblockMsg.id === wb.id &&
+  hasRoster(rosterUnblockedA, [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]) &&
+  hasRoster(rosterUnblockedB, [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]) &&
+  hasRoster(rosterUnblockedC, [[wa.id, "Alice Updated"], [wb.id, "Bob"], [wc.id, "Charlie"]]));
 
 c.close();
 const goneC = await nextOp(b, "gone");
