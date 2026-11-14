@@ -150,6 +150,8 @@ void send_to_rival(u8 player, dCcD_GObjInf& at, u8 kind, const cXyz& from, bool 
     msg.se = at.GetAtSe();
     msg.blocked = blocked ? 1 : 0;
     msg.cut = cut;
+    msg.swordDamagePercent =
+        wheel_pvp_sword_damage_percent(msg.atType);
     msg.from[0] = from.x;
     msg.from[1] = from.y;
     msg.from[2] = from.z;

@@ -13,13 +13,20 @@ namespace bow_aim {
 namespace {
 
 DEFINE_HOOK(&daAlink_c::procBowSubject, BowSubject);
+DEFINE_HOOK(&daAlink_c::procBoomerangSubject, BoomerangSubject);
+DEFINE_HOOK(&daAlink_c::procHookshotSubject, ClawshotSubject);
+DEFINE_HOOK(&daAlink_c::procIronBallSubject, IronBallSubject);
+DEFINE_HOOK(&daAlink_c::setStickData, BowSetStickData);
 DEFINE_HOOK(&dCamera_c::nextMode, BowCameraNextMode);
 DEFINE_HOOK(&dCamera_c::nextType, BowCameraNextType);
 DEFINE_HOOK(&dCamera_c::subjectCamera, BowSubjectCamera);
 DEFINE_HOOK(&dCamera_c::Run, BowCameraRun);
-DEFINE_HOOK(&daAlink_c::modelCalc, BowModelCalc);
+DEFINE_HOOK(&daAlink_c::setMatrix, AimSetMatrix);
+DEFINE_HOOK(&daAlink_c::modelCalc, AimModelCalc);
 DEFINE_HOOK(&daAlink_c::modelDraw, BowModelDraw);
 DEFINE_HOOK(&daArrow_c::arrowShooting, BowArrowShooting);
+DEFINE_HOOK(&daAlink_c::throwBoomerang, BoomerangThrow);
+DEFINE_HOOK(&daArrow_c::procMove, BulletTimeArrowMove);
 DEFINE_HOOK_SYMBOL("fopAc_Execute", int(void*), BulletTimeActorExecute);
 DEFINE_HOOK(&fpcMtd_Execute, BulletTimeProcessExecute);
 DEFINE_HOOK(&fopAcM_calcSpeed, BulletTimeCalcSpeed);
@@ -79,16 +86,25 @@ struct EnemyPositionStep {
     bool active = false;
 };
 
+struct ArrowMoveStep {
+    daArrow_c* arrow = nullptr;
+    cXyz speed{};
+    f32 gravity = 0.0f;
+    f32 timeScale = 1.0f;
+    int (daArrow_c::*procFunc)() = nullptr;
+    bool active = false;
+};
+
 struct EnemyAnimationStep {
     mDoExt_morf_c* morf = nullptr;
     f32 playSpeed = 0.0f;
     bool active = false;
 };
 
-struct BowPoseCorrection {
+struct AimMovementInputState {
     daAlink_c* link = nullptr;
-    csXyz bodyAngle{};
-    s16 torsoYaw = 0;
+    f32 moveValue = 0.0f;
+    bool active = false;
 };
 
 BulletTimeState g_bulletTime{};
@@ -100,18 +116,22 @@ std::chrono::steady_clock::time_point g_manualJumpStarted{};
 bool g_bowBulletTimePending = false;
 bool g_manualJumpBowAimRequested = false;
 bool g_manualJumpBowAimActive = false;
+bool g_manualJumpBowAimHawkeyeRequested = false;
+u8 g_manualJumpBowAimHawkeyeButton = dItemNo_NONE_e;
 std::array<SlowActorClock, kActorClockCapacity> g_actorClocks{};
 std::array<fopAc_ac_c*, kActorExecuteStackCapacity> g_actorExecuteStack{};
 std::array<EnemyGravityStep, kMovementHookStackCapacity> g_enemyGravitySteps{};
 std::array<EnemyPositionStep, kMovementHookStackCapacity> g_enemyPositionSteps{};
+std::array<ArrowMoveStep, kMovementHookStackCapacity> g_arrowMoveSteps{};
 std::array<EnemyAnimationStep, kAnimationHookStackCapacity> g_enemyAnimationSteps{};
 std::size_t g_actorExecuteDepth = 0;
 std::size_t g_enemyGravityDepth = 0;
 std::size_t g_enemyPositionDepth = 0;
+std::size_t g_arrowMoveDepth = 0;
 std::size_t g_enemyAnimationDepth = 0;
 std::uint64_t g_slowMotionFrame = 0;
 LinkPositionStep g_linkPositionStep{};
-BowPoseCorrection g_bowPoseCorrection{};
+AimMovementInputState g_aimMovementInput{};
 bool g_customSightActive = false;
 bool g_thirdPersonAimActive = false;
 f32 g_thirdPersonDistance = 300.0f;
@@ -135,6 +155,14 @@ bool is_bow_or_slingshot(u16 item) {
     return daAlink_c::checkBowItem(item) || item == dItemNo_PACHINKO_e;
 }
 
+bool is_clawshot_item(u16 item) {
+    return item == dItemNo_HOOKSHOT_e || item == dItemNo_W_HOOKSHOT_e;
+}
+
+bool aim_features_enabled() {
+    return custom_camera_enabled() || aimMovementEnabled();
+}
+
 bool bow_subject_active(const daAlink_c* link) {
     return link != nullptr && !link->checkWolf() &&
            (link->mProcID == daAlink_c::PROC_BOW_SUBJECT ||
@@ -142,9 +170,50 @@ bool bow_subject_active(const daAlink_c* link) {
              is_bow_or_slingshot(link->mEquipItem)));
 }
 
-bool vanilla_air_bow_camera_active(const daAlink_c* link) {
-    return aimMode() == 0 && bow_subject_active(link) &&
-           !link->mLinkAcch.ChkGroundHit();
+bool boomerang_subject_active(const daAlink_c* link) {
+    return link != nullptr && !link->checkWolf() &&
+           link->mProcID == daAlink_c::PROC_BOOMERANG_SUBJECT;
+}
+
+bool clawshot_subject_active(const daAlink_c* link) {
+    return link != nullptr && !link->checkWolf() &&
+           is_clawshot_item(link->mEquipItem) &&
+           link->mProcID == daAlink_c::PROC_HOOKSHOT_SUBJECT;
+}
+
+bool hookshot_action_active(const daAlink_c* link) {
+    if (link == nullptr) return false;
+    switch (link->mProcID) {
+    case daAlink_c::PROC_HOOKSHOT_SUBJECT:
+    case daAlink_c::PROC_HOOKSHOT_MOVE:
+    case daAlink_c::PROC_HOOKSHOT_FLY:
+    case daAlink_c::PROC_HOOKSHOT_ROOF_WAIT:
+    case daAlink_c::PROC_HOOKSHOT_ROOF_SHOOT:
+    case daAlink_c::PROC_HOOKSHOT_ROOF_BOOTS:
+    case daAlink_c::PROC_HOOKSHOT_WALL_WAIT:
+    case daAlink_c::PROC_HOOKSHOT_WALL_SHOOT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool ironball_subject_active(const daAlink_c* link) {
+    return link != nullptr && !link->checkWolf() &&
+           link->mEquipItem == dItemNo_IRONBALL_e &&
+           link->mProcID == daAlink_c::PROC_IRON_BALL_SUBJECT;
+}
+
+bool aim_subject_active(const daAlink_c* link) {
+    return bow_subject_active(link) || boomerang_subject_active(link) ||
+           clawshot_subject_active(link) || ironball_subject_active(link);
+}
+
+bool vanilla_aim_camera_active(const daAlink_c* link) {
+    return aimMode() == 0 &&
+        (boomerang_subject_active(link) || clawshot_subject_active(link) ||
+         ironball_subject_active(link) ||
+         (bow_subject_active(link) && !link->mLinkAcch.ChkGroundHit()));
 }
 
 bool is_hawkeye_bow(const daAlink_c* link) {
@@ -174,6 +243,29 @@ bool face_camera_view_yaw(daAlink_c* link) {
     link->shape_angle.y = cM_atan2s(direction.x, direction.z);
     link->field_0x310c = link->shape_angle.y;
     return true;
+}
+
+void face_camera_view(daAlink_c* link) {
+    auto* process = player_camera(link);
+    if (process == nullptr) {
+        return;
+    }
+
+    const cXyz direction =
+        process->mCamera.mViewCache.mCenter - process->mCamera.mViewCache.mEye;
+    if (!std::isfinite(direction.x) || !std::isfinite(direction.y) ||
+        !std::isfinite(direction.z) || direction.abs() <= 0.001f)
+    {
+        return;
+    }
+
+    if (direction.absXZ() > 0.001f) {
+        link->shape_angle.y = cM_atan2s(direction.x, direction.z);
+        link->field_0x310c = link->shape_angle.y;
+    }
+    link->mBodyAngle.x = cM_atan2s(-direction.y, direction.absXZ());
+    link->checkBodyAngleX(link->mBodyAngle.x);
+    link->field_0x310a = link->mBodyAngle.x;
 }
 
 cXyz aim_vector_to_world(daAlink_c* link, cXyz vector) {
@@ -310,7 +402,18 @@ bool bow_reticle_target(daAlink_c* link, cXyz& target, cXyz& direction) {
     return true;
 }
 
+void draw_camera_center_sight(daAlink_c* link);
+
 void draw_camera_bow_sight(daAlink_c* link) {
+    if (boomerang_subject_active(link) || ironball_subject_active(link))
+    {
+        draw_camera_center_sight(link);
+        return;
+    }
+    if (clawshot_subject_active(link)) {
+        return;
+    }
+
     cXyz target;
     cXyz direction;
     if (link == nullptr || !bow_reticle_target(link, target, direction)) {
@@ -322,10 +425,28 @@ void draw_camera_bow_sight(daAlink_c* link) {
     g_customSightActive = true;
 }
 
-void draw_subject_bow_sight(daAlink_c* link) {
-    if (link == nullptr || is_hawkeye_bow(link)) {
+void draw_subject_aim_sight(daAlink_c* link) {
+    if (link == nullptr) {
         return;
     }
+    if (boomerang_subject_active(link)) {
+        link->setBoomerangSight();
+        if (custom_camera_enabled()) {
+            draw_camera_center_sight(link);
+        }
+        return;
+    }
+    if (clawshot_subject_active(link)) {
+        return;
+    }
+    if (ironball_subject_active(link)) {
+        if (custom_camera_enabled()) {
+            draw_camera_center_sight(link);
+        }
+        return;
+    }
+    if (is_hawkeye_bow(link)) return;
+
     link->setBowSight();
     if (custom_camera_enabled()) {
         link->mSight.onDrawFlg();
@@ -359,8 +480,9 @@ void draw_camera_center_sight(daAlink_c* link) {
     g_customSightActive = true;
 }
 
-bool should_keep_camera_bow_sight(daAlink_c* link) {
-    return link != nullptr && custom_camera_enabled() && !is_hawkeye_bow(link);
+bool should_keep_camera_aim_sight(daAlink_c* link) {
+    return link != nullptr && custom_camera_enabled() &&
+           !is_hawkeye_bow(link) && !clawshot_subject_active(link);
 }
 
 void prepare_third_person_aim(daAlink_c* link) {
@@ -407,8 +529,8 @@ bool update_subject_aim(daAlink_c* link) {
     link->shape_angle.y = shapeAngle;
     update_move_animation(link);
     if (aim_with_c_stick(link)) {
-        draw_subject_bow_sight(link);
-    } else if (should_keep_camera_bow_sight(link)) {
+        draw_subject_aim_sight(link);
+    } else if (should_keep_camera_aim_sight(link)) {
         draw_camera_center_sight(link);
     }
     normalize_forward_aim_speed(link);
@@ -416,7 +538,7 @@ bool update_subject_aim(daAlink_c* link) {
 }
 
 void keep_camera_bow_sight(daAlink_c* link) {
-    if (!should_keep_camera_bow_sight(link)) {
+    if (!should_keep_camera_aim_sight(link)) {
         return;
     }
     if (aimMovementEnabled() && aimMode() == 2) {
@@ -426,7 +548,7 @@ void keep_camera_bow_sight(daAlink_c* link) {
 }
 
 bool update_bullet_time_bow_aim(daAlink_c* link) {
-    if (!should_keep_camera_bow_sight(link)) {
+    if (!should_keep_camera_aim_sight(link)) {
         return false;
     }
     prepare_third_person_aim(link);
@@ -490,7 +612,134 @@ bool manual_jump_is_airborne(daAlink_c* link) {
     return link != nullptr && !link->mLinkAcch.ChkGroundHit() &&
            (link->mProcID == daAlink_c::PROC_AUTO_JUMP ||
             link->mProcID == daAlink_c::PROC_FALL ||
-            link->mProcID == daAlink_c::PROC_BOW_SUBJECT);
+            link->mProcID == daAlink_c::PROC_BOW_SUBJECT ||
+            clawshot_subject_active(link));
+}
+
+bool link_is_airborne(daAlink_c* link) {
+    return link != nullptr && !link->checkWolf() &&
+           !link->mLinkAcch.ChkGroundHit();
+}
+
+bool manual_jump_owner_is_airborne(daAlink_c* link) {
+    return manual_jump_is_airborne(link) ||
+           ((g_manualJumpBowAimActive || aim_subject_active(link)) &&
+            link_is_airborne(link));
+}
+
+u16 selected_midair_bow_item(u8 slot) {
+    if (slot == SELECT_ITEM_DOWN && zItemSlotEnabled() &&
+        hawkeyeMidairBowAimEnabled() &&
+        selected_item_for_button(slot) == dItemNo_HAWK_ARROW_e)
+    {
+        return dItemNo_HAWK_ARROW_e;
+    }
+    return dComIfGp_getSelectItem(slot);
+}
+
+bool item_button_triggered(const daAlink_c* link, u8 slot) {
+    if (link == nullptr) {
+        return false;
+    }
+
+    const bool gameTrigger =
+        (static_cast<u32>(link->mItemTrigger) & (1u << slot)) != 0;
+    switch (slot) {
+    case SELECT_ITEM_X:
+        return gameTrigger || mDoCPd_c::getTrigX(PAD_1) != 0;
+    case SELECT_ITEM_Y:
+        return gameTrigger || mDoCPd_c::getTrigY(PAD_1) != 0;
+    case SELECT_ITEM_DOWN:
+        return gameTrigger || mDoCPd_c::getTrigZ(PAD_1) != 0;
+    default:
+        return gameTrigger;
+    }
+}
+
+u8 midair_clawshot_button_triggered(const daAlink_c* link) {
+    if (link == nullptr) return dItemNo_NONE_e;
+
+    constexpr std::array<u8, 3> slots = {
+        SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
+    for (const u8 slot : slots) {
+        if (slot == SELECT_ITEM_DOWN && !zItemSlotEnabled()) continue;
+        if (item_button_triggered(link, slot) &&
+            is_clawshot_item(selected_item_for_button(slot)))
+        {
+            return slot;
+        }
+    }
+    return dItemNo_NONE_e;
+}
+
+void capture_midair_clawshot_input(daAlink_c* link) {
+    if (!aim_features_enabled() || !link_is_airborne(link)) return;
+    if (hookshot_action_active(link)) return;
+
+    const u8 slot = midair_clawshot_button_triggered(link);
+    if (slot == dItemNo_NONE_e) return;
+
+    const u16 item = selected_item_for_button(slot);
+    link->mSelectItemId = slot;
+    if (link->mEquipItem != item) {
+        link->itemEquip(item);
+        if (link->field_0x2fde != item) return;
+        link->commonChangeItem();
+    }
+    if (!is_clawshot_item(link->mEquipItem)) return;
+
+    link->setHookshotReadyAnime();
+    link->procHookshotSubjectInit();
+}
+
+u8 hawkeye_combo_button_triggered(const daAlink_c* link) {
+    if (link == nullptr || !hawkeyeMidairBowAimEnabled()) {
+        return dItemNo_NONE_e;
+    }
+
+    constexpr std::array<u8, 3> slots = {
+        SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
+    for (const u8 slot : slots) {
+        if (slot == SELECT_ITEM_DOWN &&
+            (!zItemSlotEnabled() || secondaryItemAssigned(slot)))
+        {
+            continue;
+        }
+        if (item_button_triggered(link, slot) &&
+            selected_midair_bow_item(slot) == dItemNo_HAWK_ARROW_e)
+        {
+            return slot;
+        }
+    }
+    return dItemNo_NONE_e;
+}
+
+void capture_midair_hawkeye_combo_input(
+    ModContext*, void* args, void*, void*)
+{
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr || !link_is_airborne(link)) {
+        return;
+    }
+
+    const u8 button = hawkeye_combo_button_triggered(link);
+    if (button == dItemNo_NONE_e) {
+        return;
+    }
+    if (g_manualJumpOwner != link) {
+        g_manualJumpOwner = link;
+        g_manualJumpStarted = std::chrono::steady_clock::now();
+        g_bulletTime.usedForJump = false;
+        g_bowBulletTimePending = false;
+    }
+
+    g_manualJumpBowAimRequested = true;
+    g_manualJumpBowAimActive = true;
+    g_manualJumpBowAimHawkeyeRequested = true;
+    g_manualJumpBowAimHawkeyeButton = button;
+    if (bulletTimeMode() != 0) {
+        g_bowBulletTimePending = true;
+    }
 }
 
 bool selected_bow_button_requested(daAlink_c* link) {
@@ -502,12 +751,12 @@ bool selected_bow_button_requested(daAlink_c* link) {
         SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
     for (const u8 slot : slots) {
         if ((buttons & (1u << slot)) != 0 &&
-            is_bow_or_slingshot(dComIfGp_getSelectItem(slot)))
+            is_bow_or_slingshot(selected_midair_bow_item(slot)))
         {
             return true;
         }
     }
-    return false;
+    return hawkeye_combo_button_triggered(link) != dItemNo_NONE_e;
 }
 
 bool selected_bow_button_triggered(daAlink_c* link) {
@@ -516,12 +765,12 @@ bool selected_bow_button_triggered(daAlink_c* link) {
         SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
     for (const u8 slot : slots) {
         if ((static_cast<u32>(link->mItemTrigger) & (1u << slot)) != 0 &&
-            is_bow_or_slingshot(dComIfGp_getSelectItem(slot)))
+            is_bow_or_slingshot(selected_midair_bow_item(slot)))
         {
             return true;
         }
     }
-    return false;
+    return hawkeye_combo_button_triggered(link) != dItemNo_NONE_e;
 }
 
 bool bow_aim_requested(daAlink_c* link) {
@@ -531,17 +780,24 @@ bool bow_aim_requested(daAlink_c* link) {
             link->itemButton());
 }
 
-bool equip_selected_bow_for_bullet_time(daAlink_c* link) {
-    if (link == nullptr || is_bow_or_slingshot(link->mEquipItem)) return false;
+bool equip_selected_bow_for_bullet_time(
+    daAlink_c* link, bool replaceCurrentBow = false,
+    u8 forcedSlot = dItemNo_NONE_e)
+{
+    if (link == nullptr ||
+        (is_bow_or_slingshot(link->mEquipItem) && !replaceCurrentBow))
+    {
+        return false;
+    }
     const u32 buttons =
         static_cast<u32>(link->mItemTrigger) |
         static_cast<u32>(link->mItemButton);
     constexpr std::array<u8, 3> slots = {
         SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
     for (const u8 slot : slots) {
-        if ((buttons & (1u << slot)) == 0) continue;
-        const u16 item = dComIfGp_getSelectItem(slot);
-        if (!is_bow_or_slingshot(item)) continue;
+        if ((buttons & (1u << slot)) == 0 && slot != forcedSlot) continue;
+        const u16 item = selected_midair_bow_item(slot);
+        if (!is_bow_or_slingshot(item) || item == link->mEquipItem) continue;
         link->mSelectItemId = slot;
         link->itemEquip(item);
         if (link->field_0x2fde != item) return false;
@@ -585,10 +841,29 @@ void start_bullet_time(daAlink_c* link) {
 }
 
 void update_bullet_time_before_jump(daAlink_c* link) {
-    if (link == nullptr || g_manualJumpOwner != link) return;
+    if (link == nullptr) return;
+    const u8 hawkeyeComboButton = hawkeye_combo_button_triggered(link);
+    const bool hawkeyeCombo = hawkeyeComboButton != dItemNo_NONE_e;
+    if (hawkeyeCombo && link_is_airborne(link)) {
+        if (g_manualJumpOwner != link) {
+            g_manualJumpOwner = link;
+            g_manualJumpStarted = std::chrono::steady_clock::now();
+            g_bulletTime.usedForJump = false;
+            g_bowBulletTimePending = false;
+        }
+        g_manualJumpBowAimRequested = true;
+        g_manualJumpBowAimActive = true;
+        g_manualJumpBowAimHawkeyeRequested = true;
+        g_manualJumpBowAimHawkeyeButton = hawkeyeComboButton;
+        if (bulletTimeMode() != 0) {
+            g_bowBulletTimePending = true;
+        }
+    }
+    if (g_manualJumpOwner != link) return;
     const auto now = std::chrono::steady_clock::now();
-    if ((!manualJumpEnabled() && !revalisGaleEnabled()) ||
-        !manual_jump_is_airborne(link) ||
+    if ((!manualJumpEnabled() && !revalisGaleEnabled() &&
+         !(hawkeyeMidairBowAimEnabled() && g_manualJumpBowAimActive)) ||
+        !manual_jump_owner_is_airborne(link) ||
         (!g_bulletTime.active &&
          now - g_manualJumpStarted >= kManualJumpTimeout) ||
         link->checkEventRun() || dComIfGp_event_runCheck() ||
@@ -601,9 +876,20 @@ void update_bullet_time_before_jump(daAlink_c* link) {
     if (selected_bow_button_triggered(link)) {
         g_manualJumpBowAimRequested = true;
         g_manualJumpBowAimActive = true;
-        if (!is_bow_or_slingshot(link->mEquipItem)) {
-            g_bowBulletTimePending =
-                equip_selected_bow_for_bullet_time(link);
+        g_manualJumpBowAimHawkeyeRequested = hawkeyeCombo;
+        g_manualJumpBowAimHawkeyeButton =
+            hawkeyeCombo ? hawkeyeComboButton : dItemNo_NONE_e;
+        if (hawkeyeCombo || !is_bow_or_slingshot(link->mEquipItem)) {
+            if (hawkeyeCombo) {
+                if (bulletTimeMode() != 0) {
+                    g_bowBulletTimePending = true;
+                }
+                equip_selected_bow_for_bullet_time(
+                    link, true, hawkeyeComboButton);
+            } else {
+                g_bowBulletTimePending =
+                    equip_selected_bow_for_bullet_time(link);
+            }
         }
     }
 
@@ -611,6 +897,13 @@ void update_bullet_time_before_jump(daAlink_c* link) {
         stop_bullet_time();
         g_bulletTime.usedForJump = false;
         return;
+    }
+
+    if (!g_bulletTime.active && !g_bulletTime.usedForJump &&
+        link_is_airborne(link) && clawshot_subject_active(link) &&
+        link->checkHookshotWait())
+    {
+        start_bullet_time(link);
     }
 
     if (g_bulletTime.active && link->doTrigger()) {
@@ -643,11 +936,13 @@ void update_bullet_time_after_jump(daAlink_c* link) {
     {
         return;
     }
-    if (!manual_jump_is_airborne(link)) {
+    if (!manual_jump_owner_is_airborne(link)) {
         g_manualJumpOwner = nullptr;
         g_bowBulletTimePending = false;
         g_manualJumpBowAimRequested = false;
         g_manualJumpBowAimActive = false;
+        g_manualJumpBowAimHawkeyeRequested = false;
+        g_manualJumpBowAimHawkeyeButton = dItemNo_NONE_e;
         stop_bullet_time();
         g_bulletTime.usedForJump = false;
         return;
@@ -657,14 +952,25 @@ void update_bullet_time_after_jump(daAlink_c* link) {
 
 void update_manual_jump_bow_aim(daAlink_c* link) {
     if (link == nullptr || g_manualJumpOwner != link ||
-        !manual_jump_is_airborne(link))
+        !manual_jump_owner_is_airborne(link))
     {
+        return;
+    }
+
+    if (g_manualJumpBowAimRequested &&
+        g_manualJumpBowAimHawkeyeRequested &&
+        link->mEquipItem != dItemNo_HAWK_ARROW_e)
+    {
+        equip_selected_bow_for_bullet_time(
+            link, true, g_manualJumpBowAimHawkeyeButton);
         return;
     }
 
     if (!is_bow_or_slingshot(link->mEquipItem)) {
         g_manualJumpBowAimRequested = false;
         g_manualJumpBowAimActive = false;
+        g_manualJumpBowAimHawkeyeRequested = false;
+        g_manualJumpBowAimHawkeyeButton = dItemNo_NONE_e;
         return;
     }
 
@@ -686,11 +992,23 @@ void update_manual_jump_bow_aim(daAlink_c* link) {
     {
         link->setBowSight();
     }
+    if (g_manualJumpBowAimHawkeyeRequested &&
+        is_hawkeye_bow(link) &&
+        !dComIfGp_checkPlayerStatus0(0, 0x200000))
+    {
+        link->procCoSubjectivityInit();
+        dComIfGp_setPlayerStatus0(0, 0x200000);
+        link->seStartSystem(Z2SE_AL_HAWK_EYE_PUTON);
+    }
     g_manualJumpBowAimRequested = false;
+    g_manualJumpBowAimHawkeyeRequested = false;
+    g_manualJumpBowAimHawkeyeButton = dItemNo_NONE_e;
 }
 
 HookAction before_player_execute_impl(ModContext*, void* args, void*, void*) {
-    update_bullet_time_before_jump(mods::arg<daAlink_c*>(args, 0));
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    capture_midair_clawshot_input(link);
+    update_bullet_time_before_jump(link);
     return HOOK_CONTINUE;
 }
 
@@ -709,6 +1027,8 @@ void mark_manual_jump_started_impl(daAlink_c* link) {
     g_bowBulletTimePending = false;
     g_manualJumpBowAimRequested = false;
     g_manualJumpBowAimActive = false;
+    g_manualJumpBowAimHawkeyeRequested = false;
+    g_manualJumpBowAimHawkeyeButton = dItemNo_NONE_e;
 }
 
 void clear_manual_jump_impl(daAlink_c* link) {
@@ -719,6 +1039,8 @@ void clear_manual_jump_impl(daAlink_c* link) {
     g_bowBulletTimePending = false;
     g_manualJumpBowAimRequested = false;
     g_manualJumpBowAimActive = false;
+    g_manualJumpBowAimHawkeyeRequested = false;
+    g_manualJumpBowAimHawkeyeButton = dItemNo_NONE_e;
 }
 
 f32 actor_time_scale(fopAc_ac_c* actor) {
@@ -739,6 +1061,15 @@ f32 actor_time_scale(fopAc_ac_c* actor) {
 bool is_slow_motion_target(const fopAc_ac_c* actor) {
     return actor != nullptr &&
         (actor->group == fopAc_ENEMY_e || actor->group == fopAc_NPC_e);
+}
+
+bool is_arrow_target_actor(fopAc_ac_c* actor) {
+    if (actor == nullptr) {
+        return false;
+    }
+    const auto actorName = fopAcM_GetName(actor);
+    return actorName == fpcNm_OBJ_BOUMATO_e ||
+           actorName == fpcNm_OBJ_ITAMATO_e;
 }
 
 SlowActorClock* actor_clock(fopAc_ac_c* actor) {
@@ -847,7 +1178,7 @@ HookAction scale_actor_execution(ModContext*, void* args, void* retval, void*) {
     }
 
     if (fopAcM_GetName(actor) == fpcNm_ARROW_e ||
-        is_slow_motion_target(actor))
+        is_slow_motion_target(actor) || is_arrow_target_actor(actor))
     {
         return HOOK_CONTINUE;
     }
@@ -958,6 +1289,62 @@ HookAction scale_enemy_position_step(ModContext*, void* args, void*, void*) {
     actor->speed.y *= kEnemyTimeScale;
     actor->speed.z *= kEnemyTimeScale;
     return HOOK_CONTINUE;
+}
+
+HookAction scale_arrow_movement(ModContext*, void* args, void*, void*) {
+    const std::size_t depth = g_arrowMoveDepth++;
+    if ((!g_bulletTime.active && !g_flurryRushSlowMotionActive) ||
+        depth >= g_arrowMoveSteps.size())
+    {
+        return HOOK_CONTINUE;
+    }
+
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    if (arrow == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    ArrowMoveStep& step = g_arrowMoveSteps[depth];
+    step = {
+        .arrow = arrow,
+        .speed = arrow->speed,
+        .gravity = arrow->gravity,
+        .timeScale = kEnemyTimeScale,
+        .procFunc = arrow->mProcFunc,
+        .active = true,
+    };
+    arrow->speed.x *= step.timeScale;
+    arrow->speed.y *= step.timeScale;
+    arrow->speed.z *= step.timeScale;
+    arrow->gravity *= step.timeScale;
+    return HOOK_CONTINUE;
+}
+
+void restore_arrow_movement(ModContext*, void* args, void*, void*) {
+    if (g_arrowMoveDepth == 0) {
+        return;
+    }
+
+    const std::size_t depth = --g_arrowMoveDepth;
+    if (depth >= g_arrowMoveSteps.size()) {
+        return;
+    }
+
+    ArrowMoveStep& step = g_arrowMoveSteps[depth];
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    if (step.active && arrow == step.arrow) {
+        if (arrow->mProcFunc == step.procFunc) {
+            arrow->speed.x /= step.timeScale;
+            arrow->speed.y /= step.timeScale;
+            arrow->speed.z /= step.timeScale;
+        }
+        if (std::fabs(arrow->gravity - step.gravity * step.timeScale) <
+            0.00001f)
+        {
+            arrow->gravity = step.gravity;
+        }
+    }
+    step = {};
 }
 
 void restore_enemy_position_step(ModContext*, void* args, void*, void*) {
@@ -1098,7 +1485,11 @@ HookAction replace_bow_subject(ModContext*, void* args, void* retval, void*) {
     link->setDoStatus(BUTTON_STATUS_BACK);
     if (!link->checkNextAction(0)) {
         if (!update_subject_aim(link) && link->setBodyAngleToCamera()) {
-            link->setBowSight();
+            if (boomerang_subject_active(link)) {
+                link->setBoomerangSight();
+            } else {
+                link->setBowSight();
+            }
         }
         keep_camera_bow_sight(link);
     }
@@ -1107,12 +1498,119 @@ HookAction replace_bow_subject(ModContext*, void* args, void* retval, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
+void adjust_aim_subject(daAlink_c* link) {
+    if (link == nullptr || (aimMode() == 0 && !aimMovementEnabled()) ||
+        link->checkNextAction(0))
+    {
+        return;
+    }
+
+    face_camera_view_yaw(link);
+    const bool movementAim = update_subject_aim(link);
+    if (custom_camera_enabled()) {
+        face_camera_view(link);
+    }
+    if (!movementAim) {
+        draw_subject_aim_sight(link);
+    }
+    keep_camera_bow_sight(link);
+}
+
+void adjust_boomerang_subject(ModContext*, void* args, void*, void*) {
+    adjust_aim_subject(mods::arg<daAlink_c*>(args, 0));
+}
+
+HookAction isolate_aim_movement_input(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr || !aimMovementEnabled() ||
+        (!clawshot_subject_active(link) && !ironball_subject_active(link)) ||
+        g_aimMovementInput.active)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    g_aimMovementInput = {
+        .link = link,
+        .moveValue = link->mMoveValue,
+        .active = true,
+    };
+    link->mMoveValue = 0.0f;
+    return HOOK_CONTINUE;
+}
+
+void restore_aim_movement_input(daAlink_c* link) {
+    if (!g_aimMovementInput.active || g_aimMovementInput.link != link) {
+        return;
+    }
+    link->mMoveValue = g_aimMovementInput.moveValue;
+    g_aimMovementInput = {};
+}
+
+void adjust_clawshot_subject(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    restore_aim_movement_input(link);
+    if (link == nullptr || !link->checkHookshotWait()) {
+        return;
+    }
+    adjust_aim_subject(link);
+}
+
+void adjust_ironball_subject(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    restore_aim_movement_input(link);
+    if (link == nullptr || link->mItemVar0.field_0x3018 != 2 ||
+        !link->itemButton())
+    {
+        return;
+    }
+    adjust_aim_subject(link);
+}
+
+void aim_boomerang_throw(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    if (!boomerang_subject_active(link)) {
+        return;
+    }
+
+    auto* cameraProcess = player_camera(link);
+    auto* boomerang =
+        static_cast<daBoomerang_c*>(link->getBoomerangActor());
+    if (cameraProcess == nullptr || boomerang == nullptr ||
+        fopAcM_GetName(boomerang) != fpcNm_BOOMERANG_e ||
+        !is_player_camera(&cameraProcess->mCamera, link))
+    {
+        return;
+    }
+
+    auto* camera = &cameraProcess->mCamera;
+    const cXyz direction =
+        camera->mViewCache.mCenter - camera->mViewCache.mEye;
+    if (!std::isfinite(direction.x) || !std::isfinite(direction.y) ||
+        !std::isfinite(direction.z) || direction.abs() <= 0.001f)
+    {
+        return;
+    }
+
+    boomerang->current.angle.x = direction.atan2sY_XZ();
+    if (direction.absXZ() > 0.001f) {
+        boomerang->current.angle.y = direction.atan2sX_Z();
+    }
+}
+
 void select_bow_camera_mode(ModContext*, void* args, void* retval, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     auto* result = static_cast<s32*>(retval);
-    if (camera == nullptr || result == nullptr || !custom_camera_enabled() ||
-        !bow_subject_active(daAlink_getAlinkActorClass()))
+    auto* link = daAlink_getAlinkActorClass();
+    const bool vanillaBoomerang =
+        aimMode() == 0 && boomerang_subject_active(link);
+    if (camera == nullptr || result == nullptr ||
+        (!custom_camera_enabled() && !vanillaBoomerang) ||
+        !aim_subject_active(link))
     {
+        return;
+    }
+    if (vanillaBoomerang) {
+        *result = 7;
         return;
     }
     if (*result == 7 || *result == 8) {
@@ -1132,12 +1630,20 @@ bool camera_type_supports_bow_subject(dCamera_c* camera, int type) {
 void select_bow_camera_type(ModContext*, void* args, void* retval, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     auto* result = static_cast<s32*>(retval);
-    if (camera == nullptr || result == nullptr || !custom_camera_enabled() ||
-        !bow_subject_active(daAlink_getAlinkActorClass()))
+    auto* link = daAlink_getAlinkActorClass();
+    const bool vanillaBoomerang =
+        aimMode() == 0 && boomerang_subject_active(link);
+    if (camera == nullptr || result == nullptr ||
+        (!custom_camera_enabled() && !vanillaBoomerang) ||
+        !aim_subject_active(link))
     {
         return;
     }
     const int scopeType = camera->GetCameraTypeFromCameraName("Scope");
+    if (vanillaBoomerang) {
+        *result = scopeType;
+        return;
+    }
     if (*result == scopeType) {
         int aimType = camera->mMapToolType;
         if (!camera_type_supports_bow_subject(camera, aimType)) {
@@ -1153,7 +1659,7 @@ void adjust_third_person_bow_camera(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     auto* link = daAlink_getAlinkActorClass();
     if (camera == nullptr || link == nullptr || aimMode() != 1 ||
-        !g_thirdPersonAimActive || !bow_subject_active(link) ||
+        !g_thirdPersonAimActive || !aim_subject_active(link) ||
         camera->mCurMode != 8)
     {
         return;
@@ -1221,6 +1727,52 @@ HookAction prepare_bow_aim_camera(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
+struct AimCameraStickInput {
+    f32 x;
+    f32 y;
+};
+
+AimCameraStickInput aim_camera_stick_input(
+    dCamera_c* camera, const daAlink_c* link)
+{
+    const bool midairBowAim =
+        link != nullptr && is_bow_or_slingshot(link->mEquipItem) &&
+        !link->mLinkAcch.ChkGroundHit() && !aimMovementEnabled();
+    if (midairBowAim) {
+        return {
+            mDoCPd_c::getStickX3D(camera->mPadID),
+            mDoCPd_c::getStickY(camera->mPadID),
+        };
+    }
+
+    return {
+        mDoCPd_c::getSubStickX3D(camera->mPadID),
+        mDoCPd_c::getSubStickY(camera->mPadID),
+    };
+}
+
+cXyz predicted_aim_camera_direction(dCamera_c* camera, daAlink_c* link) {
+    auto& view = camera->mViewCache;
+    const bool hasCameraState =
+        g_freeBowCamera == camera && g_freeBowCameraOwner == link;
+    f32 yaw = hasCameraState
+        ? g_freeBowCameraYaw
+        : view.mDirection.mAzimuth.Degree();
+    f32 pitch = hasCameraState
+        ? g_freeBowCameraPitch
+        : view.mDirection.mInclination.Degree();
+    const AimCameraStickInput stick = aim_camera_stick_input(camera, link);
+    yaw -= stick.x * kFreeBowCameraDegreesPerFrame;
+    pitch = std::clamp(
+        pitch - stick.y * kFreeBowCameraDegreesPerFrame,
+        -kFreeBowCameraPitchLimit, kFreeBowCameraPitchLimit);
+
+    auto direction = view.mDirection;
+    direction.mAzimuth = cSAngle(yaw);
+    direction.mInclination = cSAngle(pitch);
+    return view.mCenter - (view.mCenter + direction.Xyz());
+}
+
 void apply_unconstrained_bow_camera(dCamera_c* camera, daAlink_c* link) {
     auto& view = camera->mViewCache;
     auto& direction = view.mDirection;
@@ -1231,16 +1783,10 @@ void apply_unconstrained_bow_camera(dCamera_c* camera, daAlink_c* link) {
         g_freeBowCameraPitch = direction.mInclination.Degree();
     }
 
-    const bool airborne = !link->mLinkAcch.ChkGroundHit();
-    const f32 stickX = airborne
-        ? mDoCPd_c::getStickX3D(camera->mPadID)
-        : mDoCPd_c::getSubStickX3D(camera->mPadID);
-    const f32 stickY = airborne
-        ? mDoCPd_c::getStickY(camera->mPadID)
-        : mDoCPd_c::getSubStickY(camera->mPadID);
-    if (std::fabs(stickX) > 0.01f || std::fabs(stickY) > 0.01f) {
-        g_freeBowCameraYaw -= stickX * kFreeBowCameraDegreesPerFrame;
-        g_freeBowCameraPitch -= stickY * kFreeBowCameraDegreesPerFrame;
+    const AimCameraStickInput stick = aim_camera_stick_input(camera, link);
+    if (std::fabs(stick.x) > 0.01f || std::fabs(stick.y) > 0.01f) {
+        g_freeBowCameraYaw -= stick.x * kFreeBowCameraDegreesPerFrame;
+        g_freeBowCameraPitch -= stick.y * kFreeBowCameraDegreesPerFrame;
     }
     g_freeBowCameraPitch = std::clamp(
         g_freeBowCameraPitch, -kFreeBowCameraPitchLimit,
@@ -1277,6 +1823,76 @@ void apply_unconstrained_bow_camera(dCamera_c* camera, daAlink_c* link) {
         : cXyz::BaseY;
 }
 
+HookAction sync_airborne_bow_root_yaw(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    if (link == nullptr || !is_bow_or_slingshot(link->mEquipItem) ||
+        link->mLinkAcch.ChkGroundHit() || !aim_subject_active(link) ||
+        (!custom_camera_enabled() && !vanilla_aim_camera_active(link)))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    auto* process = player_camera(link);
+    if (process == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    const cXyz direction =
+        predicted_aim_camera_direction(&process->mCamera, link);
+    if (!std::isfinite(direction.x) || !std::isfinite(direction.y) ||
+        !std::isfinite(direction.z) || direction.absXZ() <= 0.001f)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    link->shape_angle.y = cM_atan2s(direction.x, direction.z);
+    link->field_0x310c = link->shape_angle.y;
+    return HOOK_CONTINUE;
+}
+
+HookAction sync_held_model_pose_to_camera(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    auto* model = mods::arg<J3DModel*>(args, 1);
+    if (link == nullptr || model == nullptr || model != link->mpLinkModel ||
+        (!is_bow_or_slingshot(link->mEquipItem) &&
+         !is_clawshot_item(link->mEquipItem)) ||
+        !aim_subject_active(link) ||
+        (!custom_camera_enabled() && !vanilla_aim_camera_active(link)))
+    {
+        return HOOK_CONTINUE;
+    }
+
+    auto* process = player_camera(link);
+    if (process == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    const cXyz direction =
+        predicted_aim_camera_direction(&process->mCamera, link);
+    if (!std::isfinite(direction.x) || !std::isfinite(direction.y) ||
+        !std::isfinite(direction.z) || direction.abs() <= 0.001f)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    s16 bodyPitch = cM_atan2s(-direction.y, direction.absXZ());
+    if (link->mpHIO != nullptr) {
+        bodyPitch = cLib_minMaxLimit<s16>(
+            bodyPitch, link->mpHIO->mItem.m.mItemFPUpMaxUnk,
+            link->mpHIO->mItem.m.mItemFPMaxUnk);
+    } else {
+        bodyPitch = cLib_minMaxLimit<s16>(bodyPitch, -0x4000, 0x4000);
+    }
+
+    const s16 cameraYaw = cM_atan2s(direction.x, direction.z);
+    link->mBodyAngle.x = bodyPitch;
+    link->mBodyAngle.y = cLib_minMaxLimit<s16>(
+        cameraYaw - link->shape_angle.y, -0x4000, 0x4000);
+    link->field_0x30c8 = link->mBodyAngle.y >> 1;
+    link->field_0x310a = link->mBodyAngle.x;
+    return HOOK_CONTINUE;
+}
+
 void adjust_bow_aim_camera(ModContext*, void* args, void*, void*) {
     auto* camera = mods::arg<dCamera_c*>(args, 0);
     auto* link = daAlink_getAlinkActorClass();
@@ -1285,8 +1901,8 @@ void adjust_bow_aim_camera(ModContext*, void* args, void*, void*) {
     }
     g_cameraFovyBeforeRunCamera = nullptr;
     if (!is_player_camera(camera, link) ||
-        (!custom_camera_enabled() && !vanilla_air_bow_camera_active(link)) ||
-        !bow_subject_active(link))
+        (!custom_camera_enabled() && !vanilla_aim_camera_active(link)) ||
+        !aim_subject_active(link))
     {
         if (g_zoomApplied && camera == g_zoomCamera) {
             camera->mFovy = g_cameraFovyBeforeRun;
@@ -1310,6 +1926,9 @@ void adjust_bow_aim_camera(ModContext*, void* args, void*, void*) {
         g_zoomBaseFovy = std::clamp(g_cameraFovyBeforeRun, 10.0f, 120.0f);
         camera->mFovy = std::clamp(g_zoomBaseFovy / zoom, 10.0f, 120.0f);
         g_zoomApplied = true;
+    } else if (aimMode() == 0 && boomerang_subject_active(link)) {
+        camera->mFovy = g_cameraFovyBeforeRun;
+        camera->mViewCache.mFovy = g_cameraFovyBeforeRun;
     } else {
         g_zoomCamera = nullptr;
         g_zoomApplied = false;
@@ -1319,7 +1938,7 @@ void adjust_bow_aim_camera(ModContext*, void* args, void*, void*) {
 }
 
 void clear_bow_aim_state(daAlink_c* link) {
-    if (bow_subject_active(link)) {
+    if (aim_subject_active(link)) {
         return;
     }
     g_thirdPersonAimActive = false;
@@ -1334,7 +1953,7 @@ void aim_arrow_at_bow_reticle(ModContext*, void* args, void*, void*) {
     auto* arrow = mods::arg<daArrow_c*>(args, 0);
     auto* link = daAlink_getAlinkActorClass();
     if (arrow == nullptr || link == nullptr ||
-        (!custom_camera_enabled() && !vanilla_air_bow_camera_active(link)) ||
+        (!custom_camera_enabled() && !vanilla_aim_camera_active(link)) ||
         !bow_subject_active(link))
     {
         return;
@@ -1360,53 +1979,6 @@ void aim_arrow_at_bow_reticle(ModContext*, void* args, void*, void*) {
     arrow->speed.set(direction.x * speed, direction.y * speed, direction.z * speed);
 }
 
-HookAction correct_held_bow_pose(ModContext*, void* args, void*, void*) {
-    auto* link = mods::arg<daAlink_c*>(args, 0);
-    auto* model = mods::arg<J3DModel*>(args, 1);
-    if (!bow_subject_active(link) || !daAlink_c::checkBowItem(link->mEquipItem) ||
-        model != link->mpLinkModel || g_bowPoseCorrection.link != nullptr)
-    {
-        return HOOK_CONTINUE;
-    }
-
-    cXyz target;
-    cXyz forward;
-    if (!bow_reticle_target(link, target, forward)) {
-        return HOOK_CONTINUE;
-    }
-    const cXyz savedRoot = link->mHeldItemRootPos;
-    s16 pitch = 0;
-    s16 yaw = 0;
-    const cXyz* launchPosition = link->checkBowCameraArrowPosP(&pitch, &yaw);
-    cXyz origin;
-    if (launchPosition != nullptr) {
-        origin = *launchPosition;
-    }
-    link->mHeldItemRootPos = savedRoot;
-    if (launchPosition == nullptr) {
-        return HOOK_CONTINUE;
-    }
-
-    cXyz direction(target.x - origin.x, target.y - origin.y, target.z - origin.z);
-    if (direction.abs() <= 0.001f || direction.inprod(forward) <= 0.0f) {
-        return HOOK_CONTINUE;
-    }
-    direction.normalize();
-    if (link->checkMagneBootsOn()) {
-        mDoMtx_multVecSR(link->getMagneBootsInvMtx(), &direction, &direction);
-    }
-
-    g_bowPoseCorrection = {
-        .link = link,
-        .bodyAngle = link->mBodyAngle,
-        .torsoYaw = link->field_0x30c8,
-    };
-    link->mBodyAngle.x = cM_atan2s(-direction.y, direction.absXZ());
-    link->mBodyAngle.y = cM_atan2s(direction.x, direction.z) - link->shape_angle.y;
-    link->field_0x30c8 = link->mBodyAngle.y >> 1;
-    return HOOK_CONTINUE;
-}
-
 HookAction hide_body_in_vanilla_aim(ModContext*, void* args, void*, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
     auto* model = mods::arg<J3DModel*>(args, 1);
@@ -1416,19 +1988,6 @@ HookAction hide_body_in_vanilla_aim(ModContext*, void* args, void*, void*) {
         return HOOK_CONTINUE;
     }
     return HOOK_SKIP_ORIGINAL;
-}
-
-void restore_held_bow_pose(ModContext*, void* args, void*, void*) {
-    auto* link = mods::arg<daAlink_c*>(args, 0);
-    auto* model = mods::arg<J3DModel*>(args, 1);
-    if (link == nullptr || model != link->mpLinkModel ||
-        g_bowPoseCorrection.link != link)
-    {
-        return;
-    }
-    link->mBodyAngle = g_bowPoseCorrection.bodyAngle;
-    link->field_0x30c8 = g_bowPoseCorrection.torsoYaw;
-    g_bowPoseCorrection = {};
 }
 
 }  // namespace
@@ -1472,7 +2031,7 @@ void update_bullet_time_for_player(daAlink_c* link) {
     ++g_slowMotionFrame;
     clear_bow_aim_state(link);
     if (g_manualJumpOwner != nullptr &&
-        (link != g_manualJumpOwner || !manual_jump_is_airborne(link) ||
+        (link != g_manualJumpOwner || !manual_jump_owner_is_airborne(link) ||
          (!g_bulletTime.active &&
           std::chrono::steady_clock::now() - g_manualJumpStarted >=
               kManualJumpTimeout) ||
@@ -1500,6 +2059,8 @@ void stop_bow_bullet_time() {
     g_bowBulletTimePending = false;
     g_manualJumpBowAimRequested = false;
     g_manualJumpBowAimActive = false;
+    g_manualJumpBowAimHawkeyeRequested = false;
+    g_manualJumpBowAimHawkeyeButton = dItemNo_NONE_e;
     g_zoomCamera = nullptr;
     g_zoomApplied = false;
     g_cameraFovyBeforeRunCamera = nullptr;

@@ -852,6 +852,7 @@ void connect() {
 void disconnect(const char* why) {
     release_all(why);
     if (s_ws) {
+        if (s_phase == Phase::Live) send_json("{\"op\":\"bye\"}");
         s_ws.close();
         s_ws = mods::ws::Connection{};
     }
@@ -1079,6 +1080,14 @@ void global_on_ws_event(const mods::ws::Event& event) {
         s_ws = mods::ws::Connection{};
         release_all("server connection closed");
         s_phase = Phase::Off;
+        s_myId = 0;
+        s_total = 0;
+        s_here = 0;
+        s_lastPresenceHeartbeatMs = 0;
+        s_presenceHeartbeatSupported = false;
+        s_seen.clear();
+        s_onlineRoster.clear();
+        s_area = "\x01";
         s_superseded = s_superseded ||
             event.closeReason == "replaced by newer session";
         if (s_superseded) {

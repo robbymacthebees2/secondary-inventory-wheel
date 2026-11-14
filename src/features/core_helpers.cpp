@@ -1,4 +1,5 @@
 bool g_darkLinkDamageMultiplierConfigReadFailureReported = false;
+bool g_giantMaskDamageMultiplierConfigReadFailureReported = false;
 
 bool zItemSlotEnabled();
 bool get_bool_option(ConfigVarHandle handle, bool fallback);
@@ -57,6 +58,24 @@ int64_t darkLinkDamageMultiplierPercent() {
         kDarkLinkDamageMultiplierMaxPercent);
 }
 
+int64_t giantMaskDamageMultiplierPercent() {
+    int64_t value = kGiantMaskDamageMultiplierDefaultPercent;
+    if (g_giantMaskDamageMultiplier == 0 ||
+        svc_config->get_int(mod_ctx, g_giantMaskDamageMultiplier, &value) != MOD_OK)
+    {
+        if (!g_giantMaskDamageMultiplierConfigReadFailureReported) {
+            svc_log->warn(mod_ctx, "could not read Giant's Mask damage multiplier config");
+            g_giantMaskDamageMultiplierConfigReadFailureReported = true;
+        }
+        return kGiantMaskDamageMultiplierDefaultPercent;
+    }
+
+    g_giantMaskDamageMultiplierConfigReadFailureReported = false;
+    return std::clamp(
+        value, kGiantMaskDamageMultiplierMinPercent,
+        kGiantMaskDamageMultiplierMaxPercent);
+}
+
 int64_t manualJumpHeightPercent() {
     int64_t value = kManualJumpDefaultHeightPercent;
     if (g_manualJumpHeightPercent == 0 ||
@@ -107,6 +126,10 @@ int64_t aimMode() {
 
 bool aimMovementEnabled() {
     return get_bool_option(g_aimMovementEnabled, true);
+}
+
+bool hawkeyeMidairBowAimEnabled() {
+    return get_bool_option(g_hawkeyeMidairBowAimEnabled, false);
 }
 
 int64_t cinemaZoomPercent() {
@@ -261,6 +284,30 @@ bool spinnerAttackAlwaysActive() {
 
 bool shieldSurfRBoostEnabled() {
     return get_bool_option(g_shieldSurfRBoost, false);
+}
+
+bool iceLeafRBoostEnabled() {
+    return get_bool_option(g_iceLeafRBoost, false);
+}
+
+bool clawshotUnevenSurfaceStickEnabled() {
+    return get_bool_option(g_clawshotUnevenSurfaceStick, false);
+}
+
+bool indoorMovementUnrestrictedEnabled() {
+    return get_bool_option(g_indoorMovementUnrestricted, false);
+}
+
+bool castleTownFirstPersonEnabled() {
+    return get_bool_option(g_castleTownFirstPerson, false);
+}
+
+bool clawshotAnySurfaceEnabled() {
+    return get_bool_option(g_clawshotAnySurface, false);
+}
+
+bool lanternIgnitesEnemiesEnabled() {
+    return get_bool_option(g_lanternIgnitesEnemies, false);
 }
 
 bool hoverBootsAirwalkingEnabled() {
@@ -776,6 +823,44 @@ bool secondaryItemAssigned(int button) {
     return secondaryItemIdForSlot(g_secondarySelectedItems[button]) != dItemNo_NONE_e;
 }
 
+bool gale_bomb_combo_selected(int button) {
+    if (button != kZItemSelectIndex || !zItemSlotEnabled() ||
+        secondaryItemAssigned(button))
+    {
+        return false;
+    }
+
+    const u8 selectedSlot = dComIfGs_getSelectItemIndex(button);
+    const u8 mixItemSlot = dComIfGs_getMixItemIndex(button);
+    if (selectedSlot == dItemNo_NONE_e || mixItemSlot == dItemNo_NONE_e) {
+        return false;
+    }
+
+    const u8 selectedItem = dComIfGs_getItem(selectedSlot, false);
+    const u8 mixItem = dComIfGs_getItem(mixItemSlot, false);
+    return (selectedItem == dItemNo_BOOMERANG_e &&
+            mixItem == dItemNo_NORMAL_BOMB_e) ||
+           (selectedItem == dItemNo_NORMAL_BOMB_e &&
+            mixItem == dItemNo_BOOMERANG_e);
+}
+
+u8 gale_bomb_combo_bag_slot(int button) {
+    if (!gale_bomb_combo_selected(button)) {
+        return dItemNo_NONE_e;
+    }
+
+    const u8 selectedSlot = dComIfGs_getSelectItemIndex(button);
+    const u8 mixItemSlot = dComIfGs_getMixItemIndex(button);
+    const u8 bombInventorySlot =
+        dComIfGs_getItem(selectedSlot, false) == dItemNo_NORMAL_BOMB_e
+            ? selectedSlot
+            : mixItemSlot;
+    if (bombInventorySlot < SLOT_15 || bombInventorySlot >= SLOT_15 + 3) {
+        return dItemNo_NONE_e;
+    }
+    return bombInventorySlot - SLOT_15;
+}
+
 u8 selected_item_for_button(int button) {
     if (button != kZItemSelectIndex) {
         return dComIfGp_getSelectItem(button);
@@ -794,6 +879,9 @@ u8 selected_item_for_button(int button) {
     }
 
     const u8 mixItem = dComIfGs_getItem(mixItemSlot, false);
+    if (gale_bomb_combo_selected(button)) {
+        return dItemNo_BOOMERANG_e;
+    }
     if ((selectedItem == dItemNo_BOW_e && mixItem == dItemNo_KANTERA_e) ||
         (selectedItem == dItemNo_KANTERA_e && mixItem == dItemNo_BOW_e))
     {

@@ -519,11 +519,22 @@ void restore_shield_surf_hover_plane_board_common(
 void boost_shield_surf_speed(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);
     const BOOL canMove = mods::arg<BOOL>(args, 1);
-    if (!g_shieldSurfActive || g_shieldSurfIsIceLeaf ||
-        !shieldSurfRBoostEnabled() || !canMove ||
-        alink == nullptr || !alink->checkBoardRide() ||
+    if (alink == nullptr || !canMove || !alink->checkBoardRide() ||
         mDoCPd_c::getHoldR(PAD_1) == 0)
     {
+        return;
+    }
+
+    fopAc_ac_c* rideActor = alink->getRideActor();
+    const bool iceLeafRide =
+        (g_shieldSurfActive && g_shieldSurfIsIceLeaf) ||
+        (!g_shieldSurfActive && rideActor != nullptr &&
+         fopAcM_GetName(rideActor) == fpcNm_Obj_IceLeaf_e);
+    const bool boostEnabled = iceLeafRide
+        ? iceLeafRBoostEnabled()
+        : g_shieldSurfActive && !g_shieldSurfIsIceLeaf &&
+              shieldSurfRBoostEnabled();
+    if (!boostEnabled) {
         return;
     }
 

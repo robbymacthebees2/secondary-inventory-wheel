@@ -12,6 +12,9 @@
 #include <vector>
 
 class J3DModel;
+class J3DModelData;
+
+constexpr const char kSubiLinkSkinName[] = "Subi Link";
 
 struct FairyCompanionNetworkState {
     uint8_t active;
@@ -149,6 +152,7 @@ class J3DModel;
 class dKy_tevstr_c;
 bool wheel_is_dark_link_active();
 bool wheel_is_giant_mask_active();
+uint16_t wheel_pvp_sword_damage_percent(uint32_t attackType);
 void wheel_dark_link_remote_draw_begin(J3DModel* model, bool active);
 void wheel_dark_link_remote_draw_end();
 int standin_body(const char* skin);
@@ -216,6 +220,7 @@ enum SkinChoiceSlot {
     kSkinChoiceMasterSword,
     kSkinChoiceHylianShield,
     kSkinChoiceOrdonShield,
+    kSkinChoiceWoodenShield,
     kSkinChoiceHookshot,
     kSkinChoiceBoomerang,
     kSkinChoiceBombs,
@@ -225,6 +230,9 @@ enum SkinChoiceSlot {
     kSkinChoiceSpinner,
     kSkinChoiceFishingRod,
     kSkinChoiceBottle,
+    kSkinChoiceLantern,
+    kSkinChoiceWolfChain,
+    kSkinChoiceIronBoots,
     kSkinChoiceCount,
 
     kSkinChoiceFirstItem = kSkinChoiceWoodSword,
@@ -343,7 +351,7 @@ void skins_outfit_list(int index, std::vector<std::string>& out);
 
 std::string skins_folder_path();
 
-const char* const kCoopShippedModelsVersion = "2.0.8";
+const char* const kCoopShippedModelsVersion = "2.0.11";
 
 void skins_cycle_update();
 
@@ -440,6 +448,7 @@ J3DModel* skins_part_model(const char* name, int outfit, int part, float scale);
 class J3DModelData;
 J3DModelData* skins_equipment_data(const char* name, const char* file);
 J3DModelData* skins_local_equipment_data(const char* file);
+J3DModelData* skins_local_aram_data(uint16_t index);
 
 int skins_slot_for_outfit(int outfit);
 class J3DModelData;
@@ -780,6 +789,9 @@ void ui_init();
 
 void puppet_hook_release_player(uint8_t playerId);
 bool puppet_hook_player_active(uint8_t playerId);
+J3DModelData* puppet_hook_link_model_data(uint8_t playerId, int part);
+const char* puppet_hook_skin_for_active_outfit(uint8_t playerId, int* outfit);
+bool puppet_hook_subi_ordon_skin_active(uint8_t playerId);
 
 bool puppet_hook_sword_mtx(uint8_t playerId, float out[3][4], bool* master);
 
