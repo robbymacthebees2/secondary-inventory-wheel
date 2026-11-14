@@ -355,6 +355,58 @@ static void igniteBurningActor(fopAc_ac_c* actor) {
     slot.timer = BURNING_ACTOR_DURATION;
 }
 
+struct LanternIgnitionScan {
+    cXyz center;
+    f32 reachSquared;
+};
+
+static void* igniteLanternNearbyEnemy(void* actorData, void* scanData) {
+    auto* actor = static_cast<fopAc_ac_c*>(actorData);
+    auto* scan = static_cast<LanternIgnitionScan*>(scanData);
+    if (actor == nullptr || scan == nullptr ||
+        fopAcM_GetGroup(actor) != fopAc_ENEMY_e ||
+        scan->center.abs2(actor->current.pos) > scan->reachSquared)
+    {
+        return nullptr;
+    }
+
+    igniteBurningActor(actor);
+    return nullptr;
+}
+
+static void updateLanternIgnition(daAlink_c* alink) {
+    if (!lanternIgnitesEnemiesEnabled() || alink == nullptr ||
+        alink->mEquipItem != dItemNo_KANTERA_e ||
+        !alink->checkKandelaarSwing(1))
+    {
+        return;
+    }
+
+    const f32 swingFrame = alink->mUnderFrameCtrl[0].getFrame();
+    if (dComIfGs_getOil() == 0 || swingFrame < alink->field_0x347c ||
+        swingFrame > alink->field_0x3480 || !alink->mAtSph.ChkAtSet())
+    {
+        return;
+    }
+
+    if (alink->mAtSph.ChkAtHit()) {
+        fopAc_ac_c* hitActor = alink->mAtSph.GetAtHitAc();
+        if (hitActor != nullptr && fopAcM_GetGroup(hitActor) == fopAc_ENEMY_e) {
+            igniteBurningActor(hitActor);
+        }
+    }
+
+    const f32 reach = alink->mAtSph.GetR() + 40.0f;
+    LanternIgnitionScan scan = {alink->mAtSph.GetC(), reach * reach};
+    fopAcM_Search(igniteLanternNearbyEnemy, &scan);
+}
+
+void update_lantern_ignition_after_player_execute(
+    ModContext*, void* args, void*, void*)
+{
+    updateLanternIgnition(mods::arg<daAlink_c*>(args, 0));
+}
+
 static void updateBurningActors() {
     for (BurningActor& slot : g_burningActors) {
         if (slot.timer == 0) {

@@ -466,10 +466,12 @@ void push_global_player_names(SurfaceHandles& h) {
         ids.push_back(myId);
         labels.push_back(features_local_name() + " (You)");
     }
-    for (const GlobalPlayer& peer : global_online_players()) {
-        if (peer.id != myId && !peer.name.empty()) {
-            ids.push_back(peer.id);
-            labels.push_back(peer.name);
+    if (global_active()) {
+        for (const GlobalPlayer& peer : global_online_players()) {
+            if (peer.id != myId && !peer.name.empty()) {
+                ids.push_back(peer.id);
+                labels.push_back(peer.name);
+            }
         }
     }
 
@@ -1401,7 +1403,7 @@ bool add_slot_dropdown(UiElementHandle pane, int slot) {
     for (const std::string& option : s_slotOptions[slot]) {
         s_slotOptionPtrs[slot].push_back(option.c_str());
     }
-    if (s_slotModelNames[slot].empty()) return false;
+    if (s_slotModelNames[slot].empty() && slot != kSkinChoiceOrdonShield) return false;
 
     UiControlDesc desc = UI_CONTROL_DESC_INIT;
 
@@ -1434,7 +1436,7 @@ bool add_slot_dropdown(UiElementHandle pane, int slot) {
 
 void add_epona_skin_dropdown(UiElementHandle pane) {
     static const char* const options[] = {
-        "Default", "OOT Style Epona", "Twilight Epona", "Nightwalker Epona",
+        "Default", "OOT Style Epona", "Twilight Epona", "Nightwalker Epona", "N64 HoT",
     };
 
     UiControlDesc desc = UI_CONTROL_DESC_INIT;
@@ -1448,13 +1450,15 @@ void add_epona_skin_dropdown(UiElementHandle pane) {
         const std::string skin = skins_local_epona_skin();
         value->int_value = skin == "OOT Style Epona" ? 1 :
                            skin == "Twilight Epona" ? 2 :
-                           skin == "Nightwalker Epona" ? 3 : 0;
+                           skin == "Nightwalker Epona" ? 3 :
+                           skin == "N64 HoT" ? 4 : 0;
     };
     desc.set = [](ModContext*, void*, const UiControlValue* value) {
         switch (value->int_value) {
         case 1: skins_set_local_epona_skin("OOT Style Epona"); break;
         case 2: skins_set_local_epona_skin("Twilight Epona"); break;
         case 3: skins_set_local_epona_skin("Nightwalker Epona"); break;
+        case 4: skins_set_local_epona_skin("N64 HoT"); break;
         default: skins_set_local_epona_skin(""); break;
         }
     };
@@ -1487,7 +1491,13 @@ ModResult build_equipment_detail(ModContext*, UiElementHandle pane, void*, ModEr
     svc_ui->pane_add_section(mod_ctx, pane, "Pieces");
     int offered = 0;
     for (int slot = kSkinChoiceFirstItem; slot < kSkinChoiceCount; ++slot) {
+        if (slot == kSkinChoiceOrdonShield) continue;
         if (add_slot_dropdown(pane, slot)) ++offered;
+        if (slot == kSkinChoiceWoodenShield &&
+            add_slot_dropdown(pane, kSkinChoiceOrdonShield))
+        {
+            ++offered;
+        }
     }
     if (offered == 0) {
         svc_ui->pane_add_text(mod_ctx, pane,

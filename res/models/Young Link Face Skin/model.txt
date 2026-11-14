@@ -1,0 +1,4 @@
+name = Young Link - Face + Skin
+by = madnessgod
+about = Face and Show Some Skin variant for Hero, Ordon, Zora, Magic, and Sumo outfits. Ported with permission from GameBanana mod 724984.
+preset=false

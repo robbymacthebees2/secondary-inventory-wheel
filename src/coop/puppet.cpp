@@ -83,6 +83,8 @@ DEFINE_HOOK((static_cast<void* (*)(const char*, const char*, dRes_info_c*, int)>
 
 DEFINE_HOOK_SYMBOL("daAlink_c::loadAramBmd",
     J3DModelData*(daAlink_c*, u16, u32), LocalAramBmdHook);
+DEFINE_HOOK(&daAlink_c::setBottleModel, LocalBottleModelHook);
+DEFINE_HOOK(&daAlink_c::loadAramItemBtp, LocalBottleBtpHook);
 DEFINE_HOOK((static_cast<void* (*)(const char*, s32, dRes_info_c*, int)>(&dRes_control_c::getRes)),
     LocalSkinResByIndexHook);
 
@@ -90,6 +92,11 @@ namespace {
 
 const f32 kPuppetSpawnDist = 150.0f;
 const int kPuppetMaxJoints = 128;
+constexpr int kWoodSwordKmdlIndex = 0x11;
+constexpr int kWoodSwordBmdlIndex = 0x0E;
+constexpr int kWoodSwordZmdlIndex = 0x0E;
+constexpr int kWoodSwordMmdlIndex = 0x10;
+constexpr int kBottleObjBtlBmdIndex = 0x06;
 
 const int kPuppetMaxPrivateData = 96;
 const int kPuppetMaxPrivateArcs = 6;
@@ -443,6 +450,20 @@ J3DModelData* s_pendingDataOlder[kPendingFreeMax];
 int s_pendingDataOlderCount = 0;
 J3DModelData* s_pendingDataOldest[kPendingFreeMax];
 int s_pendingDataOldestCount = 0;
+u8* s_pendingBuffers[kPendingFreeMax];
+int s_pendingBufferCount = 0;
+u8* s_pendingBuffersOlder[kPendingFreeMax];
+int s_pendingBuffersOlderCount = 0;
+
+void puppet_free_buffer_later(u8*& buffer) {
+    if (buffer == nullptr) return;
+    if (s_pendingBufferCount < kPendingFreeMax) {
+        s_pendingBuffers[s_pendingBufferCount++] = buffer;
+    } else {
+        coop_log::warn("coop_mod: [PUPPET] deferred-buffer queue full, leaking one");
+    }
+    buffer = nullptr;
+}
 
 void puppet_free_data_later(J3DModelData*& data) {
     if (data == nullptr) return;
@@ -519,6 +540,17 @@ void puppet_flush_pending_frees() {
         s_pendingData[i] = nullptr;
     }
     s_pendingDataCount = 0;
+
+    for (int i = 0; i < s_pendingBuffersOlderCount; ++i) {
+        JKRFreeToSysHeap(s_pendingBuffersOlder[i]);
+        s_pendingBuffersOlder[i] = nullptr;
+    }
+    s_pendingBuffersOlderCount = s_pendingBufferCount;
+    for (int i = 0; i < s_pendingBufferCount; ++i) {
+        s_pendingBuffersOlder[i] = s_pendingBuffers[i];
+        s_pendingBuffers[i] = nullptr;
+    }
+    s_pendingBufferCount = 0;
 }
 inline Puppet& pup() { return *s_pup; }
 
@@ -2086,6 +2118,24 @@ J3DModelData* get_or_load_item_data(u8 kind, u16 wireIdx) {
         if (loadObjectArchive(pup().rodArc) != 0) return nullptr;
         J3DModel* model = puppet_private_part_idx(pup().rodArc, res.bmdResIdx, cXyz(1.0f, 1.0f, 1.0f));
         if (model == nullptr) return nullptr;
+        if (kind == kPuppetHeldFishRod) {
+            const char* skinName = puppet_skin_for(kSkinChoiceFishingRod);
+            if (skinName == nullptr) skinName = puppet_skin_for(kSkinChoiceEquipment);
+            J3DModelData* skinData = skinName != nullptr
+                ? guard_skin_data(skins_equipment_data(skinName, "al_crod.bmd"), "al_crod.bmd")
+                : nullptr;
+            if (skinData != nullptr &&
+                skin_fits_original(skinData, model->getModelData(), "al_crod.bmd"))
+            {
+                J3DModel* skinModel = coop_create_model(skinData, 0x80000, 0x11000284);
+                if (skinModel != nullptr) {
+                    keep_private_data_of(model);
+                    coop_free_model(model);
+                    model = skinModel;
+                    coop_log::info("coop_mod: [SKIN] fishing rod uses peer model 'al_crod.bmd'");
+                }
+            }
+        }
         slot.data = model->getModelData();
         slot.shared = true;
         prep_equipment_model(model);
@@ -2101,6 +2151,15 @@ J3DModelData* get_or_load_item_data(u8 kind, u16 wireIdx) {
         J3DModel* model =
             puppet_private_part_idx(pup().heldArc, res.bmdResIdx, cXyz(1.0f, 1.0f, 1.0f));
         if (model == nullptr) return nullptr;
+        if (kind == kPuppetHeldWolfChain) {
+            if (J3DModel* skinModel =
+                    puppet_skin_equipment("wl_kusari.bmd", cXyz(1.0f, 1.0f, 1.0f)))
+            {
+                keep_private_data_of(model);
+                coop_free_model(model);
+                model = skinModel;
+            }
+        }
         slot.data = model->getModelData();
         slot.fromOutfit = true;
         slot.shared = true;
@@ -2117,13 +2176,16 @@ J3DModelData* get_or_load_item_data(u8 kind, u16 wireIdx) {
         J3DModel* model = puppet_private_part_idx("Alink", res.bmdResIdx, cXyz(1.0f, 1.0f, 1.0f));
         if (model == nullptr) return nullptr;
 
+        const char* skinFile = kind == kPuppetHeldSpinner
+            ? "al_sp.bmd"
+            : private_arc_file_name("Alink", res.bmdResIdx);
         if (J3DModel* skinModel = puppet_skin_equipment(
-                private_arc_file_name("Alink", res.bmdResIdx), cXyz(1.0f, 1.0f, 1.0f))) {
+                skinFile, cXyz(1.0f, 1.0f, 1.0f))) {
             keep_private_data_of(model);
             coop_free_model(model);
             model = skinModel;
             coop_log::info("coop_mod: [SKIN] held item kind={} uses peer model '{}'", kind,
-                private_arc_file_name("Alink", res.bmdResIdx));
+                skinFile);
         }
         slot.data = model->getModelData();
         slot.fromOutfit = false;
@@ -2237,15 +2299,23 @@ void release_outfit_item_data() {
 
     for (int i = 0; i < kPuppetHeldCount; ++i) {
         const u8 source = kHeldItemRes[i].source;
+        const bool hasAlAnmBuffer =
+            source == kItemSrcAlAnm && pup().itemData[i].buf != nullptr;
         const bool diesWithPuppet = pup().itemData[i].fromOutfit || source == kItemSrcAlink ||
-                                    source == kItemSrcWireArc || source == kItemSrcFieldItem;
+                                    source == kItemSrcWireArc || source == kItemSrcFieldItem ||
+                                    hasAlAnmBuffer;
         if (!diesWithPuppet) continue;
         J3DModelData* data = pup().itemData[i].data;
         pup().itemData[i].data = nullptr;
         pup().itemData[i].fromOutfit = false;
+        pup().itemData[i].shared = false;
         drop_slot_models_of_kind(static_cast<u8>(i));
 
-        if (kHeldItemRes[i].source != kItemSrcFieldItem) free_private_data(data);
+        if (hasAlAnmBuffer) {
+            puppet_free_buffer_later(pup().itemData[i].buf);
+        } else if (source != kItemSrcFieldItem) {
+            free_private_data(data);
+        }
     }
 
     release_rod_segments();
@@ -2328,11 +2398,15 @@ bool ensure_chain_link_data() {
     return true;
 }
 
-bool draw_chain_link(MtxP mtx, f32 scale) {
+bool draw_chain_link(MtxP mtx, f32 scale, J3DModelData* data) {
     if (pup().chainLinksUsed >= kChainLinkPool) return false;
     J3DModel*& model = pup().chainLinks[pup().chainLinksUsed];
+    if (model != nullptr && model->getModelData() != data) {
+        puppet_free_later(model);
+        model = nullptr;
+    }
     if (model == nullptr) {
-        model = coop_create_model(s_chainLinkData, 0x80000, 0x11000284);
+        model = coop_create_model(data, 0x80000, 0x11000284);
         if (model == nullptr) return false;
         enable_stage_count_diff(model);
     }
@@ -2340,6 +2414,23 @@ bool draw_chain_link(MtxP mtx, f32 scale) {
     model->setBaseScale(cXyz(scale, scale, scale));
     renderModelAtMtx(model, mtx, nullptr);
     return true;
+}
+
+J3DModelData* chain_link_data() {
+    if (!ensure_chain_link_data()) return nullptr;
+    if (pup().chainKind != kPuppetChainIronBall) return s_chainLinkData;
+
+    const char* skinName = puppet_skin_for(kSkinChoiceBallAndChain);
+    if (skinName == nullptr) skinName = puppet_skin_for(kSkinChoiceEquipment);
+    if (skinName == nullptr) return s_chainLinkData;
+
+    J3DModelData* mine = guard_skin_data(
+        skins_equipment_data(skinName, "al_pend.bmd"), "al_pend.bmd");
+    if (mine == nullptr) return s_chainLinkData;
+
+    return skin_fits_original(mine, s_chainLinkData, "al_pend.bmd")
+        ? mine
+        : s_chainLinkData;
 }
 
 void chain_sample(const f32 pts[][3], int count, f32 t, cXyz* out) {
@@ -2387,11 +2478,18 @@ void draw_puppet_rod(const cXyz* pts, int count, bool uki) {
     if (pup().rodSegKind != kind) {
         release_rod_segments();
         for (int i = 0; i < kRodSegments; ++i) {
+            const u16 resource = rod_segment_res(uki, i);
+            const char* file = resource == 40 ? "rod_ukia.bmd" :
+                resource == 41 ? "rod_ukib.bmd" : "rod_ukic.bmd";
             J3DModel* model =
-                puppet_private_part_idx("Alink", rod_segment_res(uki, i), cXyz(1.0f, 1.0f, 1.0f));
+                puppet_skin_equipment(file, cXyz(1.0f, 1.0f, 1.0f));
+            if (model == nullptr) {
+                model = puppet_private_part_idx(
+                    "Alink", resource, cXyz(1.0f, 1.0f, 1.0f));
+            }
             if (model == nullptr) {
                 coop_log::warn("coop_mod: [DIAG-ROD] segment {} (Alink idx {}) failed to load", i,
-                    rod_segment_res(uki, i));
+                    resource);
                 release_rod_segments();
                 return;
             }
@@ -2448,7 +2546,8 @@ void draw_puppet_chain() {
         draw_puppet_rod(pts, count, pup().chainKind == kPuppetChainRodUki);
         return;
     }
-    if (!ensure_chain_link_data()) return;
+    J3DModelData* const linkData = chain_link_data();
+    if (linkData == nullptr) return;
 
     if (pup().chainKind == kPuppetChainHookshot) {
 
@@ -2479,7 +2578,7 @@ void draw_puppet_chain() {
                 mDoMtx_copy(mDoMtx_stack_c::get(), linkMtx);
                 mDoMtx_stack_c::multVec(&kStepVec, &pos);
 
-                if (!draw_chain_link(linkMtx, 1.0f)) break;
+                if (!draw_chain_link(linkMtx, 1.0f, linkData)) break;
 
                 cur.z = static_cast<s16>(cur.z + 0x3000);
                 prev = bend;
@@ -2501,7 +2600,7 @@ void draw_puppet_chain() {
                     mDoMtx_stack_c::ZXYrotM(ang);
                     Mtx linkMtx;
                     mDoMtx_copy(mDoMtx_stack_c::get(), linkMtx);
-                    if (!draw_chain_link(linkMtx, 1.0f)) break;
+                    if (!draw_chain_link(linkMtx, 1.0f, linkData)) break;
                     pos += subDir * kChainStep;
                     ang.z = static_cast<s16>(ang.z + 0x3000);
                 }
@@ -2537,7 +2636,7 @@ void draw_puppet_chain() {
             mDoMtx_stack_c::ZXYrotM(ang);
             Mtx linkMtx;
             mDoMtx_copy(mDoMtx_stack_c::get(), linkMtx);
-            if (!draw_chain_link(linkMtx, kIronBallLinkScale)) break;
+            if (!draw_chain_link(linkMtx, kIronBallLinkScale, linkData)) break;
             roll.z = static_cast<s16>(roll.z + 0x3000);
         }
         prevPos = pos;
@@ -2966,6 +3065,10 @@ const LinkFile kLinkFiles[] = {
     {"Mmdl", "al_face.bmd", kSkinOutfitMagic, kSkinPartFace},
     {"Mmdl", "ml_head.bmd", kSkinOutfitMagic, kSkinPartHead},
     {"Mmdl", "al_hands.bmd", kSkinOutfitMagic, kSkinPartHands},
+    {"Wmdl", "wl.bmd", kSkinOutfitWolf, kSkinPartBody},
+    {"alSumou", "bls.bmd", kSkinOutfitSumo, kSkinPartBody},
+    {"alSumou", "bls_head.bmd", kSkinOutfitSumo, kSkinPartHead},
+    {"alSumou", "bls_hands.bmd", kSkinOutfitSumo, kSkinPartHands},
 };
 
 bool s_loadingPuppetModels = false;
@@ -2996,6 +3099,11 @@ bool skin_fits_counts(J3DModelData* mine, u16 refJoints, u16 refMats, const char
     const u16 myJoints = mine->getJointNum();
     const u16 myMats = mine->getMaterialNum();
     if (myJoints == refJoints && myMats == refMats) return true;
+    if (what != nullptr && std::strcmp(what, "al_bottle.bmd") == 0 &&
+        myJoints == refJoints)
+    {
+        return true;
+    }
     // KePa's Ordon head keeps four extra cap joints from its source rig.
     if (what != nullptr && std::strcmp(what, "bl_head.bmd") == 0 &&
         myJoints == 10 && refJoints == 6 && myMats == 2 && refMats == 1)
@@ -3060,8 +3168,9 @@ J3DModelData* local_skin_for(const char* arcName, const char* resName) {
         return data;
     }
 
-    static const char* const kEquipmentArcs[] = {"Alink", "AlAnm", "HyShd", "SWShd", "CWShd",
-        "MstrSword"};
+    static const char* const kEquipmentArcs[] = {
+        "Alink", "AlAnm", "HyShd", "SWShd", "CWShd", "MstrSword",
+        "Kmdl", "Bmdl", "Zmdl", "Mmdl", "Wmdl", "Obj_btl", "alSumou"};
     for (const char* arc : kEquipmentArcs) {
         if (std::strcmp(arc, arcName) != 0) continue;
         J3DModelData* data = guard_skin_data(skins_local_equipment_data(resName), resName);
@@ -3088,6 +3197,9 @@ int puppet_skin_outfit() {
 
 const char* equipment_arc_for_file(const char* file) {
     if (file == nullptr) return "Alink";
+    if (std::strcmp(file, "al_bottle.bmd") == 0) return "Obj_btl";
+    if (std::strcmp(file, "al_pend.bmd") == 0) return "AlAnm";
+    if (std::strcmp(file, "wl_kusari.bmd") == 0) return "Wmdl";
     if (std::strcmp(file, "al_sha.bmd") == 0) return "HyShd";
     if (std::strcmp(file, "al_shc.bmd") == 0) return "SWShd";
     if (std::strcmp(file, "al_shb.bmd") == 0) return "CWShd";
@@ -4419,12 +4531,14 @@ const char* shield_file_for_arc(const char* arc) {
 struct LocalEquipSlot {
     const char* file;
     J3DModelData* data = nullptr;
+    J3DModelData* originalData = nullptr;
     J3DModel* ours = nullptr;
     bool restored = false;
 };
 
 LocalEquipSlot s_localEquip[] = {
     {"al_swa.bmd"}, {"al_poda.bmd"}, {"al_swm.bmd"}, {"al_podm.bmd"}, {"al_sha.bmd"},
+    {"al_swb.bmd"},
 };
 
 void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
@@ -4435,11 +4549,11 @@ void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
         if (rec.restored || rec.ours == nullptr) return;
         if (*slot != rec.ours) {
             rec.restored = true;
+            rec.originalData = nullptr;
             return;
         }
-        J3DModelData* original = nullptr;
-        {
-
+        J3DModelData* original = rec.originalData;
+        if (original == nullptr) {
             PuppetModelLoadScope scope;
             original = static_cast<J3DModelData*>(
                 dComIfG_getObjectRes(equipment_arc_for_file(rec.file), rec.file));
@@ -4454,6 +4568,7 @@ void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
         J3DModel* previous = rec.ours;
         rec.ours = built;
         rec.data = nullptr;
+        rec.originalData = nullptr;
         rec.restored = true;
         puppet_free_later(previous);
         coop_log::info("coop_mod: [EQUIP] '{}' restored to game model", rec.file);
@@ -4465,6 +4580,7 @@ void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
         if (rec.ours != nullptr && *slot != rec.ours) {
             J3DModelData* inSlot = (*slot != nullptr) ? (*slot)->getModelData() : nullptr;
             if (!skin_fits_original(want, inSlot, rec.file)) return;
+            rec.originalData = inSlot;
             models_reset_for_game(want, rec.file);
             *slot = rec.ours;
             breadcrumb2("local: put our held item back", rec.file);
@@ -4483,6 +4599,7 @@ void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
     J3DModel* previous = rec.ours;
     rec.ours = built;
     rec.data = want;
+    rec.originalData = theirs;
     *slot = built;
     if (previous != nullptr) puppet_free_later(previous);
     breadcrumb2("local: installed held item", rec.file);
@@ -4498,11 +4615,12 @@ void local_skin_rebuild_equipment(daAlink_c* alink) {
     if (alink->checkWolf()) return;
     J3DModel** const slots[] = {
         &alink->mpSwAModel, &alink->mpSwASheathModel, &alink->mpSwMModel,
-        &alink->mpSwMSheathModel, &alink->mShieldModel,
+        &alink->mpSwMSheathModel, &alink->mShieldModel, &alink->mWoodSwordModel,
     };
     const int count = static_cast<int>(sizeof(slots) / sizeof(slots[0]));
 
     const int kShieldSlot = 4;
+    const int kWoodSwordSlot = 5;
     const char* shieldFile = shield_file_for_arc(alink->mShieldArcName);
     if (shieldFile != nullptr && std::strcmp(shieldFile, s_localEquip[kShieldSlot].file) != 0) {
         s_localEquip[kShieldSlot].file = shieldFile;
@@ -4512,7 +4630,13 @@ void local_skin_rebuild_equipment(daAlink_c* alink) {
     for (int i = 0; i < count; ++i) {
 
         if (i == kShieldSlot && shieldFile == nullptr) continue;
+        J3DModel* const before = *slots[i];
         local_equip_install(slots[i], s_localEquip[i]);
+        if (i == kWoodSwordSlot && before != nullptr &&
+            alink->mSwordModel == before && *slots[i] != before)
+        {
+            alink->mSwordModel = *slots[i];
+        }
     }
 }
 
@@ -4616,6 +4740,60 @@ void puppet_hook_release_player(uint8_t playerId) {
 bool puppet_hook_player_active(uint8_t playerId) {
     return playerId < kMaxPuppets && s_puppetSlots[playerId].state == 2 &&
            s_puppetSlots[playerId].model != nullptr;
+}
+
+J3DModelData* puppet_hook_link_model_data(uint8_t playerId, int part) {
+    if (!puppet_hook_player_active(playerId) ||
+        part < kSkinPartBody || part > kSkinPartHands)
+    {
+        return nullptr;
+    }
+    const Puppet& slot = s_puppetSlots[playerId];
+    J3DModel* model = nullptr;
+    switch (part) {
+    case kSkinPartBody: model = slot.model; break;
+    case kSkinPartFace: model = slot.faceModel; break;
+    case kSkinPartHead: model = slot.hatModel; break;
+    case kSkinPartHands: model = slot.handsModel; break;
+    default: return nullptr;
+    }
+    if (!coop_ptr_looks_live(model)) return nullptr;
+    J3DModelData* data = model->getModelData();
+    return coop_ptr_looks_live(data) ? data : nullptr;
+}
+
+const char* puppet_hook_skin_for_active_outfit(uint8_t playerId, int* outfit) {
+    if (!puppet_hook_player_active(playerId)) return nullptr;
+    const Puppet& slot = s_puppetSlots[playerId];
+    int skinOutfit = kSkinOutfitHero;
+    switch (slot.outfit) {
+    case kPuppetOutfitSumo: skinOutfit = kSkinOutfitSumo; break;
+    case kPuppetOutfitCasual: skinOutfit = kSkinOutfitOrdon; break;
+    case kPuppetOutfitZora: skinOutfit = kSkinOutfitZora; break;
+    case kPuppetOutfitMagicArmor: skinOutfit = kSkinOutfitMagic; break;
+    case kPuppetOutfitWolf: skinOutfit = kSkinOutfitWolf; break;
+    default: break;
+    }
+    if (outfit != nullptr) *outfit = skinOutfit;
+
+    int choice = kSkinChoiceHero;
+    switch (skinOutfit) {
+    case kSkinOutfitSumo: choice = kSkinChoiceSumo; break;
+    case kSkinOutfitOrdon: choice = kSkinChoiceOrdon; break;
+    case kSkinOutfitZora: choice = kSkinChoiceZora; break;
+    case kSkinOutfitMagic: choice = kSkinChoiceMagic; break;
+    case kSkinOutfitWolf: choice = kSkinChoiceWolf; break;
+    default: break;
+    }
+    const char* name = slot.builtSkins.name[choice];
+    return name[0] != '\0' && skins_have(name, slot.builtSkins.hash[choice]) ? name : nullptr;
+}
+
+bool puppet_hook_subi_ordon_skin_active(uint8_t playerId) {
+    int outfit = -1;
+    const char* name = puppet_hook_skin_for_active_outfit(playerId, &outfit);
+    return outfit == kSkinOutfitOrdon && name != nullptr &&
+           std::strcmp(name, kSubiLinkSkinName) == 0;
 }
 
 uint8_t puppet_hook_combat_of(uint8_t playerId) {
@@ -7275,6 +7453,52 @@ void puppet_hook_init() {
         });
     coop_log::info("coop_mod: [SKIN] held-item hook {}",
         aramResult == MOD_OK ? "attached" : "FAILED - held items will stay the game's own");
+    const ModResult bottleModelResult = mods::hook::add_post<LocalBottleModelHook>(
+        [](ModContext*, void* args, void*, void*) {
+            daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
+            if (alink == nullptr) return;
+            J3DModelData* expected = skins_local_aram_data(0x310);
+            J3DModelData* actual =
+                alink->mHeldItemModel != nullptr ? alink->mHeldItemModel->getModelData() : nullptr;
+            const std::string bottleSkin = skins_local_slot(kSkinChoiceBottle);
+            const std::string selected = bottleSkin.empty()
+                ? skins_local_slot(kSkinChoiceEquipment)
+                : bottleSkin;
+            coop_log::info(
+                "coop_mod: [SKIN-BOTTLE] item={} selected='{}' expected={} held={} matches={} "
+                "expectedJoints={} heldJoints={} expectedMaterials={} heldMaterials={}",
+                mods::arg<u16>(args, 1), selected, static_cast<void*>(expected),
+                static_cast<void*>(actual), expected != nullptr && expected == actual,
+                expected != nullptr ? expected->getJointNum() : 0,
+                actual != nullptr ? actual->getJointNum() : 0,
+                expected != nullptr ? expected->getMaterialNum() : 0,
+                actual != nullptr ? actual->getMaterialNum() : 0);
+        });
+    coop_log::info("coop_mod: [SKIN-BOTTLE] held-model diagnostic hook {}",
+        bottleModelResult == MOD_OK ? "attached" : "FAILED");
+    const ModResult bottleBtpResult = mods::hook::add_post<LocalBottleBtpHook>(
+        [](ModContext*, void* args, void* retval, void*) {
+            J3DModel* model = mods::arg<J3DModel*>(args, 2);
+            J3DModelData* data = model != nullptr ? model->getModelData() : nullptr;
+            if (data == nullptr || data != skins_local_aram_data(0x310)) return;
+            std::string selected = skins_local_slot(kSkinChoiceBottle);
+            if (selected.empty()) selected = skins_local_slot(kSkinChoiceEquipment);
+            if (selected != "N64 HoT") return;
+            J3DAnmTexPattern** animation = static_cast<J3DAnmTexPattern**>(retval);
+            if (animation == nullptr || *animation == nullptr) return;
+            u16 matchingMaterials = 0;
+            for (u16 i = 0; i < (*animation)->getUpdateMaterialNum(); ++i) {
+                if ((*animation)->isValidUpdateMaterialID(i)) ++matchingMaterials;
+            }
+            if (matchingMaterials == 0) return;
+            const int removed = data->removeTexNoAnimator(*animation);
+            coop_log::info(
+                "coop_mod: [SKIN-BOTTLE] removed native BTP texture overrides for {} "
+                "matching materials (result={})",
+                matchingMaterials, removed);
+        });
+    coop_log::info("coop_mod: [SKIN-BOTTLE] texture-pattern compatibility hook {}",
+        bottleBtpResult == MOD_OK ? "attached" : "FAILED");
     mods::hook::add_post<LocalSkinResByNameHook>(
         [](ModContext*, void* args, void* retval, void*) {
             void** result = static_cast<void**>(retval);
@@ -7306,6 +7530,53 @@ void puppet_hook_init() {
                 }
                 return;
             }
+
+            const char* equipmentFile = nullptr;
+            if (std::strcmp(arc, "AlAnm") == 0) {
+                equipmentFile = skins_aram_file_for_index(static_cast<uint16_t>(index));
+            } else if (std::strcmp(arc, "Alink") == 0) {
+                if (index == kBoomerangAlinkResIdx) {
+                    equipmentFile = "al_boom.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_AL_BOMB_e) {
+                    equipmentFile = "al_bomb.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_AL_SP_e) {
+                    equipmentFile = "al_sp.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_CROD_BALL_e) {
+                    equipmentFile = "crod_ball.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_ROD_UKIA_e) {
+                    equipmentFile = "rod_ukia.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_ROD_UKIB_e) {
+                    equipmentFile = "rod_ukib.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_ROD_UKIC_e) {
+                    equipmentFile = "rod_ukic.bmd";
+                }
+            } else if (std::strcmp(arc, "Kmdl") == 0 && index == kWoodSwordKmdlIndex) {
+                equipmentFile = "al_swb.bmd";
+            } else if (std::strcmp(arc, "Bmdl") == 0 && index == kWoodSwordBmdlIndex) {
+                equipmentFile = "al_swb.bmd";
+            } else if (std::strcmp(arc, "Zmdl") == 0 && index == kWoodSwordZmdlIndex) {
+                equipmentFile = "al_swb.bmd";
+            } else if (std::strcmp(arc, "Mmdl") == 0 && index == kWoodSwordMmdlIndex) {
+                equipmentFile = "al_swb.bmd";
+            } else if (std::strcmp(arc, "Wmdl") == 0 &&
+                       index == dRes_INDEX_WMDL_BMD_WL_KUSARI_e) {
+                equipmentFile = "wl_kusari.bmd";
+            } else if (std::strcmp(arc, "Obj_btl") == 0 &&
+                       index == kBottleObjBtlBmdIndex) {
+                equipmentFile = "al_bottle.bmd";
+            }
+            if (equipmentFile != nullptr) {
+                J3DModelData* mine = skins_local_equipment_data(equipmentFile);
+                if (mine != nullptr &&
+                    skin_fits_original(
+                        mine, static_cast<J3DModelData*>(*result), equipmentFile))
+                {
+                    models_reset_for_game(mine, equipmentFile);
+                    *result = mine;
+                }
+                return;
+            }
+
             if (std::strcmp(arc, "alSumou") != 0 ||
                 !sumo_hides_equipment(coop_net_local_id())) {
                 return;

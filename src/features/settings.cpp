@@ -140,6 +140,24 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     }
 
     control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Giant's Mask sword damage multiplier";
+    control.help_rml =
+        "Set the damage dealt by Link's sword attacks while Giant's Mask is active. "
+        "The default is 1100%; fractional damage is rounded up. Set to 0% to disable "
+        "sword damage, or choose any value up to 2000%.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_giantMaskDamageMultiplier;
+    control.min = kGiantMaskDamageMultiplierMinPercent;
+    control.max = kGiantMaskDamageMultiplierMaxPercent;
+    control.step = 1;
+    control.suffix = "%";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
     control.label = "Manual Jump";
     control.binding = UI_BINDING_CONFIG_VAR;
@@ -411,6 +429,19 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     }
 
     control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Midair Hawkeye Combo Aim";
+    control.help_rml =
+        "When the Bow and Hawk Eye are combined on X, Y, or Z, start midair bow aim "
+        "with Hawkeye active. Ground aiming keeps its vanilla behavior.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_hawkeyeMidairBowAimEnabled;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_NUMBER;
     control.label = "Cinema Zoom";
     control.help_rml = "Adjust the Cinema aim camera zoom. 100% is the default view.";
@@ -615,6 +646,82 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Ice Leaf R-button speed boost";
+    control.help_rml =
+        "While riding the Ice Leaf, hold R to gradually accelerate toward the board's "
+        "maximum speed. Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_iceLeafRBoost;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Clawshot uneven-surface sticking";
+    control.help_rml =
+        "Allow the Clawshot and Double Clawshot to stick to moderately angled wall-like "
+        "surfaces. Existing valid-surface checks remain in place. Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_clawshotUnevenSurfaceStick;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lantern ignites enemies";
+    control.help_rml =
+        "When Link's Lantern swing hits an enemy, set that enemy on fire for five seconds. "
+        "Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lanternIgnitesEnemies;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Unrestricted movement in houses and shops";
+    control.help_rml =
+        "Allow normal movement in houses and shops, including rolling and outdoor movement speed. Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_indoorMovementUnrestricted;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "First-person view in Castle Town";
+    control.help_rml =
+        "Allow subject/first-person camera mode in Castle Town. Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_castleTownFirstPerson;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Clawshots stick to any surface";
+    control.help_rml =
+        "Allow the Clawshot and Double Clawshot to latch onto any background surface. "
+        "Other hookshot restrictions remain in effect. Off by default.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_clawshotAnySurface;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
     control.label = "Sword put-away flourish";
     control.help_rml =
         "Use the game's sword-unequip flourish whenever Link puts away a drawn sword. "
@@ -755,6 +862,8 @@ void open_combined_credits(ModContext* ctx, void*) {
         ctx, "Credits",
         "<p><b>Third-party character models</b></p>"
         "<p>Dark Link - LoadingError</p>"
+        "<p>Subi Link black-hair and red-eyes textures from GameBanana mod 677266, adapted for "
+        "the Ordon outfit and used with permission.</p>"
         "<p>Dark Link visual, body-aura mesh, and shaders based on Dawnlight by BeZide93 "
         "(CC0 1.0; license included in the package)</p>"
         "<p>Manual jump, Disable Auto Jump, glide, and Sprint features based on Dawnlight by "
@@ -771,6 +880,8 @@ void open_combined_credits(ModContext* ctx, void*) {
         "<p>Hero of Time, Hero of the Sky, Hero of the Wild, Hyrule Warriors, Ordon Warrior, and "
         "Ordon Warrior (No Hat) - SkilarBabcock</p>"
         "<p>Hero of Time voice pack - SkilarBabcock</p>"
+        "<p>Young Link face and body models - madnessgod, from GameBanana mod 724984, used with "
+        "permission: https://gamebanana.com/mods/724984.</p>"
         "<p>Linkle - Ditrey; concept art by ThenMichael; modeling help from SkilarBabcock</p>"
         "<p>Zora Link and Zora Link (Alt Eyes) - model and textures by SkilarBabcock; fixes by "
         "Oxygno. Source: GameBanana mod 735675.</p>"

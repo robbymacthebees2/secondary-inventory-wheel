@@ -39,6 +39,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -69,6 +70,8 @@ struct Skin {
     std::string about;
     std::string path;
     bool has[kSkinOutfitCount][kSkinPartCount] = {};
+    std::unordered_set<std::string> files;
+    std::unordered_set<std::string> equipmentFiles;
 
     bool hasEquipment = false;
     bool hasCutscenes = false;
@@ -109,16 +112,19 @@ const char* const kSlotVarName[kSkinChoiceCount] = {
     "model_hero", "model_sumo", "model_ordon", "model_zora", "model_magic",
     "model_wolf", "model_equipment", "model_cutscenes", "model_voice",
     "model_sword_wood", "model_sword_ordon", "model_sword_master",
-    "model_shield_hylian", "model_shield_ordon",
+    "model_shield_hylian", "model_shield_ordon", "model_shield_wooden",
     "model_hookshot", "model_boomerang", "model_bombs", "model_bow", "model_slingshot",
     "model_ball_chain", "model_spinner", "model_fishing_rod", "model_bottle",
+    "model_lantern", "model_wolf_chain", "model_iron_boots",
 };
 const char* const kSlotLabel[kSkinChoiceCount] = {
     "Hero's clothes", "Sumo clothes", "Ordon clothes", "Zora armor", "Magic armor",
     "Wolf", "Equipment", "Cutscenes", "Voice",
     "Wooden Sword", "Ordon Sword", "Master Sword", "Hylian Shield", "Ordon Shield",
+    "Wooden Shield",
     "Clawshot", "Boomerang", "Bombs", "Bow", "Slingshot",
-    "Ball and Chain", "Spinner", "Fishing Rod", "Bottle",
+    "Ball and Chain", "Spinner", "Fishing Rod", "Bottle", "Lantern", "Wolf Chain",
+    "Iron Boots",
 };
 
 struct EquipSlotFile {
@@ -135,8 +141,33 @@ const EquipSlotFile kEquipSlotFiles[] = {
     {"al_sha.bmd", kSkinChoiceHylianShield},
 
     {"al_shb.bmd", kSkinChoiceOrdonShield},
-    {"al_shc.bmd", kSkinChoiceOrdonShield},
-
+    {"al_shc.bmd", kSkinChoiceWoodenShield},
+    {"al_arrow.bmd", kSkinChoiceBow},
+    {"al_arrowb.bmd", kSkinChoiceBow},
+    {"al_bomb.bmd", kSkinChoiceBombs},
+    {"al_boom.bmd", kSkinChoiceBoomerang},
+    {"al_pachi_nut.bmd", kSkinChoiceSlingshot},
+    {"al_sp.bmd", kSkinChoiceSpinner},
+    {"al_kantera.bmd", kSkinChoiceLantern},
+    {"ef_ktglow.bmd", kSkinChoiceLantern},
+    {"wl_kusari.bmd", kSkinChoiceWolfChain},
+    {"al_bootsh.bmd", kSkinChoiceIronBoots},
+    {"al_bootsH.bmd", kSkinChoiceIronBoots},
+    {"al_pend.bmd", kSkinChoiceBallAndChain},
+    {"crod_ball.bmd", kSkinChoiceBallAndChain},
+    {"s_ball_yami.bmd", kSkinChoiceBallAndChain},
+    {"ef_setboom.bmd", kSkinChoiceBoomerang},
+    {"ef_shippu.bmd", kSkinChoiceBoomerang},
+    {"hk.bmd", kSkinChoiceHookshot},
+    {"rod_ukia.bmd", kSkinChoiceFishingRod},
+    {"rod_ukib.bmd", kSkinChoiceFishingRod},
+    {"rod_ukic.bmd", kSkinChoiceFishingRod},
+    {"sango_fook.bmd", kSkinChoiceFishingRod},
+    {"sfook.bmd", kSkinChoiceFishingRod},
+    {"uki.bmd", kSkinChoiceFishingRod},
+    {"uki_saki.bmd", kSkinChoiceFishingRod},
+    {"worm.bmd", kSkinChoiceFishingRod},
+    {"worm_hole.bmd", kSkinChoiceFishingRod},
 };
 ConfigVarHandle s_slotVar[kSkinChoiceCount] = {};
 ConfigVarHandle s_eponaSkinVar = 0;
@@ -177,11 +208,36 @@ void read_about(const std::filesystem::path& dir, Skin& skin) {
     }
 }
 
+std::string lower_file_name(std::string name) {
+    for (char& c : name) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return name;
+}
+
+void collect_model_files(
+    const std::filesystem::path& dir, std::unordered_set<std::string>& files)
+{
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(path_ci(dir), ec)) {
+        if (ec) break;
+        std::error_code entryError;
+        if (!entry.is_regular_file(entryError) || entryError) continue;
+        files.insert(lower_file_name(path_text(entry.path().filename())));
+    }
+}
+
 bool scan_one(const std::filesystem::path& path, Skin& skin) {
     skin.name = path_text(path.filename());
     skin.path = path_text(path);
     read_about(path, skin);
     if (skin.name.size() >= kSkinNameMax) skin.name.resize(kSkinNameMax - 1);
+    collect_model_files(path, skin.files);
+    collect_model_files(path / "equipment", skin.files);
+    collect_model_files(path / "equipment", skin.equipmentFiles);
+    for (int o = 1; o < kSkinOutfitCount; ++o) {
+        collect_model_files(path / kOutfitDir[o], skin.files);
+    }
     bool any = false;
     if (skin.baseWolf) {
         skin.has[kSkinOutfitWolf][kSkinPartBody] = true;
@@ -254,6 +310,10 @@ void rescan() {
     add_builtin(kBeastGanonSkin, kByGame, "", kSkinOutfitWolf, kSkinOutfitWolf, false, 0x6A4E0D10u, false, true);
 
     add_builtin(kHerosShadeSkin, kByGame, "", kSkinOutfitHero, kSkinOutfitWolf, true, 0x6A4E0D11u, true, false);
+    add_builtin(
+        kSubiLinkSkinName, "Subi", "Black hair and red eyes for the Ordon outfit.",
+        kSkinOutfitOrdon, kSkinOutfitOrdon, false, 0x6A4E0D12u, false, false);
+    s_skins.back().presetEnabled = false;
     std::filesystem::path dir;
     if (models_dir(dir)) scan_dir(dir, found);
     const auto preset_order = [](const Skin& skin) {
@@ -316,6 +376,22 @@ DEFINE_HOOK(&daHorse_c::draw, EponaDraw);
 const char* const kOotStyleEponaName = "OOT Style Epona";
 const char* const kTwilightEponaName = "Twilight Epona";
 const char* const kNightwalkerEponaName = "Nightwalker Epona";
+const char* const kN64HoTName = "N64 HoT";
+const char* const kYoungLinkSkinNames[] = {
+    "Young Link",
+    "Young Link Clothed",
+    "Young Link Face Skin",
+    "Young Link Face Only",
+};
+const char* const kSubiLinkTexturePaths[] = {
+    "subi_link/tex1_128x128_9eb9ec36cac639fb_14.dds",
+    "subi_link/tex1_256x128_582a10908b80c70e_14.dds",
+    "subi_link/tex1_64x128_02b0791f4cb54bfc_14.dds",
+    "subi_link/tex1_64x128_d7f168afaf5c673a_14.dds",
+    "subi_link/tex1_64x64_6b8197713a85409d_14.dds",
+    "subi_link/tex1_64x64_89170bd255f99533_14.dds",
+    "subi_link/tex1_64x64_949ae08489a9c86f_14.dds",
+};
 
 const char* const kOotStyleEponaTexturePaths[] = {
     "epona_skins/OOT Style Epona/Eyes/tex1_32x32_1b47c467fc5ca5bc_14.dds",
@@ -340,7 +416,6 @@ const char* const kTwilightEponaTexturePaths[] = {
 };
 
 bool s_eponaTextureServiceWarningLogged = false;
-bool s_eponaResourceServiceWarningLogged = false;
 
 struct EponaTextureOwner {
     fopAc_ac_c* actor = nullptr;
@@ -356,13 +431,42 @@ struct EponaTextureOwner {
 
 std::array<EponaTextureOwner, kCoopMaxPlayers> s_eponaTextureOwners{};
 
-constexpr size_t kMaxNightwalkerBmdSize = 8 * 1024 * 1024;
-std::unique_ptr<u8[]> s_nightwalkerHeapStorage;
-JKRExpHeap* s_nightwalkerHeap = nullptr;
-J3DModelData* s_nightwalkerModelData = nullptr;
-std::array<J3DModel*, kCoopMaxPlayers> s_nightwalkerModels{};
-bool s_nightwalkerLoadAttempted = false;
-bool s_nightwalkerCompatibilityErrorLogged = false;
+struct SubiLinkTextureOwner {
+    std::array<J3DModelData*, kSkinPartCount> modelData{};
+    std::vector<const void*> texturePointers;
+    std::string skin;
+    bool active = false;
+    bool failed = false;
+};
+
+struct SharedSubiTextureReplacement {
+    const void* pointer = nullptr;
+    TextureReplacementHandle handle = 0;
+    std::string path;
+    size_t owners = 0;
+};
+
+std::array<SubiLinkTextureOwner, kCoopMaxPlayers> s_subiLinkTextureOwners{};
+std::vector<SharedSubiTextureReplacement> s_sharedSubiTextureReplacements;
+bool s_subiLinkTextureServiceWarningLogged = false;
+
+constexpr size_t kMaxEponaBmdSize = 8 * 1024 * 1024;
+
+struct EponaModelAsset {
+    const char* name;
+    const char* path;
+    std::unique_ptr<u8[]> heapStorage;
+    JKRExpHeap* heap = nullptr;
+    J3DModelData* modelData = nullptr;
+    std::array<J3DModel*, kCoopMaxPlayers> models{};
+    bool loadAttempted = false;
+    bool compatibilityErrorLogged = false;
+};
+
+EponaModelAsset s_nightwalkerModel{
+    kNightwalkerEponaName, "epona_skins/Nightwalker Epona/hs.bmd"};
+EponaModelAsset s_n64HoTModel{
+    kN64HoTName, "epona_skins/N64 HoT/hs.bmd"};
 
 struct EponaHeapScope {
     JKRHeap* previous;
@@ -372,46 +476,51 @@ struct EponaHeapScope {
     }
 };
 
-bool load_nightwalker_model() {
-    if (s_nightwalkerModelData != nullptr) return true;
-    if (s_nightwalkerLoadAttempted) return false;
-    s_nightwalkerLoadAttempted = true;
+EponaModelAsset* epona_model_for_skin(const std::string& skin) {
+    if (skin == s_nightwalkerModel.name) return &s_nightwalkerModel;
+    if (skin == s_n64HoTModel.name) return &s_n64HoTModel;
+    return nullptr;
+}
+
+bool load_epona_model(EponaModelAsset& asset) {
+    if (asset.modelData != nullptr) return true;
+    if (asset.loadAttempted) return false;
+    asset.loadAttempted = true;
 
     ResourceBuffer buffer = RESOURCE_BUFFER_INIT;
-    const char* const path = "epona_skins/Nightwalker Epona/hs.bmd";
     if (svc_resource == nullptr ||
-        svc_resource->load(mod_ctx, path, &buffer) != MOD_OK ||
+        svc_resource->load(mod_ctx, asset.path, &buffer) != MOD_OK ||
         buffer.data == nullptr || buffer.size < 32 ||
-        buffer.size > kMaxNightwalkerBmdSize)
+        buffer.size > kMaxEponaBmdSize)
     {
         if (buffer.data != nullptr) svc_resource->free(mod_ctx, &buffer);
-        coop_log::warn("coop_mod: [SKIN] failed to load Nightwalker Epona model");
+        coop_log::warn("coop_mod: [SKIN] failed to load {} model", asset.name);
         return false;
     }
 
     const u32 heapSize = 8 * 1024 * 1024 + static_cast<u32>(buffer.size) * 4;
-    s_nightwalkerHeapStorage.reset(new (std::nothrow) u8[heapSize + 31]);
-    if (!s_nightwalkerHeapStorage) {
+    asset.heapStorage.reset(new (std::nothrow) u8[heapSize + 31]);
+    if (!asset.heapStorage) {
         svc_resource->free(mod_ctx, &buffer);
-        coop_log::warn("coop_mod: [SKIN] could not allocate Nightwalker Epona model memory");
+        coop_log::warn("coop_mod: [SKIN] could not allocate {} model memory", asset.name);
         return false;
     }
     void* memory = reinterpret_cast<void*>(
-        (reinterpret_cast<uintptr_t>(s_nightwalkerHeapStorage.get()) + 31) &
+        (reinterpret_cast<uintptr_t>(asset.heapStorage.get()) + 31) &
         ~uintptr_t{31});
-    s_nightwalkerHeap = JKRExpHeap::create(
+    asset.heap = JKRExpHeap::create(
         memory, heapSize, JKRHeap::getRootHeap(), false);
-    if (s_nightwalkerHeap == nullptr) {
+    if (asset.heap == nullptr) {
         svc_resource->free(mod_ctx, &buffer);
-        s_nightwalkerHeapStorage.reset();
-        coop_log::warn("coop_mod: [SKIN] could not create Nightwalker Epona model heap");
+        asset.heapStorage.reset();
+        coop_log::warn("coop_mod: [SKIN] could not create {} model heap", asset.name);
         return false;
     }
 
     bool loaded = false;
     {
-        EponaHeapScope heapScope(s_nightwalkerHeap);
-        auto* bytes = static_cast<u8*>(s_nightwalkerHeap->alloc(
+        EponaHeapScope heapScope(asset.heap);
+        auto* bytes = static_cast<u8*>(asset.heap->alloc(
             static_cast<u32>(buffer.size), 32));
         if (bytes != nullptr) {
             std::memcpy(bytes, buffer.data, buffer.size);
@@ -440,7 +549,7 @@ bool load_nightwalker_model() {
                 {
                     data->simpleCalcMaterial(const_cast<MtxP>(j3dDefaultMtx));
                     data->makeSharedDL();
-                    s_nightwalkerModelData = data;
+                    asset.modelData = data;
                     loaded = true;
                 }
             }
@@ -448,70 +557,71 @@ bool load_nightwalker_model() {
     }
     svc_resource->free(mod_ctx, &buffer);
     if (!loaded) {
-        coop_log::warn("coop_mod: [SKIN] Nightwalker Epona model data is invalid");
+        coop_log::warn("coop_mod: [SKIN] {} model data is invalid", asset.name);
     }
     return loaded;
 }
 
-bool swap_nightwalker_model(daHorse_c* horse, EponaTextureOwner& owner, uint8_t player) {
+bool swap_epona_model(
+    daHorse_c* horse, EponaTextureOwner& owner, uint8_t player, EponaModelAsset& asset)
+{
     if (horse == nullptr || horse->m_model == nullptr ||
         horse->m_modelData == nullptr || player >= kCoopMaxPlayers ||
-        !load_nightwalker_model())
+        !load_epona_model(asset))
     {
         return false;
     }
-    if (horse->m_modelData->getJointNum() != s_nightwalkerModelData->getJointNum() ||
-        horse->m_modelData->getMaterialNum() != s_nightwalkerModelData->getMaterialNum() ||
-        horse->m_modelData->getShapeNum() != s_nightwalkerModelData->getShapeNum())
+    if (horse->m_modelData->getJointNum() != asset.modelData->getJointNum() ||
+        horse->m_modelData->getMaterialNum() != asset.modelData->getMaterialNum() ||
+        horse->m_modelData->getShapeNum() != asset.modelData->getShapeNum())
     {
-        if (!s_nightwalkerCompatibilityErrorLogged) {
+        if (!asset.compatibilityErrorLogged) {
             coop_log::warn(
-                "coop_mod: [SKIN] Nightwalker Epona rig does not match the active horse model");
-            s_nightwalkerCompatibilityErrorLogged = true;
+                "coop_mod: [SKIN] {} rig does not match the active horse model", asset.name);
+            asset.compatibilityErrorLogged = true;
         }
         return false;
     }
 
-    J3DModel*& nightwalkerModel = s_nightwalkerModels[player];
-    if (nightwalkerModel == nullptr) {
-        EponaHeapScope heapScope(s_nightwalkerHeap);
-        nightwalkerModel =
-            mDoExt_J3DModel__create(s_nightwalkerModelData, 0x80000, 0x11020084);
-        if (nightwalkerModel == nullptr) return false;
+    J3DModel*& model = asset.models[player];
+    if (model == nullptr) {
+        EponaHeapScope heapScope(asset.heap);
+        model = mDoExt_J3DModel__create(asset.modelData, 0x80000, 0x11020084);
+        if (model == nullptr) return false;
     }
 
     J3DModel* const originalModel = horse->m_model;
     J3DModelData* const originalData = horse->m_modelData;
-    for (u16 i = 0; i < s_nightwalkerModelData->getJointNum(); ++i) {
+    for (u16 i = 0; i < asset.modelData->getJointNum(); ++i) {
         J3DJoint* const originalJoint = originalData->getJointNodePointer(i);
-        J3DJoint* const nightwalkerJoint = s_nightwalkerModelData->getJointNodePointer(i);
-        if (originalJoint == nullptr || nightwalkerJoint == nullptr) return false;
+        J3DJoint* const modelJoint = asset.modelData->getJointNodePointer(i);
+        if (originalJoint == nullptr || modelJoint == nullptr) return false;
     }
-    for (u16 i = 0; i < s_nightwalkerModelData->getJointNum(); ++i) {
+    for (u16 i = 0; i < asset.modelData->getJointNum(); ++i) {
         J3DJoint* const originalJoint = originalData->getJointNodePointer(i);
-        J3DJoint* const nightwalkerJoint = s_nightwalkerModelData->getJointNodePointer(i);
-        nightwalkerJoint->setCallBack(originalJoint->getCallBack());
-        nightwalkerJoint->setMtxCalc(originalJoint->getMtxCalc());
+        J3DJoint* const modelJoint = asset.modelData->getJointNodePointer(i);
+        modelJoint->setCallBack(originalJoint->getCallBack());
+        modelJoint->setMtxCalc(originalJoint->getMtxCalc());
     }
-    for (u16 i = 0; i < s_nightwalkerModelData->getShapeNum(); ++i) {
+    for (u16 i = 0; i < asset.modelData->getShapeNum(); ++i) {
         J3DShape* const originalShape = originalData->getShapeNodePointer(i);
-        J3DShape* const nightwalkerShape = s_nightwalkerModelData->getShapeNodePointer(i);
-        if (originalShape == nullptr || nightwalkerShape == nullptr) return false;
+        J3DShape* const modelShape = asset.modelData->getShapeNodePointer(i);
+        if (originalShape == nullptr || modelShape == nullptr) return false;
         if (originalShape->checkFlag(J3DShpFlag_Visible)) {
-            nightwalkerShape->hide();
+            modelShape->hide();
         } else {
-            nightwalkerShape->show();
+            modelShape->show();
         }
     }
-    nightwalkerModel->setBaseTRMtx(originalModel->getBaseTRMtx());
-    nightwalkerModel->setBaseScale(*originalModel->getBaseScale());
-    nightwalkerModel->setUserArea(reinterpret_cast<uintptr_t>(horse));
+    model->setBaseTRMtx(originalModel->getBaseTRMtx());
+    model->setBaseScale(*originalModel->getBaseScale());
+    model->setUserArea(reinterpret_cast<uintptr_t>(horse));
     owner.originalModel = originalModel;
     owner.originalModelData = horse->m_modelData;
     owner.modelSwapped = true;
-    horse->m_model = nightwalkerModel;
-    horse->m_modelData = s_nightwalkerModelData;
-    nightwalkerModel->calc();
+    horse->m_model = model;
+    horse->m_modelData = asset.modelData;
+    model->calc();
     return true;
 }
 
@@ -588,7 +698,7 @@ uint64_t xxh64(const uint8_t* data, size_t size) {
     return hash;
 }
 
-size_t epona_texture_source_size(uint32_t format, uint32_t width, uint32_t height) {
+size_t gx_texture_source_size(uint32_t format, uint32_t width, uint32_t height) {
     if (width == 0 || height == 0) return 0;
     const auto div_ceil = [](uint32_t value, uint32_t divisor) {
         return (value + divisor - 1) / divisor;
@@ -614,18 +724,18 @@ size_t epona_texture_source_size(uint32_t format, uint32_t width, uint32_t heigh
     }
 }
 
-size_t epona_rgba8_size(uint32_t width, uint32_t height) {
+size_t gx_rgba8_size(uint32_t width, uint32_t height) {
     return static_cast<size_t>((width + 3) / 4) * ((height + 3) / 4) * 64;
 }
 
-struct EponaTextureSource {
+struct GxTextureSource {
     uint64_t hash = 0;
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t format = 0;
 };
 
-bool parse_epona_texture_source(const char* path, EponaTextureSource& out) {
+bool parse_gx_texture_source(const char* path, GxTextureSource& out) {
     if (path == nullptr) return false;
     const std::string file(path);
     const size_t slash = file.find_last_of("/\\");
@@ -673,7 +783,7 @@ bool parse_epona_texture_source(const char* path, EponaTextureSource& out) {
     return true;
 }
 
-std::string epona_gx_texture_path(const char* sourcePath) {
+std::string gxrgba_texture_path(const char* sourcePath) {
     std::string path = sourcePath != nullptr ? sourcePath : "";
     const size_t extension = path.find_last_of('.');
     if (extension != std::string::npos) path.replace(extension, std::string::npos, ".gxrgba");
@@ -693,6 +803,9 @@ std::string epona_skin_for_player(uint8_t player) {
     if (std::strncmp(peer.eponaSkin, kNightwalkerEponaName, kSkinNameMax) == 0) {
         return kNightwalkerEponaName;
     }
+    if (std::strncmp(peer.eponaSkin, kN64HoTName, kSkinNameMax) == 0) {
+        return kN64HoTName;
+    }
     return "";
 }
 
@@ -707,7 +820,7 @@ void unregister_epona_owner(EponaTextureOwner& owner) {
     owner.handles.clear();
 }
 
-struct EponaTextureAsset {
+struct GxRgbaTextureAsset {
     std::string path;
     std::vector<uint8_t> data;
     uint32_t width = 0;
@@ -716,25 +829,22 @@ struct EponaTextureAsset {
     bool failed = false;
 };
 
-std::array<EponaTextureAsset, 16> s_eponaTextureAssets{};
+std::vector<GxRgbaTextureAsset> s_gxRgbaTextureAssets;
+bool s_gxRgbaResourceServiceWarningLogged = false;
 
-EponaTextureAsset* epona_texture_asset(const char* path) {
+GxRgbaTextureAsset* gxrgba_texture_asset(const char* path) {
     if (path == nullptr) return nullptr;
-    EponaTextureAsset* asset = nullptr;
-    for (EponaTextureAsset& candidate : s_eponaTextureAssets) {
-        if (candidate.path == path) return &candidate;
-        if (asset == nullptr && candidate.path.empty()) asset = &candidate;
+    for (GxRgbaTextureAsset& candidate : s_gxRgbaTextureAssets) {
+        if (candidate.path == path) return candidate.failed ? nullptr : &candidate;
     }
-    if (asset == nullptr) {
-        coop_log::warn("coop_mod: [SKIN] Epona texture asset cache is full");
-        return nullptr;
-    }
+    s_gxRgbaTextureAssets.emplace_back();
+    GxRgbaTextureAsset* asset = &s_gxRgbaTextureAssets.back();
     asset->path = path;
     if (svc_resource == nullptr) {
-        if (!s_eponaResourceServiceWarningLogged) {
+        if (!s_gxRgbaResourceServiceWarningLogged) {
             coop_log::warn(
-                "coop_mod: [SKIN] resource service unavailable; Epona textures cannot be loaded");
-            s_eponaResourceServiceWarningLogged = true;
+                "coop_mod: [SKIN] resource service unavailable; converted textures cannot be loaded");
+            s_gxRgbaResourceServiceWarningLogged = true;
         }
         asset->failed = true;
         return nullptr;
@@ -745,7 +855,7 @@ EponaTextureAsset* epona_texture_asset(const char* path) {
     {
         if (buffer.data != nullptr) svc_resource->free(mod_ctx, &buffer);
         asset->failed = true;
-        coop_log::warn("coop_mod: [SKIN] failed to load converted Epona texture '{}'", path);
+        coop_log::warn("coop_mod: [SKIN] failed to load converted texture '{}'", path);
         return nullptr;
     }
 
@@ -756,20 +866,61 @@ EponaTextureAsset* epona_texture_asset(const char* path) {
         sizeof(asset->height));
     const size_t dataSize = buffer.size - 8;
     if (asset->width == 0 || asset->height == 0 ||
-        dataSize != epona_rgba8_size(asset->width, asset->height))
+        dataSize != gx_rgba8_size(asset->width, asset->height))
     {
         svc_resource->free(mod_ctx, &buffer);
         asset->failed = true;
         coop_log::warn(
-            "coop_mod: [SKIN] converted Epona texture '{}' has invalid dimensions", path);
+            "coop_mod: [SKIN] converted texture '{}' has invalid dimensions", path);
         return nullptr;
     }
     const auto* data = static_cast<const uint8_t*>(buffer.data) + 8;
     asset->data.assign(data, data + dataSize);
     svc_resource->free(mod_ctx, &buffer);
     asset->loaded = true;
-    s_eponaResourceServiceWarningLogged = false;
+    s_gxRgbaResourceServiceWarningLogged = false;
     return asset;
+}
+
+bool is_young_link_skin(const std::string& skin) {
+    for (const char* name : kYoungLinkSkinNames) {
+        if (skin == name) return true;
+    }
+    return false;
+}
+
+bool supports_skin_textures(const std::string& skin, int outfit) {
+    return (skin == kSubiLinkSkinName && outfit == kSkinOutfitOrdon) ||
+           (is_young_link_skin(skin) && outfit != kSkinOutfitWolf);
+}
+
+std::vector<std::string> texture_paths_for_skin(const std::string& skinName) {
+    std::vector<std::string> paths;
+    if (skinName == kSubiLinkSkinName) {
+        for (const char* path : kSubiLinkTexturePaths) paths.emplace_back(path);
+        return paths;
+    }
+    if (!is_young_link_skin(skinName)) return paths;
+
+    const Skin* skin = find(skinName.c_str());
+    if (skin == nullptr) return paths;
+    const std::filesystem::path textureDir =
+        std::filesystem::u8path(skin->path) / "textures";
+    std::error_code error;
+    for (std::filesystem::directory_iterator it(textureDir, error), end;
+         !error && it != end; it.increment(error))
+    {
+        std::error_code fileError;
+        if (!it->is_regular_file(fileError) || fileError ||
+            lower_file_name(path_text(it->path().extension())) != ".gxrgba")
+        {
+            continue;
+        }
+        paths.emplace_back("models/" + skinName + "/textures/" +
+                           path_text(it->path().filename()));
+    }
+    std::sort(paths.begin(), paths.end());
+    return paths;
 }
 
 void register_epona_owner(EponaTextureOwner& owner) {
@@ -801,7 +952,7 @@ void register_epona_owner(EponaTextureOwner& owner) {
         const uint32_t width = static_cast<uint16_t>(timg->width);
         const uint32_t height = static_cast<uint16_t>(timg->height);
         const uint32_t format = timg->format;
-        const size_t sourceSize = epona_texture_source_size(format, width, height);
+        const size_t sourceSize = gx_texture_source_size(format, width, height);
         if (sourceSize == 0) continue;
         const void* imageData = textures->getImgDataPtr(i);
         if (imageData == nullptr) continue;
@@ -809,8 +960,8 @@ void register_epona_owner(EponaTextureOwner& owner) {
             xxh64(static_cast<const uint8_t*>(imageData), sourceSize);
         const char* replacementPath = nullptr;
         for (size_t pathIndex = 0; pathIndex < count; ++pathIndex) {
-            EponaTextureSource source;
-            if (parse_epona_texture_source(paths[pathIndex], source) &&
+            GxTextureSource source;
+            if (parse_gx_texture_source(paths[pathIndex], source) &&
                 source.hash == sourceHash && source.width == width &&
                 source.height == height && source.format == format)
             {
@@ -825,9 +976,9 @@ void register_epona_owner(EponaTextureOwner& owner) {
             continue;
         }
 
-        const std::string dataPath = epona_gx_texture_path(replacementPath);
-        EponaTextureAsset* replacementAsset =
-            epona_texture_asset(dataPath.c_str());
+        const std::string dataPath = gxrgba_texture_path(replacementPath);
+        GxRgbaTextureAsset* replacementAsset =
+            gxrgba_texture_asset(dataPath.c_str());
         if (replacementAsset == nullptr) {
             failed = true;
             break;
@@ -867,6 +1018,216 @@ void register_epona_owner(EponaTextureOwner& owner) {
         coop_log::warn(
             "coop_mod: [SKIN] no source textures matched the selected Epona skin");
         owner.failed = true;
+    }
+}
+
+void release_subi_link_owner(SubiLinkTextureOwner& owner) {
+    for (const void* pointer : owner.texturePointers) {
+        const auto replacement = std::find_if(
+            s_sharedSubiTextureReplacements.begin(),
+            s_sharedSubiTextureReplacements.end(),
+            [pointer](const SharedSubiTextureReplacement& entry) {
+                return entry.pointer == pointer;
+            });
+        if (replacement == s_sharedSubiTextureReplacements.end()) continue;
+        if (replacement->owners > 1) {
+            --replacement->owners;
+            continue;
+        }
+        if (svc_texture == nullptr ||
+            svc_texture->unregister(mod_ctx, replacement->handle) != MOD_OK)
+        {
+            coop_log::warn(
+                "coop_mod: [SKIN] failed to unregister a {} texture", owner.skin);
+        }
+        s_sharedSubiTextureReplacements.erase(replacement);
+    }
+    owner.texturePointers.clear();
+}
+
+void register_subi_link_owner(SubiLinkTextureOwner& owner) {
+    if (!owner.active || owner.failed || !owner.texturePointers.empty()) return;
+    if (svc_resource == nullptr) {
+        if (!s_gxRgbaResourceServiceWarningLogged) {
+            coop_log::warn(
+                "coop_mod: [SKIN] resource service unavailable; {} textures cannot be loaded",
+                owner.skin);
+            s_gxRgbaResourceServiceWarningLogged = true;
+        }
+        return;
+    }
+
+    bool failed = false;
+    const std::vector<std::string> paths = texture_paths_for_skin(owner.skin);
+    for (J3DModelData* modelData : owner.modelData) {
+        if (!coop_ptr_looks_live(modelData) ||
+            !coop_ptr_looks_live(modelData->getTexture()))
+        {
+            continue;
+        }
+        J3DTexture* textures = modelData->getTexture();
+        for (u16 i = 0; i < textures->getNum(); ++i) {
+            ResTIMG* timg = textures->getResTIMG(i);
+            if (timg == nullptr) continue;
+            const uint32_t width = static_cast<uint16_t>(timg->width);
+            const uint32_t height = static_cast<uint16_t>(timg->height);
+            const uint32_t format = timg->format;
+            const size_t sourceSize = gx_texture_source_size(format, width, height);
+            if (sourceSize == 0) continue;
+            const void* imageData = textures->getImgDataPtr(i);
+            if (imageData == nullptr ||
+                std::find(
+                    owner.texturePointers.begin(), owner.texturePointers.end(),
+                    imageData) != owner.texturePointers.end())
+            {
+                continue;
+            }
+            const uint64_t sourceHash =
+                xxh64(static_cast<const uint8_t*>(imageData), sourceSize);
+            std::string replacementPath;
+            for (const std::string& path : paths) {
+                GxTextureSource source;
+                if (parse_gx_texture_source(path.c_str(), source) &&
+                    source.hash == sourceHash && source.width == width &&
+                    source.height == height && source.format == format)
+                {
+                    replacementPath = path;
+                    break;
+                }
+            }
+            if (replacementPath.empty()) continue;
+
+            const auto existing = std::find_if(
+                s_sharedSubiTextureReplacements.begin(),
+                s_sharedSubiTextureReplacements.end(),
+                [imageData](const SharedSubiTextureReplacement& entry) {
+                    return entry.pointer == imageData;
+                });
+            if (existing != s_sharedSubiTextureReplacements.end()) {
+                if (existing->path != replacementPath) {
+                    coop_log::warn(
+                        "coop_mod: [SKIN] texture data maps to incompatible replacements '{}' and '{}'",
+                        existing->path, replacementPath);
+                    failed = true;
+                    break;
+                }
+                ++existing->owners;
+                owner.texturePointers.push_back(imageData);
+                continue;
+            }
+
+            const std::string dataPath = gxrgba_texture_path(replacementPath.c_str());
+            GxRgbaTextureAsset* replacementAsset =
+                gxrgba_texture_asset(dataPath.c_str());
+            if (replacementAsset == nullptr) {
+                failed = true;
+                break;
+            }
+
+            TextureKey key = TEXTURE_KEY_INIT;
+            key.kind = TEXTURE_KEY_POINTER;
+            key.pointer = imageData;
+            key.width = width;
+            key.height = height;
+            key.gx_format = format;
+            TextureData replacement = TEXTURE_DATA_INIT;
+            replacement.data = replacementAsset->data.data();
+            replacement.size = replacementAsset->data.size();
+            replacement.width = replacementAsset->width;
+            replacement.height = replacementAsset->height;
+            replacement.mip_count = 1;
+            replacement.gx_format = GX_TF_RGBA8;
+            TextureReplacementHandle handle = 0;
+            const ModResult result =
+                svc_texture->register_data(mod_ctx, &key, &replacement, &handle);
+            if (result != MOD_OK) {
+                coop_log::warn(
+                    "coop_mod: [SKIN] failed to register '{}' texture '{}' ({})",
+                    owner.skin,
+                    dataPath, static_cast<int>(result));
+                failed = true;
+                break;
+            }
+            s_sharedSubiTextureReplacements.push_back(
+                {imageData, handle, replacementPath, 1});
+            owner.texturePointers.push_back(imageData);
+        }
+        if (failed) break;
+    }
+
+    if (failed) {
+        release_subi_link_owner(owner);
+        owner.failed = true;
+    } else if (owner.texturePointers.empty()) {
+        coop_log::warn(
+            "coop_mod: [SKIN] no source textures matched the '{}' skin", owner.skin);
+        owner.failed = true;
+    }
+}
+
+void update_subi_link_textures() {
+    if (svc_texture == nullptr) {
+        if (!s_subiLinkTextureServiceWarningLogged) {
+            coop_log::warn(
+                "coop_mod: [SKIN] texture service unavailable; skin textures cannot be loaded");
+            s_subiLinkTextureServiceWarningLogged = true;
+        }
+        return;
+    }
+    s_subiLinkTextureServiceWarningLogged = false;
+    const uint8_t localPlayer = coop_net_local_id();
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    for (uint8_t player = 0; player < kCoopMaxPlayers; ++player) {
+        std::array<J3DModelData*, kSkinPartCount> modelData{};
+        bool active = false;
+        const uint8_t effectiveLocalPlayer =
+            localPlayer < kCoopMaxPlayers ? localPlayer : kCoopHostId;
+        const bool localOwner = player == effectiveLocalPlayer;
+        std::string selectedSkin;
+        int outfit = -1;
+        if (localOwner) {
+            outfit = local_skin_outfit();
+            selectedSkin = skins_local_slot(skins_slot_for_outfit(outfit));
+            active = link != nullptr && !link->checkWolf() &&
+                     supports_skin_textures(selectedSkin, outfit);
+            if (link != nullptr) {
+                if (coop_ptr_looks_live(link->mpLinkModel)) {
+                    modelData[kSkinPartBody] = link->mpLinkModel->getModelData();
+                }
+                if (coop_ptr_looks_live(link->mpLinkFaceModel)) {
+                    modelData[kSkinPartFace] =
+                        link->mpLinkFaceModel->getModelData();
+                }
+                if (coop_ptr_looks_live(link->mpLinkHatModel)) {
+                    modelData[kSkinPartHead] =
+                        link->mpLinkHatModel->getModelData();
+                }
+                if (coop_ptr_looks_live(link->mpLinkHandModel)) {
+                    modelData[kSkinPartHands] =
+                        link->mpLinkHandModel->getModelData();
+                }
+            }
+        } else {
+            const char* puppetSkin =
+                puppet_hook_skin_for_active_outfit(player, &outfit);
+            if (puppetSkin != nullptr) selectedSkin = puppetSkin;
+            active = supports_skin_textures(selectedSkin, outfit);
+            for (int part = kSkinPartBody; part <= kSkinPartHands; ++part) {
+                modelData[part] = puppet_hook_link_model_data(player, part);
+            }
+        }
+
+        SubiLinkTextureOwner& owner = s_subiLinkTextureOwners[player];
+        if (owner.active != active || owner.skin != selectedSkin ||
+            owner.modelData != modelData)
+        {
+            release_subi_link_owner(owner);
+            owner = {};
+            owner.active = active;
+            owner.skin = selectedSkin;
+            owner.modelData = modelData;
+        }
+        register_subi_link_owner(owner);
     }
 }
 
@@ -926,8 +1287,9 @@ HookAction prepare_epona_skin_draw(ModContext*, void* args, void*, void*) {
     for (uint8_t player = 0; player < kCoopMaxPlayers; ++player) {
         EponaTextureOwner& owner = s_eponaTextureOwners[player];
         if (owner.actor == horse) {
-            if (owner.skin == kNightwalkerEponaName) {
-                swap_nightwalker_model(horse, owner, player);
+            EponaModelAsset* model = epona_model_for_skin(owner.skin);
+            if (model != nullptr) {
+                swap_epona_model(horse, owner, player, *model);
             } else {
                 register_epona_owner(owner);
             }
@@ -958,6 +1320,7 @@ void finish_epona_skin_draw(ModContext*, void* args, void*, void*) {
 
 void skins_texture_replacements_update() {
     update_epona_textures();
+    update_subi_link_textures();
 }
 
 void skins_cycle_update() {
@@ -1294,13 +1657,24 @@ struct EquipName {
 };
 
 const EquipName kEquipNames[] = {
-
     {"al_swb.bmd", "Wooden Sword"},
     {"al_swa.bmd", "Ordon Sword"},
     {"al_swm.bmd", "Master Sword"},
     {"al_sha.bmd", "Hylian Shield"},
     {"al_shb.bmd", "Ordon Shield"},
     {"al_shc.bmd", "Wooden Shield"},
+    {"al_hs.bmd", "Clawshot"},
+    {"al_boom.bmd", "Boomerang"},
+    {"al_bomb.bmd", "Bombs"},
+    {"al_bow.bmd", "Bow"},
+    {"al_pachi.bmd", "Slingshot"},
+    {"al_ib.bmd", "Ball and Chain"},
+    {"al_sp.bmd", "Spinner"},
+    {"al_crod.bmd", "Fishing Rod"},
+    {"al_bottle.bmd", "Bottle"},
+    {"al_kantera.bmd", "Lantern"},
+    {"wl_kusari.bmd", "Wolf Chain"},
+    {"al_bootsh.bmd", "Iron Boots"},
 };
 
 bool skins_ships_equipment_file(const char* name, const char* file);
@@ -1311,10 +1685,6 @@ void skins_equipment_list(int index, std::vector<std::string>& has,
     missing.clear();
     if (!s_scanned) rescan();
     if (index < 0 || index >= static_cast<int>(s_skins.size())) return;
-    const std::filesystem::path dir = std::filesystem::u8path(s_skins[index].path) / "equipment";
-    std::error_code ec;
-    const bool haveDir = is_directory_ci(dir, ec) && !ec;
-
     auto have_file = [&](const char* file) {
         return skins_ships_equipment_file(s_skins[index].name.c_str(), file);
     };
@@ -1333,17 +1703,15 @@ void skins_equipment_list(int index, std::vector<std::string>& has,
     }
 
     int others = 0;
-    if (haveDir) {
-        for (const auto& entry : std::filesystem::directory_iterator(path_ci(dir), ec)) {
-            if (ec) break;
-            if (!entry.is_regular_file()) continue;
-            const std::string name = path_text(entry.path().filename());
-            bool named = false;
-            for (const EquipName& known : kEquipNames) {
-                if (name == known.file) named = true;
+    for (const std::string& name : s_skins[index].equipmentFiles) {
+        bool named = false;
+        for (const EquipName& known : kEquipNames) {
+            if (name == lower_file_name(known.file)) {
+                named = true;
+                break;
             }
-            if (!named) ++others;
         }
+        if (!named) ++others;
     }
     if (others > 0) {
         has.push_back(std::to_string(others) +
@@ -1368,25 +1736,29 @@ void skins_outfit_list(int index, std::vector<std::string>& out) {
 std::string skins_equipment_text(int index) {
     if (!s_scanned) rescan();
     if (index < 0 || index >= static_cast<int>(s_skins.size())) return "";
-    const std::filesystem::path dir = std::filesystem::u8path(s_skins[index].path) / "equipment";
-    std::error_code ec;
-    if (!is_directory_ci(dir, ec) || ec) return "";
+    const auto& files = s_skins[index].equipmentFiles;
+    if (files.empty()) return "";
+
     std::string out;
     int extra = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(path_ci(dir), ec)) {
-        if (ec) break;
-        if (!entry.is_regular_file()) continue;
-        const std::string name = path_text(entry.path().filename());
-        const char* label = nullptr;
+    for (const EquipName& known : kEquipNames) {
+        if (files.find(lower_file_name(known.file)) != files.end()) {
+            if (!out.empty()) out += ", ";
+            out += known.label;
+        }
+
+    }
+    for (const std::string& name : files) {
+        bool named = false;
         for (const EquipName& known : kEquipNames) {
-            if (name == known.file) label = known.label;
+            if (name == lower_file_name(known.file)) {
+                named = true;
+                break;
+            }
         }
-        if (label == nullptr) {
+        if (!named) {
             ++extra;
-            continue;
         }
-        if (!out.empty()) out += ", ";
-        out += label;
     }
     if (out.empty() && extra == 0) return "";
     if (extra > 0) {
@@ -1481,7 +1853,8 @@ void skins_set_local_epona_skin(const char* name) {
     const char* value = name != nullptr ? name : "";
     if (std::strcmp(value, kOotStyleEponaName) != 0 &&
         std::strcmp(value, kTwilightEponaName) != 0 &&
-        std::strcmp(value, kNightwalkerEponaName) != 0)
+        std::strcmp(value, kNightwalkerEponaName) != 0 &&
+        std::strcmp(value, kN64HoTName) != 0)
     {
         value = "";
     }
@@ -1508,6 +1881,10 @@ void skins_local_choices(SkinChoices* out) {
 
 std::string preset_value(const char* name, int slot) {
     const std::string value = name != nullptr ? name : "";
+    if (value == kN64HoTName && !skins_covers_slot(value.c_str(), slot)) return "";
+    if (slot == kSkinChoiceOrdon && value == "Dark Link") {
+        return kSubiLinkSkinName;
+    }
     if (slot != kSkinChoiceVoice || value.empty()) return value;
     const Skin* skin = find(name);
     return skin != nullptr && skin->silentVoice ? std::string(kSilentVoice) : value;
@@ -1515,12 +1892,16 @@ std::string preset_value(const char* name, int slot) {
 
 bool skins_all_same(const char* name) {
     const bool heroOfTime = name != nullptr && std::strcmp(name, "Hero of Time") == 0;
+    const bool n64HoT = name != nullptr && std::strcmp(name, kN64HoTName) == 0;
+    const bool darkLink = name != nullptr && std::strcmp(name, "Dark Link") == 0;
     const std::string eponaSkin = skins_local_epona_skin();
-    if (heroOfTime ? eponaSkin != kOotStyleEponaName : !eponaSkin.empty()) return false;
+    const std::string expectedEpona = heroOfTime ? kOotStyleEponaName :
+        n64HoT ? kN64HoTName : darkLink ? kNightwalkerEponaName : "";
+    if (eponaSkin != expectedEpona) return false;
     for (int i = 0; i < kSkinChoiceCount; ++i) {
-
         if (i >= kSkinChoiceFirstItem) {
-            if (!skins_local_slot(i).empty()) return false;
+            const std::string expected = n64HoT ? preset_value(name, i) : "";
+            if (skins_local_slot(i) != expected) return false;
             continue;
         }
         if (skins_local_slot(i) != preset_value(name, i)) return false;
@@ -1549,16 +1930,22 @@ void skins_set_local_slot(int slot, const char* name) {
 void skins_set_local_all(const char* name) {
     if (svc_config == nullptr) return;
     const bool heroOfTime = name != nullptr && std::strcmp(name, "Hero of Time") == 0;
+    const bool n64HoT = name != nullptr && std::strcmp(name, kN64HoTName) == 0;
+    const bool darkLink = name != nullptr && std::strcmp(name, "Dark Link") == 0;
     for (int i = 0; i < kSkinChoiceCount; ++i) {
         if (s_slotVar[i] == 0) continue;
 
         const bool piece = i >= kSkinChoiceFirstItem;
         const std::string value = preset_value(name, i);
-        svc_config->set_string(mod_ctx, s_slotVar[i], (piece || name == nullptr) ? "" : value.c_str());
+        const bool selected = name != nullptr && (!piece || n64HoT);
+        svc_config->set_string(
+            mod_ctx, s_slotVar[i], selected ? value.c_str() : "");
     }
     if (s_eponaSkinVar != 0) {
+        const char* eponaSkin = heroOfTime ? kOotStyleEponaName :
+            n64HoT ? kN64HoTName : darkLink ? kNightwalkerEponaName : "";
         svc_config->set_string(
-            mod_ctx, s_eponaSkinVar, heroOfTime ? kOotStyleEponaName : "");
+            mod_ctx, s_eponaSkinVar, eponaSkin);
     }
     after_choice_change();
 }
@@ -1675,20 +2062,32 @@ J3DModelData* equipment_data(const char* name, const char* file, bool forLink) {
     const Skin* skin = find(name);
     if (skin == nullptr) return nullptr;
     if (skin->builtin) return skin->name == kGanondorfSkin ? ganon_skin_equipment(file) : nullptr;
-    const std::string key =
-        std::string(skin->name) + (forLink ? "/equipment-link/" : "/equipment/") + file;
+    const int outfit = forLink ? local_skin_outfit() : -1;
+    const std::string key = std::string(skin->name) +
+        (forLink ? "/equipment-link/" + std::to_string(outfit) + "/" : "/equipment/") + file;
     for (const LoadedCutscene& loaded : s_loadedCutscenes) {
         if (loaded.skin != key) continue;
         return loaded.failed ? nullptr : loaded.data;
     }
     std::filesystem::path path = std::filesystem::u8path(skin->path) / "equipment" / file;
     std::error_code ec;
+    if (forLink && outfit >= 0 && outfit < kSkinOutfitCount) {
+        const std::filesystem::path outfitDir =
+            (kOutfitDir[outfit][0] == '\0')
+                ? std::filesystem::u8path(skin->path)
+                : std::filesystem::u8path(skin->path) / kOutfitDir[outfit];
+        const std::filesystem::path outfitPath = outfitDir / file;
+        if (exists_ci(outfitPath, ec) && !ec) path = outfitPath;
+    }
     LoadedCutscene loaded;
     loaded.skin = key;
     if (exists_ci(path, ec) && !ec) {
-        loaded.data = forLink ? loadBmdDataForLink(path_text(path).c_str())
-                              : loadBmdDataForPuppet(path_text(path).c_str());
-        if (loaded.data == nullptr) loaded.data = loadBmdDataFromFile(path_text(path).c_str());
+        loaded.data = loadBmdDataFromFile(path_text(path).c_str());
+        if (loaded.data == nullptr) {
+            loaded.data = forLink
+                ? loadBmdDataForLink(path_text(path).c_str())
+                : loadBmdDataForPuppet(path_text(path).c_str());
+        }
     }
     loaded.failed = loaded.data == nullptr;
     s_loadedCutscenes.push_back(loaded);
@@ -1703,15 +2102,9 @@ bool skins_ships_equipment_file(const char* name, const char* file) {
         return (skin->name == kGanondorfSkin && ganon_skin_ships(file)) ||
                (skin->name == kHerosShadeSkin && shade_skin_ships(file));
     }
-    std::error_code ec;
-    const std::filesystem::path root(skin->path);
-    if (exists_ci(root / "equipment" / file, ec) && !ec) return true;
-    for (int o = 0; o < kSkinOutfitCount; ++o) {
-        const std::filesystem::path dir =
-            (kOutfitDir[o][0] == '\0') ? root : root / kOutfitDir[o];
-        if (exists_ci(dir / file, ec) && !ec) return true;
-    }
-    return false;
+    const std::string fileName =
+        lower_file_name(path_text(std::filesystem::u8path(file).filename()));
+    return skin->files.find(fileName) != skin->files.end();
 }
 
 struct AramFile {
@@ -1731,6 +2124,8 @@ const AramFile kAramFiles[] = {
     {0x317, "al_hs_kusari.bmd", kSkinChoiceHookshot},
     {0x318, "al_hs_tip.bmd", kSkinChoiceHookshot},
     {0x319, "al_pachi.bmd", kSkinChoiceSlingshot},
+    {0x31A, "al_pend.bmd", kSkinChoiceBallAndChain},
+    {0x31F, "s_ball_yami.bmd", kSkinChoiceBallAndChain},
 };
 
 const char* skins_aram_file_for_index(uint16_t index) {
@@ -1772,12 +2167,14 @@ J3DModelData* skins_local_equipment_data(const char* file) {
     }
 
     const int slot = skins_slot_for_equipment_file(file);
+    const char* skinFile =
+        std::strcmp(file, "al_bootsH.bmd") == 0 ? "al_bootsh.bmd" : file;
     std::string mine = skins_local_slot(slot);
     if (mine.empty() && slot != kSkinChoiceEquipment) {
         mine = skins_local_slot(kSkinChoiceEquipment);
     }
     if (mine.empty()) return nullptr;
-    return equipment_data(mine.c_str(), file, true);
+    return equipment_data(mine.c_str(), skinFile, true);
 }
 
 bool skins_covers_outfit(const char* name, int outfit) {

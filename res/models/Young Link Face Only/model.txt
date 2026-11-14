@@ -1,0 +1,4 @@
+name = Young Link - Face Only
+by = madnessgod
+about = Face-only variant for Hero, Ordon, Zora, Magic, and Sumo outfits. Ported with permission from GameBanana mod 724984.
+preset=false

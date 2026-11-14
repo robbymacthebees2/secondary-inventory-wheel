@@ -386,12 +386,12 @@ void end_dark_link_shape_draw(ModContext*, void*, void*, void*) {
     }
 }
 
-void apply_dark_link_damage_multiplier(ModContext*, void* args, void*, void*) {
+void apply_mask_damage_multiplier(ModContext*, void* args, void*, void*) {
     auto* attack = mods::arg<dCcU_AtInfo*>(args, 0);
     auto* link = daAlink_getAlinkActorClass();
     constexpr u32 kSwordAttackTypes =
         AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD;
-    if (!g_darkLinkVisualActive || link == nullptr || attack == nullptr ||
+    if (link == nullptr || attack == nullptr ||
         attack->mpActor != link || attack->mpCollider == nullptr ||
         attack->mHitType != HIT_TYPE_LINK_NORMAL_ATTACK ||
         attack->mAttackPower == 0 ||
@@ -400,16 +400,24 @@ void apply_dark_link_damage_multiplier(ModContext*, void* args, void*, void*) {
         return;
     }
 
-    const u32 percent = static_cast<u32>(darkLinkDamageMultiplierPercent());
+    int64_t percent = 100;
+    if (g_darkLinkVisualActive) {
+        percent = darkLinkDamageMultiplierPercent();
+    } else if (g_giantMaskActive && !link->checkWolf()) {
+        percent = giantMaskDamageMultiplierPercent();
+    } else {
+        return;
+    }
     attack->mAttackPower = static_cast<u16>(std::min<u32>(
-        (static_cast<u32>(attack->mAttackPower) * percent + 99U) / 100U,
+        (static_cast<u32>(attack->mAttackPower) *
+             static_cast<u32>(percent) + 99U) / 100U,
         0xFFFFU));
 }
 
 ModResult initialize_dark_link_visual_hooks(ModError*) {
     ModResult result;
     if ((result = mods::hook::add_post<DarkLinkAttackPowerHook>(
-             svc_hook, apply_dark_link_damage_multiplier)) != MOD_OK ||
+             svc_hook, apply_mask_damage_multiplier)) != MOD_OK ||
         (result = mods::hook::add_pre<DarkLinkMaterialDrawHook>(
              svc_hook, begin_dark_link_material_draw)) != MOD_OK ||
         (result = mods::hook::add_post<DarkLinkMaterialDrawHook>(

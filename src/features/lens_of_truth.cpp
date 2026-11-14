@@ -12,6 +12,8 @@ constexpr u32 kPoeHumanAttackTypeMask =
 std::array<LensPoeState, 32> g_lensPoeStates{};
 bool g_lensVisionActivated = false;
 
+DEFINE_HOOK(&dCcD_GObjInf::ChkTgHit, PoeTargetHitCheck);
+
 HookAction preserve_lens_of_truth_vision(ModContext*, void* args, void*, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     if (g_lensOfTruthActive && player != nullptr && !player->checkWolf()) {
@@ -27,6 +29,25 @@ LensPoeState* find_lens_poe_state(fpc_ProcID actorId) {
         }
     }
     return nullptr;
+}
+
+HookAction allow_human_lens_poe_hit(ModContext*, void* args, void*, void*) {
+    auto* collider = mods::arg<dCcD_GObjInf*>(args, 0);
+    if (collider == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    auto* actor = collider->GetAc();
+    auto* player = daAlink_getAlinkActorClass();
+    if (actor == nullptr || fopAcM_GetName(actor) != fpcNm_E_PO_e ||
+        !g_lensOfTruthActive || player == nullptr || player->checkWolf() ||
+        find_lens_poe_state(fopAcM_GetID(actor)) == nullptr)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    reinterpret_cast<e_po_class*>(actor)->field_0x7DC = FALSE;
+    return HOOK_CONTINUE;
 }
 
 LensPoeState* capture_lens_poe_state(e_po_class* poe) {

@@ -1,5 +1,118 @@
 DEFINE_HOOK(
     &daAlink_c::checkItemChangeFromButton, SwordFlourishItemChange);
+DEFINE_HOOK(&daAlink_c::setNormalSpeedF, SetNormalSpeedF);
+DEFINE_HOOK(&daAlink_c::decideCommonDoStatus, DecideCommonDoStatus);
+DEFINE_HOOK(&daAlink_c::setFrontWallType, SetFrontWallType);
+DEFINE_HOOK(&daAlink_c::checkRoomOnly, CheckRoomOnlyForMovement);
+DEFINE_HOOK(&daAlink_c::checkNotAutoJumpStage, CheckNotAutoJumpStage);
+DEFINE_HOOK(&daAlink_c::checkNoSubjectModeCamera, CheckNoSubjectModeCamera);
+DEFINE_HOOK(&dCamera_c::ChangeModeOK, CastleTownChangeModeOK);
+DEFINE_HOOK(&daAlink_c::checkHookshotStickBG, CheckHookshotStickBG);
+DEFINE_HOOK_SYMBOL(
+    "cBgS::GetTriPla", bool(const cBgS*, const cBgS_PolyInfo*, cM3dGPla*),
+    ClawshotUnevenSurfaceGetTriPla);
+
+namespace {
+bool g_bypassRoomOnlyMovementRestriction = false;
+}
+
+HookAction begin_unrestricted_room_movement(ModContext*, void* args, void*, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (!indoorMovementUnrestrictedEnabled() || alink == nullptr ||
+        !alink->checkRoomOnly() || g_bypassRoomOnlyMovementRestriction)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    g_bypassRoomOnlyMovementRestriction = true;
+    return HOOK_CONTINUE;
+}
+
+void allow_unrestricted_room_movement(ModContext*, void*, void* retval, void*) {
+    if (g_bypassRoomOnlyMovementRestriction) {
+        *static_cast<bool*>(retval) = false;
+    }
+}
+
+void end_unrestricted_room_movement(ModContext*, void*, void*, void*) {
+    g_bypassRoomOnlyMovementRestriction = false;
+}
+
+void allow_unrestricted_room_auto_jump(ModContext*, void*, void* retval, void*) {
+    if (indoorMovementUnrestrictedEnabled() && daAlink_c::checkRoomOnly()) {
+        *static_cast<bool*>(retval) = false;
+    }
+}
+
+void allow_castle_town_first_person(ModContext*, void* args, void* retval, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (castleTownFirstPersonEnabled() && alink != nullptr &&
+        alink->checkCastleTown())
+    {
+        *static_cast<bool*>(retval) = false;
+    }
+}
+
+void allow_castle_town_subject_mode(ModContext*, void* args, void* retval, void*) {
+    auto* camera = mods::arg<dCamera_c*>(args, 0);
+    auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
+    if (castleTownFirstPersonEnabled() && camera != nullptr && alink != nullptr &&
+        alink->checkCastleTown() && mods::arg<s32>(args, 1) == 4 &&
+        !dComIfGp_evmng_cameraPlay() && !camera->chkFlag(0x20000000))
+    {
+        *static_cast<bool*>(retval) = true;
+    }
+}
+
+void use_castle_town_subject_camera_type(
+    ModContext*, void* args, void* retval, void*)
+{
+    auto* camera = mods::arg<dCamera_c*>(args, 0);
+    auto* alink = daAlink_getAlinkActorClass();
+    if (!castleTownFirstPersonEnabled() || camera == nullptr || alink == nullptr ||
+        !alink->checkCastleTown() ||
+        alink->mProcID != daAlink_c::PROC_SUBJECTIVITY)
+    {
+        return;
+    }
+
+    const s32 fieldCameraType = camera->GetCameraTypeFromCameraName("FieldS");
+    if (fieldCameraType < 0xFFFF) {
+        *static_cast<s32*>(retval) = fieldCameraType;
+    }
+}
+
+HookAction allow_clawshots_any_surface(ModContext*, void* args, void* retval, void*) {
+    auto* alink = mods::arg<daAlink_c*>(args, 0);
+    if (!clawshotAnySurfaceEnabled() || alink == nullptr) {
+        return HOOK_CONTINUE;
+    }
+
+    *static_cast<BOOL*>(retval) = TRUE;
+    return HOOK_SKIP_ORIGINAL;
+}
+
+void allow_clawshot_uneven_surface_stick(
+    ModContext*, void* args, void* retval, void*)
+{
+    auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
+    const auto* poly = mods::arg<const cBgS_PolyInfo*>(args, 1);
+    auto* plane = mods::arg<cM3dGPla*>(args, 2);
+    if (!clawshotUnevenSurfaceStickEnabled() || alink == nullptr ||
+        alink->mProcID != daAlink_c::PROC_HOOKSHOT_FLY ||
+        alink->mProcVar2.field_0x300c != 4 || poly != &alink->mPolyInfo2 ||
+        plane == nullptr || !*static_cast<bool*>(retval))
+    {
+        return;
+    }
+
+    const f32 normalY = plane->mNormal.y;
+    if (std::fabs(normalY) <= 0.05f || std::fabs(normalY) > 0.5f) {
+        return;
+    }
+
+    plane->mNormal.y = 0.0f;
+}
 
 HookAction enable_sword_putaway_flourish(ModContext*, void* args, void*, void*) {
     auto* alink = mods::arg<daAlink_c*>(args, 0);

@@ -1384,6 +1384,8 @@ HookAction handle_secondary_ring_move_end(ModContext*, void* args, void* retval,
     return HOOK_SKIP_ORIGINAL;
 }
 
+u8 z_slot_gale_bomb_base_slot();
+
 HookAction show_ice_arrow_combo_on_prompt(ModContext*, void* args, void* retval, void*) {
     auto* ring = mods::arg<dMenu_Ring_c*>(args, 0);
     if (ring != nullptr && !isSecondaryRing(ring) && retval != nullptr &&
@@ -1400,10 +1402,23 @@ HookAction show_ice_arrow_combo_on_prompt(ModContext*, void* args, void* retval,
             cursorItem == dItemNo_NORMAL_BOMB_e ||
             cursorItem == dItemNo_WATER_BOMB_e ||
             cursorItem == dItemNo_POKE_BOMB_e;
+        const u8 galeSlot = z_slot_gale_bomb_base_slot();
+        const bool galeBombComboItem =
+            cursorItem == dItemNo_NORMAL_BOMB_e &&
+            galeSlot != dItemNo_NONE_e &&
+            galeSlot != ring->mItemSlots[ring->mCurrentSlot] &&
+            !((zSlot == galeSlot &&
+               zMixSlot == ring->mItemSlots[ring->mCurrentSlot]) ||
+              (zSlot == ring->mItemSlots[ring->mCurrentSlot] &&
+               zMixSlot == galeSlot));
         if (bowComboItem &&
             ((zSlot == SLOT_4 && zMixSlot != ring->mItemSlots[ring->mCurrentSlot]) ||
              (zMixSlot == SLOT_4 && zSlot != ring->mItemSlots[ring->mCurrentSlot])))
         {
+            *static_cast<bool*>(retval) = true;
+            return HOOK_SKIP_ORIGINAL;
+        }
+        if (galeBombComboItem) {
             *static_cast<bool*>(retval) = true;
             return HOOK_SKIP_ORIGINAL;
         }
@@ -1434,10 +1449,20 @@ HookAction show_ice_arrow_combo_off_prompt(ModContext*, void* args, void* retval
             cursorItem == dItemNo_NORMAL_BOMB_e ||
             cursorItem == dItemNo_WATER_BOMB_e ||
             cursorItem == dItemNo_POKE_BOMB_e;
+        const u8 galeSlot = z_slot_gale_bomb_base_slot();
+        const bool galeBombComboItem =
+            gale_bomb_combo_selected(kZItemSelectIndex) &&
+            cursorItem == dItemNo_NORMAL_BOMB_e &&
+            ((zSlot == cursorSlot && zMixSlot == galeSlot) ||
+             (zSlot == galeSlot && zMixSlot == cursorSlot));
         if (bowComboItem &&
             ((zSlot == cursorSlot && zMixSlot == SLOT_4) ||
              (zSlot == SLOT_4 && zMixSlot == cursorSlot)))
         {
+            *static_cast<bool*>(retval) = true;
+            return HOOK_SKIP_ORIGINAL;
+        }
+        if (galeBombComboItem) {
             *static_cast<bool*>(retval) = true;
             return HOOK_SKIP_ORIGINAL;
         }
@@ -1457,6 +1482,107 @@ bool is_bow_combo_item(u8 item) {
            item == dItemNo_NORMAL_BOMB_e ||
            item == dItemNo_WATER_BOMB_e ||
            item == dItemNo_POKE_BOMB_e;
+}
+
+u8 ring_cursor_for_inventory_slot(dMenu_Ring_c* ring, u8 inventorySlot);
+void sync_primary_ring_item_selection(dMenu_Ring_c* ring);
+
+u8 z_slot_gale_bomb_base_slot() {
+    const u8 zSlot = dComIfGs_getSelectItemIndex(kZItemSelectIndex);
+    const u8 zMixSlot = dComIfGs_getMixItemIndex(kZItemSelectIndex);
+    if (zSlot != dItemNo_NONE_e &&
+        dComIfGs_getItem(zSlot, false) == dItemNo_BOOMERANG_e)
+    {
+        return zSlot;
+    }
+    if (zMixSlot != dItemNo_NONE_e &&
+        dComIfGs_getItem(zMixSlot, false) == dItemNo_BOOMERANG_e)
+    {
+        return zMixSlot;
+    }
+    if ((zSlot == dItemNo_NONE_e || zSlot == SLOT_4) &&
+        dComIfGs_getItem(SLOT_4, false) == dItemNo_BOOMERANG_e)
+    {
+        return SLOT_4;
+    }
+    return dItemNo_NONE_e;
+}
+
+bool toggle_z_gale_bomb_combo(
+    dMenu_Ring_c* ring, u8 cursorSlot, u8 cursorItem)
+{
+    if (ring == nullptr || !zItemSlotEnabled() ||
+        secondaryItemAssigned(kZItemSelectIndex) ||
+        cursorItem != dItemNo_NORMAL_BOMB_e)
+    {
+        return false;
+    }
+
+    const u8 zSlot = dComIfGs_getSelectItemIndex(kZItemSelectIndex);
+    const u8 zMixSlot = dComIfGs_getMixItemIndex(kZItemSelectIndex);
+    const u8 galeSlot = z_slot_gale_bomb_base_slot();
+    if (galeSlot == dItemNo_NONE_e || galeSlot == cursorSlot) {
+        return false;
+    }
+
+    const bool turnOff =
+        (zSlot == galeSlot && zMixSlot == cursorSlot) ||
+        (zSlot == cursorSlot && zMixSlot == galeSlot);
+    const bool canTurnOn =
+        (zSlot == galeSlot && zMixSlot != cursorSlot) ||
+        (zSlot == dItemNo_NONE_e && galeSlot == SLOT_4);
+    if (!turnOff && !canTurnOn) {
+        return false;
+    }
+
+    for (int button = 0; button <= kZItemSelectIndex; ++button) {
+        ring->setSelectItemForce(button);
+    }
+
+    if (turnOff) {
+        Z2GetAudioMgr()->seStart(
+            Z2SE_SY_ITEM_COMBINE_OFF, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        dComIfGs_setSelectItemIndex(kZItemSelectIndex, galeSlot);
+        dComIfGs_setMixItemIndex(kZItemSelectIndex, dItemNo_NONE_e);
+        ring->field_0x6cb = cursorSlot;
+        ring->field_0x6cd = kZItemSelectIndex;
+    } else {
+        Z2GetAudioMgr()->seStart(
+            Z2SE_SY_ITEM_COMBINE_ON, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+        dComIfGs_setSelectItemIndex(kZItemSelectIndex, galeSlot);
+        dComIfGs_setMixItemIndex(kZItemSelectIndex, cursorSlot);
+        ring->field_0x6cd = dItemNo_NONE_e;
+
+        for (int button = 0; button < kZItemSelectIndex; ++button) {
+            if (dComIfGs_getSelectItemIndex(button) == cursorSlot) {
+                dComIfGs_setSelectItemIndex(button, dItemNo_NONE_e);
+                dComIfGs_setMixItemIndex(button, dItemNo_NONE_e);
+            } else if (dComIfGs_getMixItemIndex(button) == cursorSlot) {
+                dComIfGs_setMixItemIndex(button, dItemNo_NONE_e);
+                ring->setSelectItem(button, selected_item_for_button(button));
+            }
+        }
+    }
+
+    sync_primary_ring_item_selection(ring);
+    ring->field_0x6b3 = kZItemSelectIndex;
+    ring->field_0x674[kZItemSelectIndex] = 1;
+    ring->setJumpItem(false);
+    ring->setSelectItem(
+        kZItemSelectIndex, selected_item_for_button(kZItemSelectIndex));
+
+    const u8 animationInventorySlot =
+        ring->field_0x6cd == kZItemSelectIndex
+            ? ring->field_0x6cb
+            : ring->field_0x6b4[kZItemSelectIndex];
+    const u8 animationSlot =
+        ring_cursor_for_inventory_slot(ring, animationInventorySlot);
+    if (animationSlot != dItemNo_NONE_e) {
+        ring->field_0x518[kZItemSelectIndex] = ring->mItemSlotPosX[animationSlot];
+        ring->field_0x528[kZItemSelectIndex] = ring->mItemSlotPosY[animationSlot];
+    }
+    ring->field_0x538[kZItemSelectIndex] = g_ringHIO.mSelectItemScale;
+    return true;
 }
 
 u8 ring_cursor_for_inventory_slot(dMenu_Ring_c* ring, u8 inventorySlot) {
@@ -1573,15 +1699,13 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context);
 DEFINE_HOOK(&dComIfGp_getSelectItem, ZSelectItemAccessorHook);
 DEFINE_HOOK(&daAlink_c::checkItemSetButton, CheckItemSetButtonHook);
 
-bool g_dispatchingVanillaZItemChange = false;
-
 void resolve_z_selected_item(ModContext*, void* args, void* retval, void*) {
     const int button = mods::arg<int>(args, 0);
     if (!zItemSlotEnabled() || retval == nullptr) {
         return;
     }
 
-    if (button == kZItemSelectIndex || (g_dispatchingVanillaZItemChange && button == 0)) {
+   if (button == kZItemSelectIndex) {
         *static_cast<u8*>(retval) = selected_item_for_button(kZItemSelectIndex);
     }
 }
@@ -1810,6 +1934,17 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
 }
 
 bool z_slot_item_ammo_count(u8 item, int& count) {
+    if (item == dItemNo_BOOMERANG_e &&
+        gale_bomb_combo_selected(kZItemSelectIndex))
+    {
+        const u8 bombBag = gale_bomb_combo_bag_slot(kZItemSelectIndex);
+        if (bombBag == dItemNo_NONE_e) {
+            return false;
+        }
+        count = dComIfGs_getBombNum(bombBag);
+        return true;
+    }
+
     switch (item) {
     case dItemNo_BOW_e:
     case dItemNo_LIGHT_ARROW_e:
@@ -1924,6 +2059,7 @@ void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
     case dItemNo_POKE_BOMB_e:
     case dItemNo_BOMB_ARROW_e:
     case dItemNo_HAWK_ARROW_e:
+    case dItemNo_BOOMERANG_e:
         numberOffsetX = 14.0f;
         numberOffsetY = -30.0f;
         numberScale = 0.75f;
@@ -2045,6 +2181,7 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         g_secondaryZHudPicture = nullptr;
         g_secondaryZHudSlot = dItemNo_NONE_e;
         g_secondaryZHudItem = dItemNo_NONE_e;
+        g_secondaryZHudGaleBombCombo = false;
         return;
     }
     if (meter == nullptr || meter->mpScreen == nullptr) {
@@ -2107,6 +2244,7 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         g_secondaryZHudPicture = nullptr;
         g_secondaryZHudSlot = dItemNo_NONE_e;
         g_secondaryZHudItem = dItemNo_NONE_e;
+        g_secondaryZHudGaleBombCombo = false;
         return;
     }
 
@@ -2119,10 +2257,13 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         g_secondaryZHudPicture = nullptr;
         g_secondaryZHudSlot = dItemNo_NONE_e;
         g_secondaryZHudItem = dItemNo_NONE_e;
+        g_secondaryZHudGaleBombCombo = false;
     }
     u8 displayItem = assigned
         ? secondaryDisplayItemForSlot(assignedSlot)
         : selected_item_for_button(kZItemSelectIndex);
+    const bool galeBombComboActive =
+        !assigned && gale_bomb_combo_selected(kZItemSelectIndex);
     if (displayItem == dItemNo_KANTERA_e &&
         z_slot_bow_lantern_combo(dItemNo_BOW_e))
     {
@@ -2135,7 +2276,9 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         zItemRoot->show();
     }
     if (g_secondaryZHudSlot == assignedSlot &&
-        g_secondaryZHudItem == displayItem && g_secondaryZHudPicture == picture)
+        g_secondaryZHudItem == displayItem &&
+        g_secondaryZHudGaleBombCombo == galeBombComboActive &&
+        g_secondaryZHudPicture == picture)
     {
         update_z_slot_ammo_display(meter, displayItem);
         return;
@@ -2151,6 +2294,7 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         g_secondaryZHudPicture = picture;
         g_secondaryZHudSlot = dItemNo_NONE_e;
         g_secondaryZHudItem = displayItem;
+        g_secondaryZHudGaleBombCombo = false;
         return;
     }
 
@@ -2159,6 +2303,8 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         ? secondaryIconContextForSlot(assignedSlot) : SecondaryIconContext::None;
     const char* customIconResource =
         secondary_custom_icon_resource(g_secondaryIconContext);
+    const u8 iconItem = galeBombComboActive
+        ? dItemNo_NORMAL_BOMB_e : displayItem;
     int textureCount = 0;
     ResTIMG* texture =
         reinterpret_cast<ResTIMG*>(g_secondaryZHudTextureBuffers[0].data());
@@ -2190,7 +2336,7 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         textureCount = 1;
     } else {
         textureCount = dMeter2Info_readItemTexture(
-            displayItem, g_secondaryZHudTextureBuffers[0].data(), picture,
+            iconItem, g_secondaryZHudTextureBuffers[0].data(), picture,
             g_secondaryZHudTextureBuffers[1].data(), meter->mpItemXYPane[2],
             nullptr, nullptr, nullptr, nullptr, -1);
     }
@@ -2204,12 +2350,29 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
         svc_log->error(mod_ctx, "Z item HUD icon has invalid dimensions");
         return;
     }
+    if (galeBombComboActive) {
+        auto* overlayTexture = reinterpret_cast<ResTIMG*>(
+            g_secondaryZHudTextureBuffers[1].data());
+        auto* overlayPicture = meter->mpItemXYPane[2];
+        const int overlayTextureCount = dMeter2Info_readItemTexture(
+            dItemNo_BOOMERANG_e, overlayTexture, nullptr, nullptr, nullptr,
+            nullptr, nullptr, nullptr, nullptr, -1);
+        if (overlayTextureCount <= 0 || overlayTexture->width == 0 ||
+            overlayTexture->height == 0 ||
+            overlayPicture->changeTexture(overlayTexture, 0) == nullptr)
+        {
+            svc_log->error(mod_ctx, "failed to create the Gale and Bomb HUD icon");
+            return;
+        }
+    }
     if (assigned) {
         picture->setBlackWhite(
             JUtility::TColor(0, 0, 0, 0),
             JUtility::TColor(255, 255, 255, 255));
     }
-    if (textureCount <= 1) {
+    if (galeBombComboActive) {
+        meter->mpItemXYPane[2]->show();
+    } else if (textureCount <= 1) {
         meter->mpItemXYPane[2]->hide();
     } else {
         meter->mpItemXYPane[2]->show();
@@ -2217,27 +2380,51 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
 
     const f32 scale = g_drawHIO.mItemScaleAdjustON
         ? g_drawHIO.mItemScalePercent / 100.0f
-        : dItem_data::getTexScale(displayItem) / 100.0f;
+        : dItem_data::getTexScale(iconItem) / 100.0f;
+    const f32 bombIconScale = galeBombComboActive ? 0.78f : 1.0f;
     meter->field_0x6c4[2] =
-        scale * ((texture->width * meter->mpItemR->getInitSizeX()) / 48.0f);
+        scale * bombIconScale *
+        ((texture->width * meter->mpItemR->getInitSizeX()) / 48.0f);
     meter->field_0x6d0[2] =
-        scale * ((texture->height * meter->mpItemR->getInitSizeY()) / 48.0f);
+        scale * bombIconScale *
+        ((texture->height * meter->mpItemR->getInitSizeY()) / 48.0f);
     meter->field_0x6ac[2] =
         (meter->mpItemR->getInitSizeX() - meter->field_0x6c4[2]) * 0.5f;
     meter->field_0x6b8[2] =
         (meter->mpItemR->getInitSizeY() - meter->field_0x6d0[2]) * 0.5f;
     meter->mpItemR->resize(meter->field_0x6c4[2], meter->field_0x6d0[2]);
     meter->mpItemR->paneTrans(
-        g_drawHIO.mButtonZItemPosX + meter->field_0x6ac[2],
-        g_drawHIO.mButtonZItemPosY + meter->field_0x6b8[2]);
-    meter->mpItemXYPane[2]->resize(
-        meter->field_0x6c4[2], meter->field_0x6d0[2]);
+        g_drawHIO.mButtonZItemPosX + meter->field_0x6ac[2] +
+            (galeBombComboActive ? meter->field_0x6c4[2] * 0.12f : 0.0f),
+        g_drawHIO.mButtonZItemPosY + meter->field_0x6b8[2] +
+            (galeBombComboActive ? meter->field_0x6d0[2] * 0.12f : 0.0f));
+    if (galeBombComboActive) {
+        auto* overlayTexture = reinterpret_cast<ResTIMG*>(
+            g_secondaryZHudTextureBuffers[1].data());
+        const f32 overlayScale = g_drawHIO.mItemScaleAdjustON
+            ? g_drawHIO.mItemScalePercent / 100.0f
+            : dItem_data::getTexScale(dItemNo_BOOMERANG_e) / 100.0f;
+        const f32 overlayWidth = overlayScale *
+            (overlayTexture->width * meter->mpItemR->getInitSizeX() / 48.0f);
+        const f32 overlayHeight = overlayScale *
+            (overlayTexture->height * meter->mpItemR->getInitSizeY() / 48.0f);
+        meter->mpItemXYPane[2]->resize(overlayWidth, overlayHeight);
+        meter->mpItemXYPane[2]->translate(
+            g_drawHIO.mButtonZItemPosX +
+                (meter->mpItemR->getInitSizeX() - overlayWidth) * 0.5f,
+            g_drawHIO.mButtonZItemPosY +
+                (meter->mpItemR->getInitSizeY() - overlayHeight) * 0.5f);
+    } else {
+        meter->mpItemXYPane[2]->resize(
+            meter->field_0x6c4[2], meter->field_0x6d0[2]);
+    }
     update_z_slot_ammo_display(meter, displayItem);
     meter->mpItemR->show();
     meter->mpLightXY[2]->show();
     g_secondaryZHudPicture = picture;
     g_secondaryZHudSlot = assignedSlot;
     g_secondaryZHudItem = displayItem;
+    g_secondaryZHudGaleBombCombo = galeBombComboActive;
 }
 
 void update_z_slot_hud(ModContext*, void* args, void*, void*) {
@@ -2319,6 +2506,12 @@ HookAction assign_secondary_z_from_ring(ModContext*, void* args, void*, void*) {
                             mDoCPd_c::getTrigZ(PAD_1) != 0;
     const bool rTriggered = zItemSlotEnabled() &&
                             mDoCPd_c::getTrigR(PAD_1) != 0;
+    if (rTriggered && !zTriggered &&
+        toggle_z_gale_bomb_combo(ring, selectedSlot, selectedItem))
+    {
+        return HOOK_SKIP_ORIGINAL;
+    }
+
     if (rTriggered && !zTriggered &&
         toggle_z_bow_combo(ring, selectedSlot, selectedItem))
     {
@@ -2457,12 +2650,10 @@ void handle_vanilla_z_item_change(ModContext*, void* args, void* retval, void*) 
         return;
     }
 
-    g_dispatchingVanillaZItemChange = true;
-    const int procType = alink->checkNewItemChange(0);
+    const int procType = alink->checkNewItemChange(kZItemSelectIndex);
     if (procType != 0) {
-        *result = alink->changeItemTriggerKeepProc(0, procType);
+        *result = alink->changeItemTriggerKeepProc(kZItemSelectIndex, procType);
     }
-    g_dispatchingVanillaZItemChange = false;
     alink->mSelectItemId = kZItemSelectIndex;
 }
 

@@ -38,10 +38,12 @@
 #include "d/actor/d_a_obj_iceleaf.h"
 #include "d/actor/d_a_npc_chin.h"
 #include "d/d_a_item_static.h"
+#include "d/actor/d_a_boomerang.h"
 #include "d/actor/d_a_nbomb.h"
 #include "d/actor/d_a_npc_tk.h"
 #include "d/d_bomb.h"
 #include "d/d_cc_d.h"
+#include "d/d_bg_s.h"
 #include "SSystem/SComponent/c_cc_d.h"
 #include "SSystem/SComponent/c_cc_s.h"
 #include "d/d_com_inf_game.h"
@@ -60,9 +62,11 @@
 #include "d/d_meter_HIO.h"
 #include "d/d_msg_object.h"
 #include "d/d_kankyo.h"
+#include "d/d_kankyo_rain.h"
 #include "d/d_item_data.h"
 #include "d/d_pane_class.h"
 #include "d/d_save.h"
+#include "d/d_stage.h"
 #include "d/d_select_cursor.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
 #include "Z2AudioLib/Z2SeMgr.h"
@@ -155,6 +159,9 @@ constexpr int64_t kBulletTimeArrowDamageMaxPercent = 1000;
 constexpr int64_t kDarkLinkDamageMultiplierDefaultPercent = 200;
 constexpr int64_t kDarkLinkDamageMultiplierMinPercent = 0;
 constexpr int64_t kDarkLinkDamageMultiplierMaxPercent = 1000;
+constexpr int64_t kGiantMaskDamageMultiplierDefaultPercent = 1100;
+constexpr int64_t kGiantMaskDamageMultiplierMinPercent = 0;
+constexpr int64_t kGiantMaskDamageMultiplierMaxPercent = 2000;
 constexpr int kZItemSelectIndex = 2;
 constexpr int kSecondaryAssignmentCount = 3;
 constexpr int64_t kHoverPlaneLowerDefaultBinding = 5;
@@ -180,7 +187,6 @@ constexpr u8 kGoronMaskItem = 0xF4;
 constexpr u8 kGiantMaskItem = 0xF3;
 constexpr u8 kArmosHammerItem = 0xF2;
 constexpr u8 kDekuNutItem = 0xF1;
-constexpr int kGiantMaskSwordDamageMultiplier = 11;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
 constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 4;
@@ -268,6 +274,7 @@ ConfigVarHandle g_wheelOpenDirection = 0;
 ConfigVarHandle g_secondaryWheelBindingEnabled = 0;
 ConfigVarHandle g_zItemSlotEnabled = 0;
 ConfigVarHandle g_darkLinkDamageMultiplier = 0;
+ConfigVarHandle g_giantMaskDamageMultiplier = 0;
 ConfigVarHandle g_bulletTimeArrowDamageMultiplier = 0;
 ConfigVarHandle g_flurryRushEnabled = 0;
 ConfigVarHandle g_ootStyleHeartsEnabled = 0;
@@ -291,6 +298,7 @@ ConfigVarHandle g_galeChargeCapacity = 0;
 ConfigVarHandle g_galeRecoverySeconds = 0;
 ConfigVarHandle g_aimMode = 0;
 ConfigVarHandle g_aimMovementEnabled = 0;
+ConfigVarHandle g_hawkeyeMidairBowAimEnabled = 0;
 ConfigVarHandle g_cinemaZoomPercent = 0;
 ConfigVarHandle g_thirdPersonReticleOffsetY = 0;
 ConfigVarHandle g_bulletTimeMode = 0;
@@ -300,6 +308,12 @@ ConfigVarHandle g_twilightWard = 0;
 ConfigVarHandle g_hawkOneShotDamage = 0;
 ConfigVarHandle g_hoverBootsWaterWalking = 0;
 ConfigVarHandle g_shieldSurfRBoost = 0;
+ConfigVarHandle g_iceLeafRBoost = 0;
+ConfigVarHandle g_clawshotUnevenSurfaceStick = 0;
+ConfigVarHandle g_indoorMovementUnrestricted = 0;
+ConfigVarHandle g_castleTownFirstPerson = 0;
+ConfigVarHandle g_clawshotAnySurface = 0;
+ConfigVarHandle g_lanternIgnitesEnemies = 0;
 ConfigVarHandle g_swordFlourishEnabled = 0;
 ConfigVarHandle g_rupeeMagnetEnabled = 0;
 ConfigVarHandle g_rupeeMagnetClawshotOrbs = 0;
@@ -420,6 +434,7 @@ dKantera_icon_c* g_secondaryZHudLanternMeter = nullptr;
 bool g_secondaryZHudLanternVisible = false;
 u8 g_secondaryZHudSlot = dItemNo_NONE_e;
 u8 g_secondaryZHudItem = dItemNo_NONE_e;
+bool g_secondaryZHudGaleBombCombo = false;
 J2DScreen* g_zSlotMidnaScreen = nullptr;
 J2DPane* g_zSlotMidnaOriginalParent = nullptr;
 f32 g_zSlotMidnaOriginalScaleX = 1.0f;
@@ -542,6 +557,7 @@ void update();
 }
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
+#include "features/gale_bomb.cpp"
 #include "features/hover_boots.cpp"
 #include "features/secondary_wheel.cpp"
 #include "features/world_hooks.cpp"
@@ -657,20 +673,30 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(bow_aim::BulletTimeCalcSpeed, bow_aim::restore_enemy_gravity);
     ADD_PRE(bow_aim::BulletTimePosMove, bow_aim::scale_enemy_position_step);
     ADD_POST(bow_aim::BulletTimePosMove, bow_aim::restore_enemy_position_step);
+    ADD_PRE(bow_aim::BulletTimeArrowMove, bow_aim::scale_arrow_movement);
+    ADD_POST(bow_aim::BulletTimeArrowMove, bow_aim::restore_arrow_movement);
     ADD_PRE(bow_aim::BulletTimeLinkPosMove, bow_aim::slow_link_movement);
     ADD_POST(bow_aim::BulletTimeLinkPosMove, bow_aim::finish_slow_link_movement);
     ADD_PRE(bow_aim::BowSubject, bow_aim::replace_bow_subject);
+    ADD_POST(bow_aim::BoomerangSubject, bow_aim::adjust_boomerang_subject);
+    ADD_PRE(bow_aim::ClawshotSubject, bow_aim::isolate_aim_movement_input);
+    ADD_POST(bow_aim::ClawshotSubject, bow_aim::adjust_clawshot_subject);
+    ADD_PRE(bow_aim::IronBallSubject, bow_aim::isolate_aim_movement_input);
+    ADD_POST(bow_aim::IronBallSubject, bow_aim::adjust_ironball_subject);
     ADD_POST(bow_aim::BowCameraNextMode, bow_aim::select_bow_camera_mode);
     ADD_POST(bow_aim::BowCameraNextType, bow_aim::select_bow_camera_type);
     ADD_POST(bow_aim::BowSubjectCamera, bow_aim::adjust_third_person_bow_camera);
+    ADD_PRE(bow_aim::AimSetMatrix, bow_aim::sync_airborne_bow_root_yaw);
+    ADD_PRE(bow_aim::AimModelCalc, bow_aim::sync_held_model_pose_to_camera);
     ADD_PRE(bow_aim::BowCameraRun, bow_aim::prepare_bow_aim_camera);
     ADD_POST(bow_aim::BowCameraRun, bow_aim::adjust_bow_aim_camera);
-    ADD_PRE(bow_aim::BowModelCalc, bow_aim::correct_held_bow_pose);
-    ADD_POST(bow_aim::BowModelCalc, bow_aim::restore_held_bow_pose);
     ADD_PRE(bow_aim::BowModelDraw, bow_aim::hide_body_in_vanilla_aim);
     ADD_POST(bow_aim::BowArrowShooting, bow_aim::aim_arrow_at_bow_reticle);
+    ADD_POST(bow_aim::BoomerangThrow, bow_aim::aim_boomerang_throw);
     ADD_PRE(PlayerExecute, bow_aim::update_before_player_execute);
     ADD_POST(PlayerExecute, bow_aim::update_after_player_execute);
+    ADD_POST(bow_aim::BowSetStickData, bow_aim::capture_midair_hawkeye_combo_input);
+    ADD_POST(gale_bomb::GaleBombThrowBoomerang, gale_bomb::attach_bomb_to_boomerang);
     ADD_PRE(FlurryColliderSet, flurry_rush::before_collider_set_callback);
     ADD_PRE(FlurryLinkDamageAction, flurry_rush::before_link_damage_action_callback);
     ADD_PRE(PlayerExecute, flurry_rush::update);
@@ -778,9 +804,8 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(PlayerExecute, begin_goron_mask_roll);
     ADD_POST(PlayerExecute, continue_goron_mask_roll);
     ADD_POST(PlayerExecute, enable_goron_roll_attack);
+    ADD_POST(PlayerExecute, fire_arrows::update_lantern_ignition_after_player_execute);
     ADD_POST(GiantMaskSetMatrix, apply_giant_mask_player_scale);
-    ADD_PRE(PlayerExecute, restore_giant_mask_attack_colliders);
-    ADD_POST(PlayerExecute, scale_giant_mask_attack_colliders);
     ADD_PRE(PlayerExecute, update_ice_arrow_freezes);
     ADD_POST(PlayerExecute, process_shield_surf_transition);
     ADD_POST(PlayerDraw, draw_truth_mask_on_player);
@@ -799,8 +824,22 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(CheckSceneChange, deactivate_giant_mask_after_scene_change);
     ADD_POST(CheckSceneChange, deactivate_armos_hammer_after_scene_change);
     ADD_PRE(OffWolfEyeUp, preserve_lens_of_truth_vision);
+    ADD_PRE(PoeTargetHitCheck, allow_human_lens_poe_hit);
     ADD_PRE(ProcAutoJump, release_manual_cucco_glide_on_a);
     ADD_POST(BoardCommon, boost_shield_surf_speed);
+    ADD_POST(ClawshotUnevenSurfaceGetTriPla, allow_clawshot_uneven_surface_stick);
+    ADD_PRE(SetNormalSpeedF, begin_unrestricted_room_movement);
+    ADD_POST(SetNormalSpeedF, end_unrestricted_room_movement);
+    ADD_PRE(DecideCommonDoStatus, begin_unrestricted_room_movement);
+    ADD_POST(DecideCommonDoStatus, end_unrestricted_room_movement);
+    ADD_PRE(SetFrontWallType, begin_unrestricted_room_movement);
+    ADD_POST(SetFrontWallType, end_unrestricted_room_movement);
+    ADD_POST(CheckRoomOnlyForMovement, allow_unrestricted_room_movement);
+    ADD_POST(CheckNotAutoJumpStage, allow_unrestricted_room_auto_jump);
+    ADD_POST(CheckNoSubjectModeCamera, allow_castle_town_first_person);
+    ADD_POST(CastleTownChangeModeOK, allow_castle_town_subject_mode);
+    ADD_POST(bow_aim::BowCameraNextType, use_castle_town_subject_camera_type);
+    ADD_PRE(CheckHookshotStickBG, allow_clawshots_any_surface);
     ADD_PRE(BoardCommon, prepare_shield_surf_hover_plane_board_common);
     ADD_POST(BoardCommon, restore_shield_surf_hover_plane_board_common);
     ADD_PRE(ShieldSurfGetTriPla, flatten_shield_surf_hover_plane_polygon);
@@ -874,6 +913,28 @@ bool wheel_is_dark_link_active() {
 bool wheel_is_giant_mask_active() {
     const auto* link = daAlink_getAlinkActorClass();
     return g_giantMaskActive && link != nullptr && !link->checkWolf();
+}
+
+uint16_t wheel_pvp_sword_damage_percent(u32 attackType) {
+    constexpr u32 kSwordAttackTypes =
+        AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD;
+    if ((attackType & kSwordAttackTypes) == 0) {
+        return 100;
+    }
+
+    int64_t multiplier = 100;
+    const auto* link = daAlink_getAlinkActorClass();
+    if (link == nullptr || link->checkWolf()) {
+        return 100;
+    }
+    if (g_darkLinkVisualActive) {
+        multiplier = darkLinkDamageMultiplierPercent();
+    } else if (wheel_is_giant_mask_active()) {
+        multiplier = giantMaskDamageMultiplierPercent();
+    } else {
+        return 100;
+    }
+    return static_cast<uint16_t>(std::clamp<int64_t>(multiplier, 0, 2000));
 }
 
 void wheel_dark_link_remote_draw_begin(J3DModel* model, bool active) {
@@ -974,6 +1035,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     result = svc_config->register_var(mod_ctx, &config, &g_darkLinkDamageMultiplier);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register Dark Link damage multiplier setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "giantMaskDamageMultiplier";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kGiantMaskDamageMultiplierDefaultPercent;
+    result = svc_config->register_var(mod_ctx, &config, &g_giantMaskDamageMultiplier);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Giant's Mask damage multiplier setting");
         return result;
     }
 
@@ -1168,6 +1239,17 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
+    config.name = "hawkeyeMidairBowAimEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(
+        mod_ctx, &config, &g_hawkeyeMidairBowAimEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register midair Hawkeye bow aim setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
     config.name = "cinemaZoomPercent";
     config.type = CONFIG_VAR_INT;
     config.default_int = kCinemaZoomDefaultPercent;
@@ -1295,6 +1377,66 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     result = svc_config->register_var(mod_ctx, &config, &g_shieldSurfRBoost);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register Shield Surf R-button speed boost setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "iceLeafRBoost";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_iceLeafRBoost);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Ice Leaf R-button speed boost setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "clawshotUnevenSurfaceStick";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_clawshotUnevenSurfaceStick);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Clawshot uneven-surface setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lanternIgnitesEnemies";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lanternIgnitesEnemies);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lantern enemy ignition setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "indoorMovementUnrestricted";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_indoorMovementUnrestricted);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register indoor movement setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "castleTownFirstPerson";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_castleTownFirstPerson);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Castle Town first-person setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "clawshotAnySurface";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_clawshotAnySurface);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Clawshot any-surface setting");
         return result;
     }
 

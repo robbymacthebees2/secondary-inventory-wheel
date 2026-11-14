@@ -663,8 +663,8 @@ struct MsgWorldFull {
 };
 
 struct MsgSkinChoices {
-    char name[23][32];
-    uint32_t hash[23];
+    char name[27][32];
+    uint32_t hash[27];
 };
 
 struct MsgEponaSkin {
@@ -876,6 +876,7 @@ struct MsgPvpHit {
     uint8_t se;
     uint8_t blocked;
     uint8_t cut;
+    uint16_t swordDamagePercent;
     float from[3];
 };
 

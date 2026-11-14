@@ -17,6 +17,7 @@
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_actor_mng.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -147,6 +148,11 @@ HitPower hit_power(const MsgPvpHit& hit) {
     if (h.skill != nullptr) {
         if (h.skill->atp > h.atp) h.atp = h.skill->atp;
         if (h.skill->spl > h.spl) h.spl = h.skill->spl;
+    }
+    if ((hit.atType & (AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD)) != 0) {
+        const int percent =
+            std::clamp<int>(hit.swordDamagePercent, 0, 2000);
+        h.atp = (h.atp * percent + 99) / 100;
     }
     h.dmg = (h.atp * effective_damage_percent() + 50) / 100;
     if (h.atp > 0 && h.dmg < 1 && effective_damage_percent() > 0) h.dmg = 1;

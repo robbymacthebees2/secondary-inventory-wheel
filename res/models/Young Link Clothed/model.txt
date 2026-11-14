@@ -1,0 +1,4 @@
+name = Young Link - Fully Clothed
+by = madnessgod
+about = Fully clothed face and body variant for Hero, Ordon, Zora, Magic, and Sumo outfits. Ported with permission from GameBanana mod 724984.
+preset=false

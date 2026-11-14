@@ -115,13 +115,21 @@ await nextOp(c, "peer");
 
 c.close();
 const goneC = await nextOp(b, "gone");
-check("closing: the area hears gone", goneC && goneC.op === "gone" && goneC.id === wc.id);
+const rosterAfterCloseA = await nextOp(a, "roster");
+const rosterAfterCloseB = await nextOp(b, "roster");
+check("closing removes the offline player's name from every roster",
+  goneC && goneC.op === "gone" && goneC.id === wc.id &&
+  hasRoster(rosterAfterCloseA, [[wa.id, "Alice Updated"], [wb.id, "Bob"]]) &&
+  hasRoster(rosterAfterCloseB, [[wa.id, "Alice Updated"], [wb.id, "Bob"]]));
 
 a.send({ op: "area", stage: "../etc" });
 const bad = await nextOp(a, "count", (msg) => msg.here === 0);
 check("a bad area name is no area", bad && bad.op === "count" && bad.here === 0);
 
-a.close();
+a.send({ op: "bye" });
+const rosterAfterLeave = await nextOp(b, "roster");
+check("explicit leave removes the player immediately and preserves the remaining name",
+  hasRoster(rosterAfterLeave, [[wb.id, "Bob"]]));
 b.close();
 
 const firstSession = await open();

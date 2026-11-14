@@ -320,3 +320,265 @@ KePa - Wolf Link TP/textures/tex1_256x128_ba1f16324b4be55d_14.gxrgba
 KePa - Wolf Link TP/textures/tex1_256x256_640f8eb7ad1e90fc_14.gxrgba
 KePa - Wolf Link TP/textures/tex1_256x256_c1a9fb137618f0e3_14.gxrgba
 KePa - Wolf Link TP/textures/tex1_64x64_e3bc7a1f1438a4ca_14.gxrgba
+N64 HoT/al_bootsh.bmd
+N64 HoT/al_kantera.bmd
+N64 HoT/al_swb.bmd
+N64 HoT/body.bmd
+N64 HoT/ef_ktglow.bmd
+N64 HoT/equipment/al_arrow.bmd
+N64 HoT/equipment/al_arrowb.bmd
+N64 HoT/equipment/al_bomb.bmd
+N64 HoT/equipment/al_boom.bmd
+N64 HoT/equipment/al_bootsh.bmd
+N64 HoT/equipment/al_bottle.bmd
+N64 HoT/equipment/al_bow.bmd
+N64 HoT/equipment/al_crod.bmd
+N64 HoT/equipment/al_hs.bmd
+N64 HoT/equipment/al_hs_kusari.bmd
+N64 HoT/equipment/al_hs_tip.bmd
+N64 HoT/equipment/al_ib.bmd
+N64 HoT/equipment/al_kantera.bmd
+N64 HoT/equipment/al_pachi.bmd
+N64 HoT/equipment/al_pachi_nut.bmd
+N64 HoT/equipment/al_pend.bmd
+N64 HoT/equipment/al_poda.bmd
+N64 HoT/equipment/al_podm.bmd
+N64 HoT/equipment/al_sha.bmd
+N64 HoT/equipment/al_shb.bmd
+N64 HoT/equipment/al_shc.bmd
+N64 HoT/equipment/al_sp.bmd
+N64 HoT/equipment/al_swa.bmd
+N64 HoT/equipment/al_swb.bmd
+N64 HoT/equipment/al_swm.bmd
+N64 HoT/equipment/al_wf.bmd
+N64 HoT/equipment/crod_ball.bmd
+N64 HoT/equipment/ef_ktglow.bmd
+N64 HoT/equipment/ef_setboom.bmd
+N64 HoT/equipment/ef_shippu.bmd
+N64 HoT/equipment/footmark.bmd
+N64 HoT/equipment/hk.bmd
+N64 HoT/equipment/inochidama.bmd
+N64 HoT/equipment/o_gd_hk.bmd
+N64 HoT/equipment/o_gd_nv.bmd
+N64 HoT/equipment/o_gd_worm.bmd
+N64 HoT/equipment/pb.bmd
+N64 HoT/equipment/pg.bmd
+N64 HoT/equipment/rod_ukia.bmd
+N64 HoT/equipment/rod_ukib.bmd
+N64 HoT/equipment/rod_ukic.bmd
+N64 HoT/equipment/s_ball_yami.bmd
+N64 HoT/equipment/sango_fook.bmd
+N64 HoT/equipment/sfook.bmd
+N64 HoT/equipment/uki.bmd
+N64 HoT/equipment/uki_saki.bmd
+N64 HoT/equipment/wl_change.bmd
+N64 HoT/equipment/wl_kusari.bmd
+N64 HoT/equipment/worm.bmd
+N64 HoT/equipment/worm_hole.bmd
+N64 HoT/face.bmd
+N64 HoT/hands.bmd
+N64 HoT/head.bmd
+N64 HoT/magic/al_bootsh.bmd
+N64 HoT/magic/al_kantera.bmd
+N64 HoT/magic/al_swb.bmd
+N64 HoT/magic/body.bmd
+N64 HoT/magic/ef_ktglow.bmd
+N64 HoT/magic/face.bmd
+N64 HoT/magic/hands.bmd
+N64 HoT/magic/head.bmd
+N64 HoT/magic/sword.bmd
+N64 HoT/model.txt
+N64 HoT/ordon/al_bootsh.bmd
+N64 HoT/ordon/al_kantera.bmd
+N64 HoT/ordon/al_swb.bmd
+N64 HoT/ordon/body.bmd
+N64 HoT/ordon/ef_ktglow.bmd
+N64 HoT/ordon/face.bmd
+N64 HoT/ordon/hands.bmd
+N64 HoT/ordon/head.bmd
+N64 HoT/ordon/sword.bmd
+N64 HoT/sumo/body.bmd
+N64 HoT/sumo/hands.bmd
+N64 HoT/sumo/head.bmd
+N64 HoT/sword.bmd
+N64 HoT/wolf/body.bmd
+N64 HoT/wolf/wl_kusari.bmd
+N64 HoT/zora/al_bootsh.bmd
+N64 HoT/zora/al_kantera.bmd
+N64 HoT/zora/al_swb.bmd
+N64 HoT/zora/body.bmd
+N64 HoT/zora/ef_ktglow.bmd
+N64 HoT/zora/face.bmd
+N64 HoT/zora/hands.bmd
+N64 HoT/zora/head.bmd
+N64 HoT/zora/sword.bmd
+Young Link/body.bmd
+Young Link/face.bmd
+Young Link/head.bmd
+Young Link/magic/body.bmd
+Young Link/magic/face.bmd
+Young Link/magic/head.bmd
+Young Link/model.txt
+Young Link/ordon/body.bmd
+Young Link/ordon/face.bmd
+Young Link/ordon/head.bmd
+Young Link/sumo/body.bmd
+Young Link/sumo/head.bmd
+Young Link/zora/body.bmd
+Young Link/zora/face.bmd
+Young Link/zora/head.bmd
+Young Link Clothed/body.bmd
+Young Link Clothed/face.bmd
+Young Link Clothed/head.bmd
+Young Link Clothed/magic/body.bmd
+Young Link Clothed/magic/face.bmd
+Young Link Clothed/magic/head.bmd
+Young Link Clothed/model.txt
+Young Link Clothed/ordon/body.bmd
+Young Link Clothed/ordon/face.bmd
+Young Link Clothed/ordon/head.bmd
+Young Link Clothed/sumo/body.bmd
+Young Link Clothed/sumo/head.bmd
+Young Link Clothed/zora/body.bmd
+Young Link Clothed/zora/face.bmd
+Young Link Clothed/zora/head.bmd
+Young Link Face Skin/body.bmd
+Young Link Face Skin/face.bmd
+Young Link Face Skin/head.bmd
+Young Link Face Skin/magic/body.bmd
+Young Link Face Skin/magic/face.bmd
+Young Link Face Skin/magic/head.bmd
+Young Link Face Skin/model.txt
+Young Link Face Skin/ordon/body.bmd
+Young Link Face Skin/ordon/face.bmd
+Young Link Face Skin/ordon/head.bmd
+Young Link Face Skin/sumo/body.bmd
+Young Link Face Skin/sumo/head.bmd
+Young Link Face Skin/zora/body.bmd
+Young Link Face Skin/zora/face.bmd
+Young Link Face Skin/zora/head.bmd
+Young Link Face Only/body.bmd
+Young Link Face Only/face.bmd
+Young Link Face Only/head.bmd
+Young Link Face Only/magic/body.bmd
+Young Link Face Only/magic/face.bmd
+Young Link Face Only/magic/head.bmd
+Young Link Face Only/model.txt
+Young Link Face Only/ordon/body.bmd
+Young Link Face Only/ordon/face.bmd
+Young Link Face Only/ordon/head.bmd
+Young Link Face Only/sumo/body.bmd
+Young Link Face Only/sumo/head.bmd
+Young Link Face Only/zora/body.bmd
+Young Link Face Only/zora/face.bmd
+Young Link Face Only/zora/head.bmd
+Young Link/textures/tex1_128x128_789c2b6543ee4c65_14.gxrgba
+Young Link/textures/tex1_256x128_2b84e9ad8988a5b3_14.gxrgba
+Young Link/textures/tex1_256x128_84a73663b3ee85e2_14.gxrgba
+Young Link/textures/tex1_256x256_cae01491dfd4d9fb_14.gxrgba
+Young Link/textures/tex1_64x128_0ef5832c21581bd5_14.gxrgba
+Young Link/textures/tex1_64x128_542ffa9a1c545970_14.gxrgba
+Young Link/textures/tex1_64x128_651f63b6f6d6cd85_14.gxrgba
+Young Link/textures/tex1_64x128_d7f168afaf5c673a_14.gxrgba
+Young Link/textures/tex1_64x64_07df38fb9d97bbea_14.gxrgba
+Young Link/textures/tex1_64x64_11091a172fbfacae_5.gxrgba
+Young Link/textures/tex1_64x64_1365ad2865c8d4c1_5.gxrgba
+Young Link/textures/tex1_64x64_2e399b8e2516998b_5.gxrgba
+Young Link/textures/tex1_64x64_3c664ff8824aa69e_14.gxrgba
+Young Link/textures/tex1_64x64_4563302fe1898655_14.gxrgba
+Young Link/textures/tex1_64x64_487ab13d532dc1ad_5.gxrgba
+Young Link/textures/tex1_64x64_4dcdba151027e106_5.gxrgba
+Young Link/textures/tex1_64x64_5282efb3111d002e_5.gxrgba
+Young Link/textures/tex1_64x64_52b0277aff20dfed_5.gxrgba
+Young Link/textures/tex1_64x64_632727ff9c02f16b_14.gxrgba
+Young Link/textures/tex1_64x64_6648025467f1c946_14.gxrgba
+Young Link/textures/tex1_64x64_72da518ac06006ff_5.gxrgba
+Young Link/textures/tex1_64x64_747009c0be38dd9d_5.gxrgba
+Young Link/textures/tex1_64x64_b19ed680118194ff_14.gxrgba
+Young Link/textures/tex1_64x64_ca70be46676f91a5_5.gxrgba
+Young Link/textures/tex1_64x64_e074a14c30666289_5.gxrgba
+Young Link/textures/tex1_64x64_e23575459ffe5857_5.gxrgba
+Young Link/textures/tex1_64x64_e623cd3a72bb8734_14.gxrgba
+Young Link/textures/tex1_64x64_e6d8e9279935e654_14.gxrgba
+Young Link/textures/tex1_64x64_e87cf9eefc1e19b8_5.gxrgba
+Young Link/textures/tex1_64x64_e9aa86724efea1c9_5.gxrgba
+Young Link/textures/tex1_64x64_eec7e28812722ccb_14.gxrgba
+Young Link Clothed/textures/tex1_256x128_2b84e9ad8988a5b3_14.gxrgba
+Young Link Clothed/textures/tex1_256x128_84a73663b3ee85e2_14.gxrgba
+Young Link Clothed/textures/tex1_256x256_cae01491dfd4d9fb_14.gxrgba
+Young Link Clothed/textures/tex1_64x128_0ef5832c21581bd5_14.gxrgba
+Young Link Clothed/textures/tex1_64x128_651f63b6f6d6cd85_14.gxrgba
+Young Link Clothed/textures/tex1_64x128_d7f168afaf5c673a_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_07df38fb9d97bbea_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_11091a172fbfacae_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_1365ad2865c8d4c1_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_2e399b8e2516998b_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_3c664ff8824aa69e_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_4563302fe1898655_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_487ab13d532dc1ad_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_4dcdba151027e106_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_5282efb3111d002e_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_52b0277aff20dfed_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_632727ff9c02f16b_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_6648025467f1c946_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_72da518ac06006ff_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_747009c0be38dd9d_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_b19ed680118194ff_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_ca70be46676f91a5_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_e074a14c30666289_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_e23575459ffe5857_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_e623cd3a72bb8734_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_e6d8e9279935e654_14.gxrgba
+Young Link Clothed/textures/tex1_64x64_e87cf9eefc1e19b8_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_e9aa86724efea1c9_5.gxrgba
+Young Link Clothed/textures/tex1_64x64_eec7e28812722ccb_14.gxrgba
+Young Link Face Skin/textures/tex1_128x128_789c2b6543ee4c65_14.gxrgba
+Young Link Face Skin/textures/tex1_64x128_0ef5832c21581bd5_14.gxrgba
+Young Link Face Skin/textures/tex1_64x128_542ffa9a1c545970_14.gxrgba
+Young Link Face Skin/textures/tex1_64x128_651f63b6f6d6cd85_14.gxrgba
+Young Link Face Skin/textures/tex1_64x128_d7f168afaf5c673a_14.gxrgba
+Young Link Face Skin/textures/tex1_64x64_11091a172fbfacae_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_1365ad2865c8d4c1_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_2e399b8e2516998b_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_3c664ff8824aa69e_14.gxrgba
+Young Link Face Skin/textures/tex1_64x64_4563302fe1898655_14.gxrgba
+Young Link Face Skin/textures/tex1_64x64_487ab13d532dc1ad_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_4dcdba151027e106_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_5282efb3111d002e_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_52b0277aff20dfed_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_6648025467f1c946_14.gxrgba
+Young Link Face Skin/textures/tex1_64x64_72da518ac06006ff_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_747009c0be38dd9d_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_b19ed680118194ff_14.gxrgba
+Young Link Face Skin/textures/tex1_64x64_ca70be46676f91a5_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_e074a14c30666289_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_e23575459ffe5857_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_e623cd3a72bb8734_14.gxrgba
+Young Link Face Skin/textures/tex1_64x64_e6d8e9279935e654_14.gxrgba
+Young Link Face Skin/textures/tex1_64x64_e87cf9eefc1e19b8_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_e9aa86724efea1c9_5.gxrgba
+Young Link Face Skin/textures/tex1_64x64_eec7e28812722ccb_14.gxrgba
+Young Link Face Only/textures/tex1_64x128_0ef5832c21581bd5_14.gxrgba
+Young Link Face Only/textures/tex1_64x128_651f63b6f6d6cd85_14.gxrgba
+Young Link Face Only/textures/tex1_64x128_d7f168afaf5c673a_14.gxrgba
+Young Link Face Only/textures/tex1_64x64_11091a172fbfacae_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_1365ad2865c8d4c1_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_2e399b8e2516998b_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_3c664ff8824aa69e_14.gxrgba
+Young Link Face Only/textures/tex1_64x64_4563302fe1898655_14.gxrgba
+Young Link Face Only/textures/tex1_64x64_487ab13d532dc1ad_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_4dcdba151027e106_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_5282efb3111d002e_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_52b0277aff20dfed_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_6648025467f1c946_14.gxrgba
+Young Link Face Only/textures/tex1_64x64_72da518ac06006ff_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_747009c0be38dd9d_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_b19ed680118194ff_14.gxrgba
+Young Link Face Only/textures/tex1_64x64_ca70be46676f91a5_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_e074a14c30666289_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_e23575459ffe5857_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_e623cd3a72bb8734_14.gxrgba
+Young Link Face Only/textures/tex1_64x64_e6d8e9279935e654_14.gxrgba
+Young Link Face Only/textures/tex1_64x64_e87cf9eefc1e19b8_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_e9aa86724efea1c9_5.gxrgba
+Young Link Face Only/textures/tex1_64x64_eec7e28812722ccb_14.gxrgba

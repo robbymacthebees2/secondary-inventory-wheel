@@ -545,6 +545,17 @@ export class Global {
     }
   }
 
+  removeGlobal(ws, info) {
+    const wasOnline = info.hello;
+    this.part(ws, info);
+    info.hello = false;
+    ws.serializeAttachment(info);
+    if (wasOnline) {
+      this.broadcastRoster(ws);
+      this.broadcastCounts(ws);
+    }
+  }
+
   introduce(ws, info, except = null) {
     if (!info.area || !info.hello) return;
     for (const other of this.all()) {
@@ -607,6 +618,15 @@ export class Global {
     info.lastSeen = Date.now();
     ws.serializeAttachment(info);
     await this.scheduleCleanup();
+    if (msg.op === "bye") {
+      this.removeGlobal(ws, info);
+      try {
+        ws.close(1000, "left");
+      } catch {
+      }
+      await this.scheduleCleanup();
+      return;
+    }
     if (msg.op === "ping" && info.hello) {
       send(ws, { op: "pong" });
       return;
@@ -683,13 +703,7 @@ export class Global {
 
     }
     const info = ws.deserializeAttachment();
-    if (info) {
-      this.part(ws, info);
-      info.hello = false;
-      ws.serializeAttachment(info);
-      this.broadcastRoster(ws);
-      this.broadcastCounts(ws);
-    }
+    if (info) this.removeGlobal(ws, info);
     await this.scheduleCleanup();
   }
 

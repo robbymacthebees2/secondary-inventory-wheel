@@ -6,86 +6,10 @@ constexpr f32 kGiantMaskFaceOffsetX = 14.0f;
 constexpr f32 kGiantMaskFaceOffsetY = -8.0f;
 constexpr s16 kGiantMaskFaceRotationY = 0x4000;
 constexpr f32 kGiantMaskPlayerScale = 2.0f;
-constexpr size_t kGiantMaskAttackColliderCount = 5;
 
-struct GiantMaskAttackSnapshot {
-    cCcD_Obj* collider = nullptr;
-    u8 originalPower = 0;
-    u8 scaledPower = 0;
-};
-
-std::array<GiantMaskAttackSnapshot, kGiantMaskAttackColliderCount>
-    g_giantMaskAttackSnapshots{};
-
-bool giant_mask_active_for_player(daAlink_c* player) {
-    return g_giantMaskActive && player != nullptr && !player->checkWolf();
-}
-
-int scale_giant_mask_sword_power(daAlink_c* player, int attackPower) {
-    if (!giant_mask_active_for_player(player)) {
-        return attackPower;
-    }
-
-    return std::min<int>(
-        attackPower * kGiantMaskSwordDamageMultiplier, 255);
-}
-
-HookAction restore_giant_mask_attack_colliders(
-    ModContext*, void* args, void*, void*)
-{
-    auto* player = mods::arg<daAlink_c*>(args, 0);
-    for (auto& snapshot : g_giantMaskAttackSnapshots) {
-        if (snapshot.collider != nullptr &&
-            (player == nullptr ||
-             snapshot.collider == &player->mAtCps[0] ||
-             snapshot.collider == &player->mAtCps[1] ||
-             snapshot.collider == &player->mAtCps[2] ||
-             snapshot.collider == &player->mAtCyl ||
-             snapshot.collider == &player->mAtSph))
-        {
-            if (snapshot.collider->GetAtAtp() == snapshot.scaledPower) {
-                snapshot.collider->SetAtAtp(snapshot.originalPower);
-            }
-        }
-        snapshot = {};
-    }
-    return HOOK_CONTINUE;
-}
-
-void scale_giant_mask_attack_collider(
-    daAlink_c* player, cCcD_Obj* collider, size_t snapshotIndex)
-{
-    constexpr u32 kSwordAttackTypes =
-        AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD;
-    if (!giant_mask_active_for_player(player) || collider == nullptr ||
-        !collider->ChkAtSet() ||
-        (collider->GetAtType() & kSwordAttackTypes) == 0)
-    {
-        return;
-    }
-
-    const u8 originalPower = collider->GetAtAtp();
-    const u8 scaledPower = scale_giant_mask_sword_power(player, originalPower);
-    if (scaledPower == originalPower) {
-        return;
-    }
-
-    collider->SetAtAtp(scaledPower);
-    g_giantMaskAttackSnapshots[snapshotIndex] = {
-        collider, originalPower, scaledPower
-    };
-}
-
-void scale_giant_mask_attack_colliders(ModContext*, void* args, void*, void*) {
-    auto* player = mods::arg<daAlink_c*>(args, 0);
-    if (player == nullptr) {
-        return;
-    }
-    for (size_t i = 0; i < 3; ++i) {
-        scale_giant_mask_attack_collider(player, &player->mAtCps[i], i);
-    }
-    scale_giant_mask_attack_collider(player, &player->mAtCyl, 3);
-    scale_giant_mask_attack_collider(player, &player->mAtSph, 4);
+bool giant_mask_active_for_player(const daAlink_c* player) {
+    return player != nullptr && player == daAlink_getAlinkActorClass() &&
+           g_giantMaskActive && !player->checkWolf();
 }
 
 void update_giant_mask_resource() {
