@@ -679,6 +679,12 @@ void say_hello() {
     s_sentName = features_local_name();
     hello += ",\"name\":\"" + json_text(s_sentName) + "\"";
     hello += ",\"key\":\"" + install_key() + "\"";
+    hello += ",\"blocked\":[";
+    for (size_t i = 0; i < s_userBlocked.size(); ++i) {
+        if (i != 0) hello += ",";
+        hello += "\"" + s_userBlocked[i].tag + "\"";
+    }
+    hello += "]";
     if (s_presenceHeartbeatSupported) hello += ",\"heartbeat\":true";
     send_json(hello + "}");
     chat_first_online();
@@ -799,8 +805,8 @@ void on_server_message(const std::string& text) {
     const std::string tag = msg.str("tag");
     remember_seen(id, is_tag(tag) ? tag : "");
     if (tag_blocked(tag)) {
-
-        send_json("{\"op\":\"block\",\"id\":" + std::to_string(id) + "}");
+        send_json("{\"op\":\"block\",\"id\":" + std::to_string(id) +
+                  ",\"tag\":\"" + tag + "\"}");
         return;
     }
     if (id == 0 || id == s_myId || blocked(id) || slot_of_id(id) > 0) return;
@@ -943,9 +949,15 @@ void global_set_blocked(const GlobalPlayer& who, bool on) {
         for (int i = 1; i < kCoopMaxPlayers; ++i) {
             if (s_peers[i].used && s_peers[i].tag == who.tag) release(i, "blocked");
         }
-        for (const GlobalPlayer& s : s_seen) {
-            if (s.tag == who.tag) send_json("{\"op\":\"block\",\"id\":" + std::to_string(s.id) + "}");
+        uint32_t id = 0;
+        for (auto it = s_seen.rbegin(); it != s_seen.rend(); ++it) {
+            if (it->tag == who.tag) {
+                id = it->id;
+                break;
+            }
         }
+        send_json("{\"op\":\"block\",\"id\":" + std::to_string(id) +
+                  ",\"tag\":\"" + who.tag + "\"}");
         chat_forget_player(who.tag);
 
         chat_note("Blocked " + who.name + ". Undo it in Co-op > Hyrule Online > Players.");
@@ -957,9 +969,15 @@ void global_set_blocked(const GlobalPlayer& who, bool on) {
         s_userBlocked.end());
     save_blocked();
 
-    for (const GlobalPlayer& s : s_seen) {
-        if (s.tag == who.tag) send_json("{\"op\":\"unblock\",\"id\":" + std::to_string(s.id) + "}");
+    uint32_t id = 0;
+    for (auto it = s_seen.rbegin(); it != s_seen.rend(); ++it) {
+        if (it->tag == who.tag) {
+            id = it->id;
+            break;
+        }
     }
+    send_json("{\"op\":\"unblock\",\"id\":" + std::to_string(id) +
+              ",\"tag\":\"" + who.tag + "\"}");
     coop_log::info("coop_mod: [GLOBAL] unblocked {}", who.tag);
 }
 

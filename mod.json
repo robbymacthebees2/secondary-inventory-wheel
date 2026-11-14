@@ -1,7 +1,7 @@
 {
   "id": "dev.twilitrealm.secondary_inventory_wheel",
   "name": "Secondary Inventory Wheel",
-  "version": "3.4.24",
+  "version": "3.4.25",
   "author": "RobinTheSoundsmith",
   "description": "Adds a secondary inventory wheel with custom items, co-op, bow aiming, Flurry Rush, an enemy spawner, and more."
 }
