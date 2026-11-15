@@ -4,6 +4,7 @@
 #include "coop/mod.hpp"
 
 #include <cmath>
+#include <cstring>
 
 // Dolphin / Hardware
 #include <dolphin/gx.h>
@@ -157,6 +158,11 @@ namespace {
 bool s_fairyActorRegistered = false;
 bool s_fairyActorActive = false;
 ActorId s_fairyActorId = 0;
+char s_fairyActorStage[9] = {};
+char s_fairyObservedStage[9] = {};
+int8_t s_fairyObservedRoom = -1;
+u8 s_fairyLocationStableFrames = 0;
+bool s_fairyLocationInitialized = false;
 u16 s_fairySpawnRetryFrames = 0;
 bool s_fairyActionPromptActive = false;
 bool s_fairyToggleButtonWasHeld[9] = {};
@@ -435,10 +441,57 @@ void update_fairy_companion() {
     }
 
     daAlink_c* player = daAlink_getAlinkActorClass();
-    if (player == nullptr) return;
+    const char* stage = dComIfGp_getStartStageName();
+    auto* currentStage = dComIfGp_getStage();
+    if (player == nullptr || currentStage == nullptr ||
+        currentStage->getStagInfo() == nullptr ||
+        stage == nullptr || stage[0] == '\0')
+    {
+        s_fairyLocationStableFrames = 0;
+        return;
+    }
     const int8_t room = fopAcM_GetRoomNo(player);
+    const bool locationChanged = !s_fairyLocationInitialized ||
+        s_fairyObservedRoom != room ||
+        std::strncmp(s_fairyObservedStage, stage, sizeof(s_fairyObservedStage)) != 0;
+    if (locationChanged) {
+        std::strncpy(
+            s_fairyObservedStage, stage, sizeof(s_fairyObservedStage) - 1);
+        s_fairyObservedStage[sizeof(s_fairyObservedStage) - 1] = '\0';
+        s_fairyObservedRoom = room;
+        s_fairyLocationInitialized = true;
+        s_fairyLocationStableFrames = 0;
+        return;
+    }
+    if (s_fairyLocationStableFrames < 30) {
+        ++s_fairyLocationStableFrames;
+        return;
+    }
+
+    if (dKy_Indoor_check()) {
+        s_fairyActionPromptActive = false;
+        s_fairySpawnRetryFrames = 0;
+        if (!s_fairyActorActive) {
+            return;
+        }
+
+        const ModResult deleteResult =
+            s_manualJumpActorService->delete_actor(mod_ctx, s_fairyActorId);
+        if (deleteResult != MOD_OK) {
+            s_fairySpawnRetryFrames = 120;
+            svc_log->error(
+                mod_ctx, "failed to remove the Fairy Companion in an interior");
+            return;
+        }
+        s_fairyActorActive = false;
+        s_fairyActorStage[0] = '\0';
+        return;
+    }
+
     int8_t actorRoom = 0;
-    const bool alive = s_fairyActorActive &&
+    const bool sameStage = s_fairyActorActive &&
+        std::strncmp(s_fairyActorStage, stage, sizeof(s_fairyActorStage)) == 0;
+    const bool alive = sameStage &&
         s_manualJumpActorService->get_actor_room_num(
             mod_ctx, s_fairyActorId, &actorRoom) == MOD_OK &&
         actorRoom == room;
@@ -469,6 +522,8 @@ void update_fairy_companion() {
         mod_ctx, maFairyCompanion_c::sProcName, &params, &s_fairyActorId);
     if (result == MOD_OK) {
         s_fairyActorActive = true;
+        std::strncpy(s_fairyActorStage, stage, sizeof(s_fairyActorStage) - 1);
+        s_fairyActorStage[sizeof(s_fairyActorStage) - 1] = '\0';
         svc_log->info(mod_ctx, "Fairy Companion spawned");
     } else {
         s_fairySpawnRetryFrames = 120;
@@ -497,6 +552,11 @@ void shutdown_fairy_companion() {
         }
     }
     s_fairySpawnRetryFrames = 0;
+    s_fairyActorStage[0] = '\0';
+    s_fairyObservedStage[0] = '\0';
+    s_fairyObservedRoom = -1;
+    s_fairyLocationStableFrames = 0;
+    s_fairyLocationInitialized = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +639,14 @@ int maFairyCompanion_c::Execute() {
     mAppearanceId = sSelectedAppearance;
     // The camera can leave NODRAW set after skipping this actor's draw callback.
     fopAcM_OffStatus(this, fopAcStts_NODRAW_e);
+
+    auto* currentStage = dComIfGp_getStage();
+    if (currentStage == nullptr || currentStage->getStagInfo() == nullptr ||
+        dKy_Indoor_check())
+    {
+        s_fairyActionPromptActive = false;
+        return 1;
+    }
 
     daPy_py_c* player = daPy_getPlayerActorClass();
     daAlink_c* alink = daAlink_getAlinkActorClass();
@@ -679,9 +747,14 @@ int maFairyCompanion_c::Execute() {
     }
 
     // --- Lighting & particles -----------------------------------------
-    // Refresh ambient lighting
-    tevStr.room_no = fopAcM_GetRoomNo(this);
-    dKy_setLight_nowroom_actor(&tevStr);
+    const bool stageAvailable =
+        currentStage != nullptr && currentStage->getStagInfo() != nullptr;
+    const bool indoors = stageAvailable && dKy_Indoor_check();
+    const bool customEffectsEnabled = stageAvailable && !indoors;
+    if (stageAvailable) {
+        tevStr.room_no = fopAcM_GetRoomNo(this);
+        dKy_setLight_nowroom_actor(&tevStr);
+    }
 
     // Keep tint available for the rest of Execute()
     const u8 tintColor = mAppearanceId != FAIRY_APPEARANCE_FAIRY
@@ -689,37 +762,31 @@ int maFairyCompanion_c::Execute() {
     const FairyTint_s& tint = getFairyTint(tintColor);
 
     // Automatic dynamic fairy light
-    if (sLightEnabled && s_hideBlend < 0.5f) {
+    if (customEffectsEnabled && sLightEnabled && s_hideBlend < 0.5f &&
+        dKy_daynight_check())
+    {
         GXColor lightCol = { tint.bodyR, tint.bodyG, tint.bodyB, 0xFF };
-
-        if (dKy_Indoor_check()) {
-            // Indoors: full intensity
-            dKy_WolfEyeLight_set(
-                &current.pos, 0.0f, 0.0f, 50.0f,
-                &lightCol, 1.0f, 0, 3
-            );
-        }
-        else if (dKy_daynight_check()) {
-            // Outdoors at night: reduced intensity
-            dKy_WolfEyeLight_set(
-                &current.pos, 0.0f, 0.0f, 50.0f,
-                &lightCol, 0.5f, 0, 3
-            );
-        }
+        dKy_WolfEyeLight_set(
+            &current.pos, 0.0f, 0.0f, 50.0f,
+            &lightCol, 0.5f, 0, 3);
     }
 
     // Trail & sparkles (they stop once she is mostly hidden)
     const GXColor prmColor = { tint.prmR, tint.prmG, tint.prmB, 0xFF };
     const GXColor envColor = { tint.envR, tint.envG, tint.envB, 0xFF };
 
-    if (s_hideBlend < 0.5f && ++mParticleTimer >= k_particleInterval) {
+    if (customEffectsEnabled && s_hideBlend < 0.5f &&
+        ++mParticleTimer >= k_particleInterval)
+    {
         mParticleTimer = 0;
         mParticleId = dComIfGp_particle_set(
             mParticleId, 0x72F, &current.pos, &tevStr, &shape_angle,
             NULL, 0xFF, NULL, -1, &prmColor, &envColor, NULL);
     }
 
-    if (s_hideBlend < 0.5f && ++mSparkleTimer >= k_particleInterval) {
+    if (customEffectsEnabled && s_hideBlend < 0.5f &&
+        ++mSparkleTimer >= k_particleInterval)
+    {
         mSparkleTimer = 0;
         mSparkleId = dComIfGp_particle_set(
             mSparkleId, 0x731, &current.pos, &tevStr, &shape_angle,
@@ -727,7 +794,9 @@ int maFairyCompanion_c::Execute() {
     }
 
     // Body aura glow (0x730) with a slow breathing pulse
-    if (s_hideBlend < 0.5f && ++mAuraTimer >= k_auraInterval) {
+    if (customEffectsEnabled && s_hideBlend < 0.5f &&
+        ++mAuraTimer >= k_auraInterval)
+    {
         mAuraTimer = 0;
         const GXColor auraCol = { tint.auraR, tint.auraG, tint.auraB, 0xFF };
 
@@ -742,7 +811,9 @@ int maFairyCompanion_c::Execute() {
     }
 
     // --- Animation & matrices -----------------------------------------
-    mpModelMorf->play(0, dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
+    if (stageAvailable) {
+        mpModelMorf->play(0, dComIfGp_getReverb(fopAcM_GetRoomNo(this)));
+    }
 
     eyePos = attention_info.position = current.pos;
     attention_info.flags = 0;
@@ -784,8 +855,11 @@ void maFairyCompanion_c::applyFairyTint(J3DModel* i_model, u8 colorId) {
 }
 
 int maFairyCompanion_c::Draw() {
+    auto* currentStage = dComIfGp_getStage();
     // Fully tucked into Link: nothing to draw
-    if (s_hideBlend >= 0.99f) {
+    if (s_hideBlend >= 0.99f || currentStage == nullptr ||
+        currentStage->getStagInfo() == nullptr || dKy_Indoor_check())
+    {
         return 1;
     }
 
