@@ -365,7 +365,7 @@ static void* igniteLanternNearbyEnemy(void* actorData, void* scanData) {
     auto* scan = static_cast<LanternIgnitionScan*>(scanData);
     if (actor == nullptr || scan == nullptr ||
         fopAcM_GetGroup(actor) != fopAc_ENEMY_e ||
-        scan->center.abs2(actor->current.pos) > scan->reachSquared)
+        scan->center.abs2(getBurnAnchorPos(actor)) > scan->reachSquared)
     {
         return nullptr;
     }
