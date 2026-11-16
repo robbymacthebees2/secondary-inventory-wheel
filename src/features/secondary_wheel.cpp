@@ -721,12 +721,29 @@ bool is_ice_arrow_slot(const dMenu_Ring_c* ring) {
            g_secondarySlots[selected - kSecondarySlotBase] == kIceArrowItem;
 }
 
-bool can_use_ice_arrow_combo(const dMenu_Ring_c* ring) {
+bool is_light_arrow_slot(const dMenu_Ring_c* ring) {
+    if (ring == nullptr || ring->mCurrentSlot >= kSecondaryWheelSlotCount) {
+        return false;
+    }
+
+    const u8 selected = g_secondaryWheelSlotIds[ring->mCurrentSlot];
+    return selected >= kSecondarySlotBase &&
+           selected < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+           g_secondarySlots[selected - kSecondarySlotBase] == kLightArrowItem;
+}
+
+bool can_use_bow_arrow_combo(const dMenu_Ring_c* ring) {
     if (ring == nullptr || ring->mPlayerIsWolf) {
         return false;
     }
 
-    for (int button = 0; button < 2; ++button) {
+    for (int button = 0; button <= kZItemSelectIndex; ++button) {
+        if (button == kZItemSelectIndex &&
+            (!zItemSlotEnabled() || secondaryItemAssigned(button)))
+        {
+            continue;
+        }
+
         const u8 mixItem = dComIfGs_getMixItemIndex(button);
         if ((dComIfGs_getSelectItemIndex(button) == SLOT_4 &&
              mixItem == dItemNo_NONE_e) ||
@@ -738,17 +755,36 @@ bool can_use_ice_arrow_combo(const dMenu_Ring_c* ring) {
     return false;
 }
 
-void set_ice_arrow_selected(daAlink_c* player, bool selected) {
-    if (player == nullptr || g_iceArrowSelected == selected) {
-        return;
-    }
-
-    g_iceArrowSelected = selected;
+void refresh_bow_arrow(daAlink_c* player) {
     if (player->mItemAcKeep.getActor() != nullptr) {
         player->deleteArrow();
         player->makeArrow();
         player->setBowReloadAnime();
     }
+}
+
+void set_ice_arrow_selected(daAlink_c* player, bool selected) {
+    if (player == nullptr || g_iceArrowSelected == selected) {
+        return;
+    }
+
+    if (selected) {
+        g_lightArrowSelected = false;
+    }
+    g_iceArrowSelected = selected;
+    refresh_bow_arrow(player);
+}
+
+void set_light_arrow_selected(daAlink_c* player, bool selected) {
+    if (player == nullptr || g_lightArrowSelected == selected) {
+        return;
+    }
+
+    if (selected) {
+        g_iceArrowSelected = false;
+    }
+    g_lightArrowSelected = selected;
+    refresh_bow_arrow(player);
 }
 
 void begin_z_slot_assignment_animation(
@@ -784,19 +820,26 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
     if (ring->mCurrentSlot < kSecondaryWheelSlotCount) {
         const u8 selected = g_secondaryWheelSlotIds[ring->mCurrentSlot];
         const bool iceArrowSlot = is_ice_arrow_slot(ring);
+        const bool lightArrowSlot = is_light_arrow_slot(ring);
+        const bool bowArrowSlot = iceArrowSlot || lightArrowSlot;
         auto* player = daAlink_getAlinkActorClass();
-        if (ring->mStatus == dMenu_Ring_c::STATUS_WAIT && iceArrowSlot &&
+        if (ring->mStatus == dMenu_Ring_c::STATUS_WAIT && bowArrowSlot &&
             mDoCPd_c::getTrigR(PAD_1) != 0 &&
-            can_use_ice_arrow_combo(ring) && player != nullptr &&
+            can_use_bow_arrow_combo(ring) && player != nullptr &&
             !player->checkCanoeSlider())
         {
-            const bool selectingIceArrow = !g_iceArrowSelected;
-            set_ice_arrow_selected(player, selectingIceArrow);
+            const bool selectingArrow = lightArrowSlot
+                ? !g_lightArrowSelected : !g_iceArrowSelected;
+            if (lightArrowSlot) {
+                set_light_arrow_selected(player, selectingArrow);
+            } else {
+                set_ice_arrow_selected(player, selectingArrow);
+            }
             Z2GetAudioMgr()->seStart(
-                selectingIceArrow ? Z2SE_SY_ITEM_COMBINE_ON : Z2SE_SY_ITEM_COMBINE_OFF,
+                selectingArrow ? Z2SE_SY_ITEM_COMBINE_ON : Z2SE_SY_ITEM_COMBINE_OFF,
                 NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         }
-        if (!iceArrowSlot && mDoCPd_c::getTrigX(PAD_1) != 0) {
+        if (!bowArrowSlot && mDoCPd_c::getTrigX(PAD_1) != 0) {
             g_secondarySelectedItems[0] = selected;
             ring->mXButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(0, secondaryDisplayItemForSlot(selected));
@@ -815,7 +858,7 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
                 g_secondaryItemInputHandled = true;
             }
         }
-        if (!iceArrowSlot && mDoCPd_c::getTrigY(PAD_1) != 0) {
+        if (!bowArrowSlot && mDoCPd_c::getTrigY(PAD_1) != 0) {
             g_secondarySelectedItems[1] = selected;
             ring->mYButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(1, secondaryDisplayItemForSlot(selected));
@@ -1428,8 +1471,10 @@ HookAction show_ice_arrow_combo_on_prompt(ModContext*, void* args, void* retval,
     }
 
     *static_cast<bool*>(retval) =
-        ring->mStatus == dMenu_Ring_c::STATUS_WAIT && is_ice_arrow_slot(ring) &&
-        !g_iceArrowSelected && can_use_ice_arrow_combo(ring);
+        ring->mStatus == dMenu_Ring_c::STATUS_WAIT &&
+        (is_ice_arrow_slot(ring) || is_light_arrow_slot(ring)) &&
+        (is_light_arrow_slot(ring) ? !g_lightArrowSelected : !g_iceArrowSelected) &&
+        can_use_bow_arrow_combo(ring);
     return HOOK_SKIP_ORIGINAL;
 }
 
@@ -1472,8 +1517,10 @@ HookAction show_ice_arrow_combo_off_prompt(ModContext*, void* args, void* retval
     }
 
     *static_cast<bool*>(retval) =
-        ring->mStatus == dMenu_Ring_c::STATUS_WAIT && is_ice_arrow_slot(ring) &&
-        g_iceArrowSelected && can_use_ice_arrow_combo(ring);
+        ring->mStatus == dMenu_Ring_c::STATUS_WAIT &&
+        (is_ice_arrow_slot(ring) || is_light_arrow_slot(ring)) &&
+        (is_light_arrow_slot(ring) ? g_lightArrowSelected : g_iceArrowSelected) &&
+        can_use_bow_arrow_combo(ring);
     return HOOK_SKIP_ORIGINAL;
 }
 
@@ -1733,13 +1780,17 @@ void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
          g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
          g_secondaryIconContext != SecondaryIconContext::DarkLink &&
          g_secondaryIconContext != SecondaryIconContext::IceArrow &&
+         g_secondaryIconContext != SecondaryIconContext::LightArrow &&
          g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
          g_secondaryIconContext != SecondaryIconContext::TruthMask &&
          g_secondaryIconContext != SecondaryIconContext::GoronMask &&
          g_secondaryIconContext != SecondaryIconContext::GiantMask &&
          g_secondaryIconContext != SecondaryIconContext::ArmosHammer &&
-         g_secondaryIconContext != SecondaryIconContext::DekuNut) ||
-        mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e)
+         g_secondaryIconContext != SecondaryIconContext::DekuNut &&
+         g_secondaryIconContext != SecondaryIconContext::DinFire) ||
+        (g_secondaryIconContext == SecondaryIconContext::LightArrow
+             ? mods::arg<u8>(args, 0) != dItemNo_LIGHT_ARROW_e
+             : mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e))
     {
         return;
     }
@@ -1806,6 +1857,8 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context) {
         return kSitIconResource;
     case SecondaryIconContext::IceArrow:
         return kIceArrowIconResource;
+    case SecondaryIconContext::LightArrow:
+        return kLightArrowIconResource;
     case SecondaryIconContext::LensOfTruth:
         return kLensOfTruthIconResource;
     case SecondaryIconContext::TruthMask:
@@ -1818,6 +1871,8 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context) {
         return kArmosHammerIconResource;
     case SecondaryIconContext::DekuNut:
         return kDekuNutIconResource;
+    case SecondaryIconContext::DinFire:
+        return kDinFireIconResource;
     case SecondaryIconContext::DarkLink:
         return kDarkLinkIconResource;
     case SecondaryIconContext::HoverBoots:
@@ -1850,12 +1905,14 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
         g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
         g_secondaryIconContext != SecondaryIconContext::DarkLink &&
         g_secondaryIconContext != SecondaryIconContext::IceArrow &&
+        g_secondaryIconContext != SecondaryIconContext::LightArrow &&
         g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
         g_secondaryIconContext != SecondaryIconContext::TruthMask &&
         g_secondaryIconContext != SecondaryIconContext::GoronMask &&
         g_secondaryIconContext != SecondaryIconContext::GiantMask &&
         g_secondaryIconContext != SecondaryIconContext::ArmosHammer &&
-        g_secondaryIconContext != SecondaryIconContext::DekuNut)
+        g_secondaryIconContext != SecondaryIconContext::DekuNut &&
+        g_secondaryIconContext != SecondaryIconContext::DinFire)
     {
         mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
         return HOOK_CONTINUE;
@@ -1989,9 +2046,16 @@ bool z_slot_bow_lantern_combo(u8 item) {
            (selectedItem == dItemNo_KANTERA_e && mixItem == dItemNo_BOW_e);
 }
 
+bool din_fire_assigned(int button) {
+    return button >= 0 && button < kSecondaryAssignmentCount &&
+           secondaryItemAssigned(button) &&
+           secondaryItemIdForSlot(g_secondarySelectedItems[button]) ==
+               kFireSphereItem;
+}
+
 void update_z_slot_ammo_display(dMeter2Draw_c* meter, u8 item) {
     g_secondaryZHudAmmoVisible = false;
-    g_secondaryZHudLanternVisible =
+    g_secondaryZHudLanternVisible = din_fire_assigned(kZItemSelectIndex) ||
         item == dItemNo_KANTERA_e || z_slot_bow_lantern_combo(item);
     if (meter == nullptr || meter->mpScreen == nullptr ||
         meter->mpItemR == nullptr)
@@ -2124,10 +2188,26 @@ DEFINE_HOOK(&dMeter2Draw_c::draw, ZSlotAmmoDraw);
 
 void draw_z_slot_ammo_numbers(ModContext*, void* args, void*, void*) {
     auto* meter = mods::arg<dMeter2Draw_c*>(args, 0);
-    if (meter == nullptr || meter->mpItemR == nullptr) {
+    if (meter == nullptr) {
         return;
     }
 
+    for (int button = 0; button < 2; ++button) {
+        if (!din_fire_assigned(button) || meter->mpItemXY[button] == nullptr ||
+            meter->mpKanteraMeter[button] == nullptr)
+        {
+            continue;
+        }
+        const f32 alpha = meter->mpItemXY[button]->getAlphaRate();
+        if (alpha > 0.0f) {
+            meter->drawKanteraMeter(button, alpha);
+            meter->mpKanteraMeter[button]->drawSelf();
+        }
+    }
+
+    if (meter->mpItemR == nullptr) {
+        return;
+    }
     J2DPane* itemPane = meter->mpItemR->getPanePtr();
     const f32 alpha = meter->mpItemR->getAlphaRate();
     if (itemPane == nullptr || !itemPane->isVisible() || alpha <= 0.0f) {

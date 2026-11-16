@@ -441,6 +441,9 @@ u8 secondaryDisplayItemForId(u8 itemId) {
     if (itemId == kGoronTunicItemId) {
         return kGoronTunicDisplayItem;
     }
+    if (itemId == kLightArrowItem) {
+        return dItemNo_LIGHT_ARROW_e;
+    }
     if (itemId == kDarkLinkItem || itemId == kIceArrowItem ||
         itemId == kLensOfTruthItem || itemId == kTruthMaskItem ||
         itemId == kGoronMaskItem || itemId == kGiantMaskItem ||
@@ -449,6 +452,9 @@ u8 secondaryDisplayItemForId(u8 itemId) {
         return dItemNo_WOOD_STICK_e;
     }
     if (itemId == kDekuNutItem) {
+        return dItemNo_WOOD_STICK_e;
+    }
+    if (itemId == kFireSphereItem) {
         return dItemNo_WOOD_STICK_e;
     }
     if (itemId == kHawkGrassItem || itemId == kHoverBootsItem) {
@@ -500,6 +506,12 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
     }
     if (slotId >= kSecondarySlotBase &&
         slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kLightArrowItem)
+    {
+        return SecondaryIconContext::LightArrow;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
         g_secondarySlots[slotId - kSecondarySlotBase] == kLensOfTruthItem)
     {
         return SecondaryIconContext::LensOfTruth;
@@ -533,6 +545,12 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
         g_secondarySlots[slotId - kSecondarySlotBase] == kDekuNutItem)
     {
         return SecondaryIconContext::DekuNut;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kFireSphereItem)
+    {
+        return SecondaryIconContext::DinFire;
     }
     return SecondaryIconContext::None;
 }
@@ -670,6 +688,9 @@ const char* secondaryItemNameForSlot(u8 slotId) {
         if (item == kIceArrowItem) {
             return "Ice Arrow (Bow)";
         }
+        if (item == kLightArrowItem) {
+            return "Light Arrow (Bow)";
+        }
         if (item == kLensOfTruthItem) {
             return "Lens of Truth";
         }
@@ -687,6 +708,9 @@ const char* secondaryItemNameForSlot(u8 slotId) {
         }
         if (item == kDekuNutItem) {
             return "Deku Nut";
+        }
+        if (item == kFireSphereItem) {
+            return "Din's Fire";
         }
     }
 

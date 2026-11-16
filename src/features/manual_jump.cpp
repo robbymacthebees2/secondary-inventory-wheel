@@ -1732,6 +1732,9 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     case kDekuNutItem:
         begin_deku_nut_use(alink);
         break;
+    case kFireSphereItem:
+        begin_fire_sphere_use(alink);
+        break;
     default:
         break;
     }

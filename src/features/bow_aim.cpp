@@ -628,6 +628,9 @@ bool manual_jump_owner_is_airborne(daAlink_c* link) {
 }
 
 u16 selected_midair_bow_item(u8 slot) {
+    if (secondaryItemAssigned(slot)) {
+        return dItemNo_NONE_e;
+    }
     if (slot == SELECT_ITEM_DOWN && zItemSlotEnabled() &&
         hawkeyeMidairBowAimEnabled() &&
         selected_item_for_button(slot) == dItemNo_HAWK_ARROW_e)
@@ -663,6 +666,7 @@ u8 midair_clawshot_button_triggered(const daAlink_c* link) {
         SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
     for (const u8 slot : slots) {
         if (slot == SELECT_ITEM_DOWN && !zItemSlotEnabled()) continue;
+        if (secondaryItemAssigned(slot)) continue;
         if (item_button_triggered(link, slot) &&
             is_clawshot_item(selected_item_for_button(slot)))
         {
@@ -773,11 +777,24 @@ bool selected_bow_button_triggered(daAlink_c* link) {
     return hawkeye_combo_button_triggered(link) != dItemNo_NONE_e;
 }
 
+bool secondary_item_button_triggered(const daAlink_c* link) {
+    constexpr std::array<u8, 3> slots = {
+        SELECT_ITEM_X, SELECT_ITEM_Y, SELECT_ITEM_DOWN};
+    for (const u8 slot : slots) {
+        if (slot == SELECT_ITEM_DOWN && !zItemSlotEnabled()) continue;
+        if (secondaryItemAssigned(slot) && item_button_triggered(link, slot)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool bow_aim_requested(daAlink_c* link) {
     return link != nullptr && is_bow_or_slingshot(link->mEquipItem) &&
            link->checkReadyItem() &&
-           (selected_bow_button_requested(link) || link->itemTrigger() ||
-            link->itemButton());
+           (selected_bow_button_requested(link) ||
+            (!secondary_item_button_triggered(link) &&
+             (link->itemTrigger() || link->itemButton())));
 }
 
 bool equip_selected_bow_for_bullet_time(

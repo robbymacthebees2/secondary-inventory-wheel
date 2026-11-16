@@ -263,12 +263,15 @@ HookAction update_ice_arrow_freezes(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-HookAction apply_ice_arrow_bow_selection(ModContext*, void* args, void*, void*) {
+HookAction apply_bow_combo_arrow_selection(ModContext*, void* args, void*, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
     if (g_secondaryRing != nullptr) {
         return HOOK_SKIP_ORIGINAL;
     }
-    if (player == nullptr || !g_iceArrowSelected || player->checkCanoeSlider()) {
+    if (player == nullptr ||
+        (!g_iceArrowSelected && !g_lightArrowSelected) ||
+        player->checkCanoeSlider())
+    {
         return HOOK_CONTINUE;
     }
 
@@ -284,19 +287,233 @@ HookAction apply_ice_arrow_bow_selection(ModContext*, void* args, void*, void*) 
         return HOOK_CONTINUE;
     }
 
-    set_ice_arrow_selected(player, !g_iceArrowSelected);
+    if (g_lightArrowSelected) {
+        set_light_arrow_selected(player, false);
+    } else {
+        set_ice_arrow_selected(player, false);
+    }
     return HOOK_SKIP_ORIGINAL;
 }
 
-void set_ice_arrow_actor_type_after_creation(ModContext*, void* args, void*, void*) {
+void set_bow_combo_arrow_type_after_creation(ModContext*, void* args, void*, void*) {
     auto* player = mods::arg<daAlink_c*>(args, 0);
-    if (!g_iceArrowSelected || player == nullptr) {
+    if (player == nullptr) {
         return;
     }
 
     fopAc_ac_c* actor = player->mItemAcKeep.getActor();
     if (actor != nullptr && fopAcM_GetName(actor) == fpcNm_ARROW_e) {
-        static_cast<daArrow_c*>(actor)->mArrowType = kIceArrowType;
+        auto* arrow = static_cast<daArrow_c*>(actor);
+        if (g_iceArrowSelected) {
+            arrow->mArrowType = kIceArrowType;
+        }
+    }
+}
+
+constexpr u8 kLightArrowLinkHandMarker = 0xA7;
+constexpr int kTrackedLightArrows = 32;
+constexpr f32 kLightArrowLightPower = 250.0f;
+constexpr f32 kLightArrowLightFluctuation = 1.0f;
+constexpr f32 kLightArrowBossLightRefDistance = 0.5f;
+constexpr GXColor kLightArrowEffectPrimColor = {0xFF, 0xFF, 0xA0, 0xFF};
+constexpr GXColor kLightArrowEffectEnvColor = {0xFF, 0xD0, 0x20, 0xFF};
+constexpr GXColorS10 kLightArrowLightColor = {0xFF, 0xD8, 0x60, 0xFF};
+constexpr GXColor kLightArrowBossLightColor = {0xFF, 0xD8, 0x60, 0xFF};
+
+struct LightArrowLight {
+    fpc_ProcID actorId = fpcM_ERROR_PROCESS_ID_e;
+    LIGHT_INFLUENCE influence{};
+    bool used = false;
+    bool active = false;
+};
+
+std::array<LightArrowLight, kTrackedLightArrows> g_lightArrowLights{};
+
+LightArrowLight* get_light_arrow_light(daArrow_c* arrow) {
+    const fpc_ProcID actorId = fopAcM_GetID(arrow);
+    LightArrowLight* freeSlot = nullptr;
+    for (auto& slot : g_lightArrowLights) {
+        if (slot.used && slot.actorId == actorId) {
+            return &slot;
+        }
+        if (!slot.used && freeSlot == nullptr) {
+            freeSlot = &slot;
+        }
+    }
+
+    if (freeSlot == nullptr) {
+        return nullptr;
+    }
+
+    freeSlot->actorId = actorId;
+    freeSlot->influence.mColor = kLightArrowLightColor;
+    freeSlot->influence.mPow = kLightArrowLightPower;
+    freeSlot->influence.mFluctuation = kLightArrowLightFluctuation;
+    freeSlot->used = true;
+    freeSlot->active = false;
+    return freeSlot;
+}
+
+void stop_light_arrow_emitter(u32& emitterId) {
+    JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(emitterId);
+    if (emitter != nullptr) {
+        emitter->setParticleCallBackPtr(nullptr);
+        emitter->setUserWork(0);
+        emitter->stopDrawParticle();
+    }
+    emitterId = 0;
+}
+
+void stop_light_arrow_effects(daArrow_c* arrow) {
+    if (arrow == nullptr) {
+        return;
+    }
+
+    stop_light_arrow_emitter(arrow->field_0x964);
+    stop_light_arrow_emitter(arrow->field_0x968);
+    for (auto& slot : g_lightArrowLights) {
+        if (slot.used && slot.actorId == fopAcM_GetID(arrow)) {
+            if (slot.active) {
+                dKy_plight_cut(&slot.influence);
+            }
+            slot.used = false;
+            slot.active = false;
+            slot.actorId = fpcM_ERROR_PROCESS_ID_e;
+        }
+    }
+}
+
+void cleanup_light_arrow_lights(ModContext*, void*, void*, void*) {
+    for (auto& slot : g_lightArrowLights) {
+        if (slot.used && fopAcM_SearchByID(slot.actorId) == nullptr) {
+            if (slot.active) {
+                dKy_plight_cut(&slot.influence);
+            }
+            slot.used = false;
+            slot.active = false;
+            slot.actorId = fpcM_ERROR_PROCESS_ID_e;
+        }
+    }
+}
+
+bool has_light_arrow_boss_light_at(const cXyz& position) {
+    for (int i = 1; i < 6; ++i) {
+        const auto& light = g_env_light.field_0x0c18[i];
+        if (light.field_0x26 == 1 && light.mPos.x == position.x &&
+            light.mPos.y == position.y && light.mPos.z == position.z)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+HookAction initialize_light_arrow_on_first_execute(
+    ModContext*, void* args, void*, void*)
+{
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    auto* player = daAlink_getAlinkActorClass();
+    if (!g_lightArrowSelected || arrow == nullptr || player == nullptr ||
+        player->mItemAcKeep.getActor() != arrow ||
+        arrow->mArrowType != daArrow_c::ARROW_TYPE_NORMAL)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    arrow->mArrowType = daArrow_c::ARROW_TYPE_LIGHT;
+    arrow->field_0x941 = kLightArrowLinkHandMarker;
+    arrow->field_0x946 = 6;
+    arrow->field_0x94c = ID_ZF_J_FIRE01_SPARK;
+    arrow->field_0x688.SetAtType(
+        arrow->field_0x688.GetAtType() | AT_TYPE_MASTER_SWORD);
+    arrow->setLightChargeEffect(0);
+    return HOOK_CONTINUE;
+}
+
+void update_light_arrow_visual_effects(ModContext*, void* args, void*, void*) {
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    if (arrow == nullptr) {
+        return;
+    }
+
+    const bool isModLightArrow =
+        arrow->field_0x941 == kLightArrowLinkHandMarker || projectiles_is_remote(arrow);
+    if (arrow->field_0x93f != 0) {
+        if (isModLightArrow) {
+            stop_light_arrow_effects(arrow);
+        }
+        return;
+    }
+    if (!isModLightArrow || arrow->mpModel == nullptr ||
+        arrow->mArrowType != daArrow_c::ARROW_TYPE_LIGHT)
+    {
+        return;
+    }
+
+    arrow->setSmokePos();
+    const f32 scale = arrow->checkWait() ? 1.0f / 3.0f : 1.0f;
+    const JGeometry::TVec3<f32> effectScale(scale, scale, scale);
+    const u8 alpha = 0xFF;
+    arrow->field_0x964 = dComIfGp_particle_setColor(
+        arrow->field_0x964, ID_ZF_J_FIRE00_GLOW, &arrow->field_0x9cc,
+        &arrow->tevStr, &kLightArrowEffectPrimColor, &kLightArrowEffectEnvColor,
+        0.0f, alpha, &arrow->shape_angle, nullptr, nullptr, -1, nullptr);
+    dComIfGp_particle_levelEmitterOnEventMove(arrow->field_0x964);
+    arrow->field_0x968 = dComIfGp_particle_setColor(
+        arrow->field_0x968, ID_ZF_J_FIRE01_SPARK, &arrow->field_0x9cc,
+        &arrow->tevStr, &kLightArrowEffectPrimColor, &kLightArrowEffectEnvColor,
+        0.0f, alpha, &arrow->shape_angle, nullptr, nullptr, -1, nullptr);
+    dComIfGp_particle_levelEmitterOnEventMove(arrow->field_0x968);
+
+    for (u32 emitterId : {arrow->field_0x964, arrow->field_0x968}) {
+        JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(emitterId);
+        if (emitter != nullptr) {
+            emitter->setParticleCallBackPtr(dPa_control_c::getParticleTracePCB());
+            emitter->setUserWork(reinterpret_cast<uintptr_t>(&arrow->speed));
+            emitter->setGlobalScale(effectScale);
+        }
+    }
+
+    if (LightArrowLight* slot = get_light_arrow_light(arrow); slot != nullptr) {
+        slot->influence.mPosition = arrow->field_0x9cc;
+        if (!slot->active) {
+            dKy_plight_set(&slot->influence);
+            slot->active = true;
+        }
+    }
+
+    GXColor bossLightColor = kLightArrowBossLightColor;
+    const int lightSet = dKy_BossLight_set(
+        &arrow->field_0x9cc, &bossLightColor, kLightArrowBossLightRefDistance, 0);
+    if (lightSet == 0 && !has_light_arrow_boss_light_at(arrow->field_0x9cc) &&
+        dKy_Indoor_check() &&
+        g_env_light.field_0x0c18[0].field_0x26 == 0)
+    {
+        dKy_WolfEyeLight_set(&arrow->field_0x9cc, 0.0f, 0.0f, 50.0f,
+                             &bossLightColor, 1.0f, 0, 3);
+    }
+}
+
+HookAction use_link_hand_for_held_light_arrow(ModContext*, void* args, void*, void*) {
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    if (arrow == nullptr ||
+        arrow->field_0x941 != kLightArrowLinkHandMarker ||
+        arrow->mArrowType != daArrow_c::ARROW_TYPE_LIGHT)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    arrow->mArrowType = daArrow_c::ARROW_TYPE_NORMAL;
+    return HOOK_CONTINUE;
+}
+
+void restore_light_arrow_type_after_keep_matrix(ModContext*, void* args, void*, void*) {
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    if (arrow != nullptr &&
+        arrow->field_0x941 == kLightArrowLinkHandMarker &&
+        arrow->mArrowType == daArrow_c::ARROW_TYPE_NORMAL)
+    {
+        arrow->mArrowType = daArrow_c::ARROW_TYPE_LIGHT;
     }
 }
 
@@ -491,6 +708,7 @@ DEFINE_HOOK(&daObjIceLeaf_c::draw, IceLeafDraw);
 DEFINE_HOOK(&daAlink_c::draw, PlayerDraw);
 DEFINE_HOOK(&daAlink_c::makeArrow, MakeArrow);
 DEFINE_HOOK(&daAlink_c::changeArrowType, ChangeArrowType);
+DEFINE_HOOK(&daArrow_c::setKeepMatrix, ArrowKeepMatrix);
 DEFINE_HOOK(&daAlink_c::modelCalc, ModelCalc);
 DEFINE_HOOK(&daArrow_c::atHitCallBack, ArrowAtHitCallBack);
 DEFINE_HOOK(&daArrow_c::draw, ArrowDraw);

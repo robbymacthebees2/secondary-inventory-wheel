@@ -1,4 +1,10 @@
 // Ported from Fire Arrows Standalone v1.2.2 by Baxlek with permission.
+namespace fire_sphere {
+void apply_blast(daAlink_c* player);
+void apply_lantern_blast(daAlink_c* player);
+void clear_lantern_blast();
+}
+
 namespace fire_arrows {
 
 using IsMixItemOn = ::RingIsMixItemOn;
@@ -290,6 +296,12 @@ static bool isArrowStationary(daArrow_c* arrow) {
 }
 
 static constexpr s16 BURNING_ACTOR_DURATION = 150;
+static constexpr f32 LANTERN_FLAME_SCALE = 1.8f;
+static constexpr f32 LANTERN_FLAME_FORWARD_OFFSET = 70.0f;
+static constexpr f32 LANTERN_FLAME_HEIGHT = 75.0f;
+static constexpr f32 LANTERN_ATTACK_RADIUS = 115.0f;
+static constexpr GXColor LANTERN_FLAME_PRIM_COLOR = {255, 196, 64, 255};
+static constexpr GXColor LANTERN_FLAME_ENV_COLOR = {255, 72, 8, 255};
 
 static const JGeometry::TVec3<f32> BURN_EFFECT_SCALE(3.0f, 3.0f, 3.0f);
 
@@ -313,6 +325,7 @@ static void cutBurningActorLight(BurningActor& slot) {
 static constexpr int MAX_BURNING_ACTORS = 8;
 static BurningActor g_burningActors[MAX_BURNING_ACTORS];
 static int g_nextBurningActorSlot = 0;
+static bool g_lanternFlameEmittedThisSwing = false;
 
 static constexpr f32 EYEPOS_MAX_PLAUSIBLE_DIST = 300.0f;
 static constexpr f32 FALLBACK_ANCHOR_HEIGHT = 40.0f;
@@ -374,20 +387,51 @@ static void* igniteLanternNearbyEnemy(void* actorData, void* scanData) {
     return nullptr;
 }
 
+static void emitLanternFireFlame(daAlink_c* alink) {
+    cXyz position = alink->current.pos;
+    position.x += cM_ssin(alink->shape_angle.y) * LANTERN_FLAME_FORWARD_OFFSET;
+    position.y += LANTERN_FLAME_HEIGHT;
+    position.z += cM_scos(alink->shape_angle.y) * LANTERN_FLAME_FORWARD_OFFSET;
+
+    const u32 key = dComIfGp_particle_setColor(
+        0, ID_ZF_J_FIRE02_FIRE, &position, &alink->tevStr,
+        &LANTERN_FLAME_PRIM_COLOR, &LANTERN_FLAME_ENV_COLOR, 0.0f, 0xFF,
+        &alink->shape_angle, nullptr, nullptr, -1, nullptr);
+    if (JPABaseEmitter* emitter = dComIfGp_particle_getEmitter(key);
+        emitter != nullptr)
+    {
+        emitter->setGlobalScale(JGeometry::TVec3<f32>(
+            LANTERN_FLAME_SCALE, LANTERN_FLAME_SCALE, LANTERN_FLAME_SCALE));
+    }
+}
+
 static void updateLanternIgnition(daAlink_c* alink) {
     if (!lanternIgnitesEnemiesEnabled() || alink == nullptr ||
         alink->mEquipItem != dItemNo_KANTERA_e ||
         !alink->checkKandelaarSwing(1))
     {
+        g_lanternFlameEmittedThisSwing = false;
+        fire_sphere::clear_lantern_blast();
         return;
     }
 
     const f32 swingFrame = alink->mUnderFrameCtrl[0].getFrame();
-    if (dComIfGs_getOil() == 0 || swingFrame < alink->field_0x347c ||
-        swingFrame > alink->field_0x3480 || !alink->mAtSph.ChkAtSet())
-    {
+    if (swingFrame > alink->field_0x3480) {
+        g_lanternFlameEmittedThisSwing = false;
+        fire_sphere::clear_lantern_blast();
         return;
     }
+    if (dComIfGs_getOil() == 0 || swingFrame < alink->field_0x347c) {
+        fire_sphere::clear_lantern_blast();
+        return;
+    }
+
+    if (!g_lanternFlameEmittedThisSwing) {
+        emitLanternFireFlame(alink);
+        g_lanternFlameEmittedThisSwing = true;
+    }
+
+    fire_sphere::apply_lantern_blast(alink);
 
     if (alink->mAtSph.ChkAtHit()) {
         fopAc_ac_c* hitActor = alink->mAtSph.GetAtHitAc();
@@ -396,15 +440,18 @@ static void updateLanternIgnition(daAlink_c* alink) {
         }
     }
 
-    const f32 reach = alink->mAtSph.GetR() + 40.0f;
-    LanternIgnitionScan scan = {alink->mAtSph.GetC(), reach * reach};
+    cXyz center = alink->current.pos;
+    center.y += LANTERN_FLAME_HEIGHT;
+    const f32 reach = LANTERN_ATTACK_RADIUS + 40.0f;
+    LanternIgnitionScan scan = {center, reach * reach};
     fopAcM_Search(igniteLanternNearbyEnemy, &scan);
 }
 
 void update_lantern_ignition_after_player_execute(
     ModContext*, void* args, void*, void*)
 {
-    updateLanternIgnition(mods::arg<daAlink_c*>(args, 0));
+    daAlink_c* alink = mods::arg<daAlink_c*>(args, 0);
+    updateLanternIgnition(alink);
 }
 
 static void updateBurningActors() {
