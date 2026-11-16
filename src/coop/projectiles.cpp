@@ -78,6 +78,14 @@ void* collect_arrows(void* proc, void* data) {
 }
 
 void apply_launch(daArrow_c* arrow, const MsgArrowShot& shot) {
+    if (shot.type == daArrow_c::ARROW_TYPE_LIGHT) {
+        arrow->mArrowType = daArrow_c::ARROW_TYPE_LIGHT;
+        arrow->field_0x946 = 6;
+        arrow->field_0x94c = ID_IT_JN_ARWG_TSUBU00;
+        arrow->field_0x688.SetAtType(
+            arrow->field_0x688.GetAtType() | AT_TYPE_MASTER_SWORD);
+    }
+
     const cXyz start(shot.startPos[0], shot.startPos[1], shot.startPos[2]);
     arrow->current.pos = start;
     arrow->old.pos = start;
@@ -272,7 +280,6 @@ void projectiles_update() {
         if (param != 1 && param != 2) continue;
         if (arrow->speedF != 100.0f) continue;
         push_id(s_reported, s_reportedNext, id);
-        if (arrow->mArrowType == daArrow_c::ARROW_TYPE_LIGHT) continue;
 
         MsgArrowShot shot{};
         shot.type = arrow->mArrowType;
@@ -303,7 +310,8 @@ void projectiles_on_message(const uint8_t* payload, size_t size) {
 
     if (alink->mpLinkModel == nullptr || dComIfGp_isEnableNextStage()) return;
     if (shot.type != daArrow_c::ARROW_TYPE_NORMAL && shot.type != daArrow_c::ARROW_TYPE_BOMB &&
-        shot.type != daArrow_c::ARROW_TYPE_SLING && shot.type != kCoopIceArrowType)
+        shot.type != daArrow_c::ARROW_TYPE_SLING &&
+        shot.type != daArrow_c::ARROW_TYPE_LIGHT && shot.type != kCoopIceArrowType)
     {
         return;
     }
@@ -311,9 +319,12 @@ void projectiles_on_message(const uint8_t* payload, size_t size) {
     cXyz pos(shot.startPos[0], shot.startPos[1], shot.startPos[2]);
     csXyz angle(shot.angleX, shot.angleY, 0);
     fopAc_ac_c* actor = nullptr;
+    const u8 actorType = shot.type == daArrow_c::ARROW_TYPE_LIGHT
+        ? daArrow_c::ARROW_TYPE_NORMAL
+        : shot.type;
     {
         CoopActorLayer layer;
-        actor = fopAcM_fastCreate(fpcNm_ARROW_e, (static_cast<u32>(shot.type) << 8) | param, &pos,
+        actor = fopAcM_fastCreate(fpcNm_ARROW_e, (static_cast<u32>(actorType) << 8) | param, &pos,
             fopAcM_GetRoomNo(alink), &angle, nullptr, -1, nullptr, nullptr);
     }
     if (actor == nullptr) {

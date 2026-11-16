@@ -1,7 +1,7 @@
 namespace enemy_spawner {
 namespace {
 
-constexpr std::array<ProfileName, 43> kProfiles = {
+constexpr std::array<ProfileName, 44> kProfiles = {
     fpcNm_B_TN_e, fpcNm_E_OC_e, fpcNm_E_FZ_e,
     fpcNm_E_BA_e, fpcNm_E_BA_e, fpcNm_E_BA_e,
     fpcNm_E_TT_e, fpcNm_E_GI_e, fpcNm_NPC_GRA_e,
@@ -16,7 +16,7 @@ constexpr std::array<ProfileName, 43> kProfiles = {
     fpcNm_E_MM_e, fpcNm_E_MM_e, fpcNm_E_KR_e,
     fpcNm_E_GE_e, fpcNm_E_AI_e, fpcNm_E_SM2_e,
     fpcNm_E_SM2_e, fpcNm_E_SM2_e, fpcNm_E_SM2_e,
-    fpcNm_E_SM2_e,
+    fpcNm_E_SM2_e, fpcNm_E_S1_e,
 };
 
 constexpr std::array<u32, kProfiles.size()> kParameters = {
@@ -34,7 +34,7 @@ constexpr std::array<u32, kProfiles.size()> kParameters = {
     0x0000ff00, 0x0000ff00, 0xffffff00,
     0x00ffff01, 0x00ff000a, 0xffff0010,
     0xffff0020, 0xffff0030, 0xffff0040,
-    0xffff0060,
+    0xffff0060, 0xffffffff,
 };
 
 constexpr std::array<const char*, kProfiles.size()> kLabels = {
@@ -52,7 +52,7 @@ constexpr std::array<const char*, kProfiles.size()> kLabels = {
     "Helmasaur", "Helmasaurus", "Kargarok",
     "Guay", "Armos", "Red Chu",
     "Blue Chu", "Yellow Chu", "Purple Chu",
-    "Black Chu",
+    "Black Chu", "Shadow Beast (Twilit Beast)",
 };
 
 constexpr std::size_t kHelmasaurusIndex = 34;

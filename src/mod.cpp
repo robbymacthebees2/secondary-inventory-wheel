@@ -181,12 +181,16 @@ constexpr u8 kHawkGrassItem = 0xFD;
 constexpr u8 kHoverBootsItem = 0xFC;
 constexpr u8 kDarkLinkItem = 0xFA;
 constexpr u8 kIceArrowItem = 0xF8;
+constexpr u8 kLightArrowItem = 0xEF;
 constexpr u8 kLensOfTruthItem = 0xF6;
 constexpr u8 kTruthMaskItem = 0xF5;
 constexpr u8 kGoronMaskItem = 0xF4;
 constexpr u8 kGiantMaskItem = 0xF3;
 constexpr u8 kArmosHammerItem = 0xF2;
 constexpr u8 kDekuNutItem = 0xF1;
+constexpr u8 kFireSphereItem = 0xEE;
+constexpr u16 kFireDamagePulseInterval = 15;
+constexpr u8 kFireDamageAmount = 1;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
 constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 4;
@@ -203,12 +207,14 @@ constexpr size_t kItemTextureBufferSize = 0xC00;
 constexpr char kHoverBootsIconResource[] = "hover_boots_wings.bti";
 constexpr char kDarkLinkIconResource[] = "dark_link.bti";
 constexpr char kIceArrowIconResource[] = "ice_arrow.bti";
+constexpr char kLightArrowIconResource[] = "light_arrow.bti";
 constexpr char kLensOfTruthIconResource[] = "lens_of_truth.bti";
 constexpr char kTruthMaskIconResource[] = "truth_mask.bti";
 constexpr char kGoronMaskIconResource[] = "goron_mask.bti";
 constexpr char kGiantMaskIconResource[] = "giants_mask.bti";
 constexpr char kArmosHammerIconResource[] = "armos_hammer.bti";
 constexpr char kDekuNutIconResource[] = "deku_nut.bti";
+constexpr char kDinFireIconResource[] = "din_fire.bti";
 constexpr char kIceLeafIconResource[] = "ice_leaf.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
@@ -257,12 +263,14 @@ enum class SecondaryIconContext : u8 {
     HoverBoots,
     DarkLink,
     IceArrow,
+    LightArrow,
     LensOfTruth,
     TruthMask,
     GoronMask,
     GiantMask,
     ArmosHammer,
     DekuNut,
+    DinFire,
 };
 
 enum class SitActionState : u8 {
@@ -397,6 +405,7 @@ fpc_ProcID g_iceArrowExecutingActorId = fpcM_ERROR_PROCESS_ID_e;
 fpc_ProcID g_iceArrowPreviousExecutingActorIds[16]{};
 u32 g_iceArrowActorExecuteDepth = 0;
 bool g_iceArrowSelected = false;
+bool g_lightArrowSelected = false;
 bool g_lensOfTruthActive = false;
 bool g_secondaryItemInputHandled = false;
 bool g_jumpButtonConfigReadFailureReported = false;
@@ -481,6 +490,8 @@ std::array<u8, MAX_ITEM_SLOTS> g_secondarySlots = [] {
     slots[7] = kGiantMaskItem;
     slots[8] = kArmosHammerItem;
     slots[9] = kDekuNutItem;
+    slots[10] = kLightArrowItem;
+    slots[11] = kFireSphereItem;
     return slots;
 }();
 std::array<u8, MAX_SELECT_ITEM> g_secondarySelectedItems = [] {
@@ -549,6 +560,7 @@ void reset_shield_surf_state_for_save_change();
 void reset_manual_jump_input_state();
 bool z_slot_midna_left_triggered();
 void begin_deku_nut_use(daAlink_c* alink);
+void begin_fire_sphere_use(daAlink_c* alink);
 void set_goron_tunic_active(bool active);
 namespace fire_arrows {
 ModResult add_settings(UiElementHandle panel);
@@ -581,6 +593,7 @@ void update();
 #include "features/ice_arrow.cpp"
 #include "features/fire_arrows.cpp"
 #include "features/deku_nut.cpp"
+#include "features/fire_sphere.cpp"
 #include "features/lens_of_truth.cpp"
 #include "features/truth_mask.cpp"
 #include "features/goron_mask.cpp"
@@ -805,6 +818,8 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(PlayerExecute, continue_goron_mask_roll);
     ADD_POST(PlayerExecute, enable_goron_roll_attack);
     ADD_POST(PlayerExecute, fire_arrows::update_lantern_ignition_after_player_execute);
+    ADD_POST(PlayerExecute, fire_sphere::update);
+    ADD_PRE(PlayerExecute, fire_sphere::restore_player_attack);
     ADD_POST(GiantMaskSetMatrix, apply_giant_mask_player_scale);
     ADD_PRE(PlayerExecute, update_ice_arrow_freezes);
     ADD_POST(PlayerExecute, process_shield_surf_transition);
@@ -821,6 +836,7 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(DekuNutBombDraw, draw_deku_nut_bomb);
     ADD_POST(CheckSceneChange, disable_hover_boots_after_scene_change);
     ADD_POST(CheckSceneChange, clear_deku_nut_bombs_after_scene_change);
+    ADD_POST(CheckSceneChange, fire_sphere::clear_after_scene_change);
     ADD_POST(CheckSceneChange, deactivate_giant_mask_after_scene_change);
     ADD_POST(CheckSceneChange, deactivate_armos_hammer_after_scene_change);
     ADD_PRE(OffWolfEyeUp, preserve_lens_of_truth_vision);
@@ -847,9 +863,14 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(SpinnerReflectAccept, keep_spinner_attack_always_active);
     ADD_PRE(IceLeafExecute, keep_shield_surf_board_in_ride_mode);
     ADD_PRE(IceLeafDraw, draw_shield_surf_on_native_board);
-    ADD_POST(MakeArrow, set_ice_arrow_actor_type_after_creation);
+    ADD_POST(MakeArrow, set_bow_combo_arrow_type_after_creation);
+    ADD_PRE(fire_arrows::ArrowExecute, initialize_light_arrow_on_first_execute);
+    ADD_POST(fire_arrows::ArrowExecute, update_light_arrow_visual_effects);
+    ADD_POST(PlayerExecute, cleanup_light_arrow_lights);
+    ADD_PRE(ArrowKeepMatrix, use_link_hand_for_held_light_arrow);
+    ADD_POST(ArrowKeepMatrix, restore_light_arrow_type_after_keep_matrix);
     ADD_POST(ArrowDraw, draw_ice_keese_on_held_arrow);
-    ADD_PRE(ChangeArrowType, apply_ice_arrow_bow_selection);
+    ADD_PRE(ChangeArrowType, apply_bow_combo_arrow_selection);
     ADD_PRE(ArrowAtHitCallBack, register_ice_arrow_hit);
     ADD_PRE(MorfFrameUpdate, freeze_ice_arrow_target_animation);
     ADD_PRE(MorfFrameUpdate, bow_aim::scale_enemy_animation);
@@ -964,6 +985,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_manualGlideActorId = fpcM_ERROR_PROCESS_ID_e;
     reset_manual_jump_input_state();
     g_iceArrowSelected = false;
+    g_lightArrowSelected = false;
     g_lensOfTruthActive = false;
     g_lensVisionActivated = false;
     g_iceArrowFrozenTargets.fill({});
@@ -1762,6 +1784,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     g_hoverBootsEquipped = false;
     g_darkLinkVisualActive = false;
     g_iceArrowSelected = false;
+    g_lightArrowSelected = false;
     g_lensOfTruthActive = false;
     g_truthMaskActive = false;
     g_goronMaskActive = false;

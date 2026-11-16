@@ -672,10 +672,10 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
-    control.label = "Lantern ignites enemies";
+    control.label = "Lantern flame";
     control.help_rml =
-        "When Link's Lantern swing hits an enemy, set that enemy on fire for five seconds. "
-        "Off by default.";
+        "Each Lantern swing uses Din's Fire's attack, including its fire damage and knockback. "
+        "Nearby enemies caught by the flame burn for five seconds. Off by default.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_lanternIgnitesEnemies;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);

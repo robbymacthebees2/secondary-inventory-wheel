@@ -2081,7 +2081,9 @@ void send_local_snapshot() {
                 uint8_t kind = kPuppetHeldNone;
                 if (arrow->mArrowType == daArrow_c::ARROW_TYPE_BOMB) {
                     kind = kPuppetHeldBombArrow;
-                } else if (arrow->mArrowType == daArrow_c::ARROW_TYPE_NORMAL) {
+                } else if (arrow->mArrowType == daArrow_c::ARROW_TYPE_NORMAL ||
+                           arrow->mArrowType == daArrow_c::ARROW_TYPE_LIGHT)
+                {
                     kind = kPuppetHeldArrow;
                 }
                 if (kind == kPuppetHeldNone) continue;
