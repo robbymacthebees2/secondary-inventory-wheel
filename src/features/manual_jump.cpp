@@ -1500,6 +1500,10 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     }
     const bool pendingManualJumpPress = g_manualJumpPendingPress;
     g_manualJumpPendingPress = false;
+    const bool hoverMovementInput = g_hoverBootsEquipped &&
+        (manual_jump_binding_triggered(
+             manualJumpBinding(), pendingManualJumpPress) ||
+         hoverPlaneLowerBindingHeld(hoverPlaneLowerBinding()));
 
     if (g_goronMaskInputBlockFrames > 0) {
         const u8 maskButtonMask = static_cast<u8>(
@@ -1709,6 +1713,9 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
                                                    "Goron Mask removed");
         break;
     case kGiantMaskItem:
+        if (hoverMovementInput) {
+            break;
+        }
         if (alink->checkWolf()) {
             svc_log->warn(mod_ctx, "Giant's Mask is only available to human Link");
             break;
