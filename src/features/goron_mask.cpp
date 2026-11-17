@@ -9,6 +9,8 @@ constexpr f32 kGoronRollSpeedMultiplier = 4.0f;
 constexpr f32 kGoronRollAttackRadius = 60.0f;
 constexpr int kGoronRollAttackDamage = 2;
 
+bool g_startingGoronMaskRoll = false;
+
 bool goron_mask_active_for_player(daAlink_c* player) {
     return g_goronMaskActive && player != nullptr && !player->checkWolf();
 }
@@ -85,7 +87,29 @@ bool start_goron_mask_roll(daAlink_c* player) {
         return false;
     }
 
-    player->procFrontRollInit();
+    const bool previousItemTrigger =
+        (player->mItemTrigger & daAlink_c::BTN_B) != 0;
+    const bool previousItemButton =
+        (player->mItemButton & daAlink_c::BTN_B) != 0;
+    player->mItemTrigger |= daAlink_c::BTN_B;
+    player->mItemButton |= daAlink_c::BTN_B;
+    g_startingGoronMaskRoll = true;
+    const int rollStarted = player->procFrontRollInit();
+    g_startingGoronMaskRoll = false;
+    if (previousItemTrigger) {
+        player->mItemTrigger |= daAlink_c::BTN_B;
+    } else {
+        player->mItemTrigger &= static_cast<u8>(~daAlink_c::BTN_B);
+    }
+    if (previousItemButton) {
+        player->mItemButton |= daAlink_c::BTN_B;
+    } else {
+        player->mItemButton &= static_cast<u8>(~daAlink_c::BTN_B);
+    }
+    if (rollStarted == 0) {
+        return false;
+    }
+
     player->mUnderFrameCtrl[0].setRate(
         player->mUnderFrameCtrl[0].getRate() * kGoronRollSpeedMultiplier);
     player->mNormalSpeed *= kGoronRollSpeedMultiplier;
@@ -139,7 +163,8 @@ HookAction suppress_goron_mask_sword_trigger(
     ModContext*, void* args, void* retval, void*)
 {
     auto* player = mods::arg<daAlink_c*>(args, 0);
-    if (mods::arg<u8>(args, 1) == daAlink_c::BTN_B &&
+    if (!g_startingGoronMaskRoll &&
+        mods::arg<u8>(args, 1) == daAlink_c::BTN_B &&
         goron_mask_active_for_player(player))
     {
         *static_cast<BOOL*>(retval) = false;
@@ -152,7 +177,8 @@ HookAction suppress_goron_mask_sword_button(
     ModContext*, void* args, void* retval, void*)
 {
     auto* player = mods::arg<daAlink_c*>(args, 0);
-    if (mods::arg<u8>(args, 1) == daAlink_c::BTN_B &&
+    if (!g_startingGoronMaskRoll &&
+        mods::arg<u8>(args, 1) == daAlink_c::BTN_B &&
         goron_mask_active_for_player(player))
     {
         *static_cast<BOOL*>(retval) = false;
