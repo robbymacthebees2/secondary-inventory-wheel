@@ -871,7 +871,7 @@ bool update_hover_plane_lowering(daAlink_c* alink, bool pendingJumpPress) {
 
     f32 vanillaJumpHeight = 0.0f;
     if (!get_vanilla_standing_jump_height(alink, &vanillaJumpHeight)) {
-        return false;
+        return pressed || raisePressed;
     }
 
     if (raisePressed) {
@@ -897,6 +897,7 @@ bool update_hover_plane_lowering(daAlink_c* alink, bool pendingJumpPress) {
                 ~manual_jump_binding_button_mask(jumpBinding));
             return true;
         }
+        return true;
     }
 
     if (!pressed) {
@@ -932,7 +933,7 @@ bool update_hover_plane_lowering(daAlink_c* alink, bool pendingJumpPress) {
     g_hoverLandingSequenceActive = false;
     g_hoverAtSurface = false;
     g_hoverLandingFrames = 0;
-    return false;
+    return true;
 }
 
 bool manual_jump_ground_action_ready(const daAlink_c* alink) {
@@ -1544,6 +1545,13 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     }
 
     if (try_manual_jump(alink, pendingManualJumpPress)) {
+        return;
+    }
+    if (g_hoverBootsEquipped &&
+        manual_jump_binding_triggered(
+            manualJumpBinding(), pendingManualJumpPress))
+    {
+        g_secondaryItemInputHandled = true;
         return;
     }
 
