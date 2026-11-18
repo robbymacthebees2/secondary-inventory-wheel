@@ -351,7 +351,7 @@ void skins_outfit_list(int index, std::vector<std::string>& out);
 
 std::string skins_folder_path();
 
-const char* const kCoopShippedModelsVersion = "2.0.11";
+const char* const kCoopShippedModelsVersion = "2.0.16";
 
 void skins_cycle_update();
 

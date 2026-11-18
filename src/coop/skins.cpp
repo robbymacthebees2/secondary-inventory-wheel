@@ -377,9 +377,9 @@ const char* const kOotStyleEponaName = "OOT Style Epona";
 const char* const kTwilightEponaName = "Twilight Epona";
 const char* const kNightwalkerEponaName = "Nightwalker Epona";
 const char* const kN64HoTName = "N64 HoT";
+const char* const kYoungLinkSkinName = "Young Link";
 const char* const kYoungLinkSkinNames[] = {
-    "Young Link",
-    "Young Link Clothed",
+    kYoungLinkSkinName,
     "Young Link Face Skin",
     "Young Link Face Only",
 };
@@ -1594,7 +1594,33 @@ void unpack_shipped_models() {
         svc_resource->free(mod_ctx, &file);
     }
 
-    const int removed = failed == 0 ? clean_shipped_leftovers(dir, shipped, shippedFolders) : 0;
+    int removed = failed == 0 ? clean_shipped_leftovers(dir, shipped, shippedFolders) : 0;
+    if (failed == 0) {
+        static const char* const kRemovedShippedFiles[] = {
+            "Hero of Termina/model.txt",
+            "Hero of Termina/magic/body.bmd",
+            "Hero of Termina/magic/face.bmd",
+            "Hero of Termina/magic/head.bmd",
+        };
+        for (const char* rel : kRemovedShippedFiles) {
+            const std::filesystem::path stale = dir / std::filesystem::u8path(rel);
+            std::error_code ec;
+            if (std::filesystem::remove(stale, ec)) {
+                ++removed;
+                coop_log::info("coop_mod: [SKIN] removed leftover '{}'", path_text(stale));
+            }
+        }
+        const std::filesystem::path oldMagicDir = dir / "Hero of Termina" / "magic";
+        const std::filesystem::path oldSkinDir = dir / "Hero of Termina";
+        std::error_code ec;
+        if (std::filesystem::is_empty(oldMagicDir, ec) && !ec) {
+            std::filesystem::remove(oldMagicDir, ec);
+        }
+        ec.clear();
+        if (std::filesystem::is_empty(oldSkinDir, ec) && !ec) {
+            std::filesystem::remove(oldSkinDir, ec);
+        }
+    }
 
     std::ofstream(marker, std::ios::trunc) << stamp << "\n";
     coop_log::info(
@@ -1882,6 +1908,17 @@ void skins_local_choices(SkinChoices* out) {
 std::string preset_value(const char* name, int slot) {
     const std::string value = name != nullptr ? name : "";
     if (value == kN64HoTName && !skins_covers_slot(value.c_str(), slot)) return "";
+    if (slot >= kSkinChoiceFirstItem) {
+        if (value == kYoungLinkSkinName &&
+            (slot == kSkinChoiceWoodSword || slot == kSkinChoiceOrdonShield))
+        {
+            return kN64HoTName;
+        }
+        return value == kN64HoTName ? value : "";
+    }
+    if (value == kYoungLinkSkinName && slot == kSkinChoiceZora) {
+        return "Zora Link (Alt Eyes)";
+    }
     if (slot == kSkinChoiceOrdon && value == "Dark Link") {
         return kSubiLinkSkinName;
     }
@@ -1900,11 +1937,10 @@ bool skins_all_same(const char* name) {
     if (eponaSkin != expectedEpona) return false;
     for (int i = 0; i < kSkinChoiceCount; ++i) {
         if (i >= kSkinChoiceFirstItem) {
-            const std::string expected = n64HoT ? preset_value(name, i) : "";
-            if (skins_local_slot(i) != expected) return false;
-            continue;
+            if (skins_local_slot(i) != preset_value(name, i)) return false;
+        } else if (skins_local_slot(i) != preset_value(name, i)) {
+            return false;
         }
-        if (skins_local_slot(i) != preset_value(name, i)) return false;
     }
     return true;
 }
@@ -1937,7 +1973,7 @@ void skins_set_local_all(const char* name) {
 
         const bool piece = i >= kSkinChoiceFirstItem;
         const std::string value = preset_value(name, i);
-        const bool selected = name != nullptr && (!piece || n64HoT);
+        const bool selected = name != nullptr && (!piece || !value.empty());
         svc_config->set_string(
             mod_ctx, s_slotVar[i], selected ? value.c_str() : "");
     }

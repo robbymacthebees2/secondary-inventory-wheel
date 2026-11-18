@@ -275,6 +275,11 @@ void set_hover_boots_enabled(daAlink_c* alink, bool enabled) {
         }
     } else {
         g_hoverBootsEquipped = true;
+        if (g_giantMaskActive) {
+            g_giantMaskActive = false;
+            svc_log->warn(
+                mod_ctx, "Giant's Mask disabled because Hover Boots are active");
+        }
         g_hoverGroundHeight = alink->current.pos.y;
         g_hoverGroundHeightValid = true;
         g_hoverLandingSequenceActive = false;

@@ -1,10 +1,4 @@
 // Ported from Fire Arrows Standalone v1.2.2 by Baxlek with permission.
-namespace fire_sphere {
-void apply_blast(daAlink_c* player);
-void apply_lantern_blast(daAlink_c* player);
-void clear_lantern_blast();
-}
-
 namespace fire_arrows {
 
 using IsMixItemOn = ::RingIsMixItemOn;
@@ -326,15 +320,103 @@ static constexpr int MAX_BURNING_ACTORS = 8;
 static BurningActor g_burningActors[MAX_BURNING_ACTORS];
 static int g_nextBurningActorSlot = 0;
 static bool g_lanternFlameEmittedThisSwing = false;
+static bool g_lanternFlameDamagedThisSwing = false;
 
 static constexpr f32 EYEPOS_MAX_PLAUSIBLE_DIST = 300.0f;
 static constexpr f32 FALLBACK_ANCHOR_HEIGHT = 40.0f;
+static constexpr u8 LANTERN_FLAME_DAMAGE = 1;
+static constexpr f32 LANTERN_FLAME_KNOCKBACK = 12.0f;
+
+static const dCcD_SrcSph kLanternDamageSphereSource = {
+    {
+        {0, {{AT_TYPE_NORMAL_SWORD, 3, 0x1A}, {0xD8FBFDFF, 5}, 0x73}},
+        {dCcD_SE_NONE, 3, 1, dCcD_MTRL_FIRE, {1}},
+        {dCcD_SE_NONE, 6, 0, 0, {0}},
+        {0},
+    },
+    {{{0.0f, 0.0f, 0.0f}, 40.0f}},
+};
+
+static const dCcD_SrcSph kLanternWorldSphereSource = {
+    {
+        {0, {{AT_TYPE_LANTERN_SWING, 3, 0x1A}, {0xD8FBFDFF, 5}, 0x73}},
+        {dCcD_SE_NONE, 3, 1, dCcD_MTRL_FIRE, {1}},
+        {dCcD_SE_NONE, 6, 0, 0, {0}},
+        {0},
+    },
+    {{{0.0f, 0.0f, 0.0f}, 40.0f}},
+};
 
 static cXyz getBurnAnchorPos(fopAc_ac_c* actor) {
     if (actor->eyePos.abs(actor->current.pos) <= EYEPOS_MAX_PLAUSIBLE_DIST) {
         return actor->eyePos;
     }
     return actor->current.pos + cXyz(0.0f, FALLBACK_ANCHOR_HEIGHT, 0.0f);
+}
+
+static dCcD_Stts g_lanternDamageStts{};
+static dCcD_Sph g_lanternDamageSphere{};
+static fpc_ProcID g_lanternDamageSourceOwnerId = fpcM_ERROR_PROCESS_ID_e;
+static dCcD_Stts g_lanternEnvironmentStts{};
+static dCcD_Sph g_lanternEnvironmentSphere{};
+static fpc_ProcID g_lanternEnvironmentOwnerId = fpcM_ERROR_PROCESS_ID_e;
+
+static void registerLanternAttack(daAlink_c* player) {
+    dCcS* collisionServer = dComIfG_Ccsp();
+    if (player == nullptr || collisionServer == nullptr) {
+        return;
+    }
+
+    const fpc_ProcID playerId = fopAcM_GetID(player);
+    if (g_lanternDamageSourceOwnerId != playerId) {
+        g_lanternDamageStts.Init(0xFF, 0xFF, player);
+        g_lanternDamageSphere.Set(kLanternDamageSphereSource);
+        g_lanternDamageSphere.SetStts(&g_lanternDamageStts);
+        g_lanternDamageSourceOwnerId = playerId;
+    }
+    if (g_lanternEnvironmentOwnerId != playerId) {
+        g_lanternEnvironmentStts.Init(0xFF, 0xFF, player);
+        g_lanternEnvironmentSphere.Set(kLanternWorldSphereSource);
+        g_lanternEnvironmentSphere.SetStts(&g_lanternEnvironmentStts);
+        g_lanternEnvironmentOwnerId = playerId;
+    }
+
+    cXyz center = player->current.pos;
+    center.y += LANTERN_FLAME_HEIGHT;
+    g_lanternDamageSphere.SetAtType(AT_TYPE_NORMAL_SWORD);
+    g_lanternDamageSphere.SetAtAtp(LANTERN_FLAME_DAMAGE);
+    g_lanternDamageSphere.SetAtMtrl(dCcD_MTRL_FIRE);
+    g_lanternDamageSphere.SetAtHitMark(1);
+    g_lanternDamageSphere.SetC(center);
+    g_lanternDamageSphere.SetR(LANTERN_ATTACK_RADIUS);
+    cXyz knockback(0.0f, LANTERN_FLAME_KNOCKBACK, 0.0f);
+    g_lanternDamageSphere.SetAtVec(knockback);
+    if (g_lanternDamageSphere.ChkAtHit()) {
+        g_lanternFlameDamagedThisSwing = true;
+    }
+    if (g_lanternFlameDamagedThisSwing) {
+        g_lanternDamageSphere.OffAtSetBit();
+    } else {
+        g_lanternDamageSphere.OnAtSetBit();
+        collisionServer->Set(&g_lanternDamageSphere);
+        collisionServer->SetMass(&g_lanternDamageSphere, 1);
+    }
+
+    g_lanternEnvironmentSphere.SetAtType(AT_TYPE_LANTERN_SWING);
+    g_lanternEnvironmentSphere.SetAtAtp(LANTERN_FLAME_DAMAGE);
+    g_lanternEnvironmentSphere.SetAtMtrl(dCcD_MTRL_FIRE);
+    g_lanternEnvironmentSphere.SetC(center);
+    g_lanternEnvironmentSphere.SetR(LANTERN_ATTACK_RADIUS);
+    g_lanternEnvironmentSphere.ResetAtHit();
+    g_lanternEnvironmentSphere.OffAtVsEnemyBit();
+    g_lanternEnvironmentSphere.OnAtSetBit();
+    collisionServer->Set(&g_lanternEnvironmentSphere);
+    collisionServer->SetMass(&g_lanternEnvironmentSphere, 1);
+}
+
+static void clearLanternAttack() {
+    g_lanternDamageSphere.OffAtSetBit();
+    g_lanternEnvironmentSphere.OffAtSetBit();
 }
 
 static void igniteBurningActor(fopAc_ac_c* actor) {
@@ -411,33 +493,30 @@ static void updateLanternIgnition(daAlink_c* alink) {
         !alink->checkKandelaarSwing(1))
     {
         g_lanternFlameEmittedThisSwing = false;
-        fire_sphere::clear_lantern_blast();
+        g_lanternFlameDamagedThisSwing = false;
+        clearLanternAttack();
         return;
     }
 
     const f32 swingFrame = alink->mUnderFrameCtrl[0].getFrame();
     if (swingFrame > alink->field_0x3480) {
         g_lanternFlameEmittedThisSwing = false;
-        fire_sphere::clear_lantern_blast();
+        g_lanternFlameDamagedThisSwing = false;
+        clearLanternAttack();
         return;
     }
     if (dComIfGs_getOil() == 0 || swingFrame < alink->field_0x347c) {
-        fire_sphere::clear_lantern_blast();
+        clearLanternAttack();
         return;
     }
 
+    registerLanternAttack(alink);
+
     if (!g_lanternFlameEmittedThisSwing) {
+        g_lanternDamageSphere.ResetAtHit();
+        g_lanternFlameDamagedThisSwing = false;
         emitLanternFireFlame(alink);
         g_lanternFlameEmittedThisSwing = true;
-    }
-
-    fire_sphere::apply_lantern_blast(alink);
-
-    if (alink->mAtSph.ChkAtHit()) {
-        fopAc_ac_c* hitActor = alink->mAtSph.GetAtHitAc();
-        if (hitActor != nullptr && fopAcM_GetGroup(hitActor) == fopAc_ENEMY_e) {
-            igniteBurningActor(hitActor);
-        }
     }
 
     cXyz center = alink->current.pos;

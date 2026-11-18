@@ -819,7 +819,6 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(PlayerExecute, enable_goron_roll_attack);
     ADD_POST(PlayerExecute, fire_arrows::update_lantern_ignition_after_player_execute);
     ADD_POST(PlayerExecute, fire_sphere::update);
-    ADD_PRE(PlayerExecute, fire_sphere::restore_player_attack);
     ADD_POST(GiantMaskSetMatrix, apply_giant_mask_player_scale);
     ADD_PRE(PlayerExecute, update_ice_arrow_freezes);
     ADD_POST(PlayerExecute, process_shield_surf_transition);
@@ -933,7 +932,8 @@ bool wheel_is_dark_link_active() {
 
 bool wheel_is_giant_mask_active() {
     const auto* link = daAlink_getAlinkActorClass();
-    return g_giantMaskActive && link != nullptr && !link->checkWolf();
+    return g_giantMaskActive && !g_hoverBootsEquipped && link != nullptr &&
+        !link->checkWolf();
 }
 
 uint16_t wheel_pvp_sword_damage_percent(u32 attackType) {
