@@ -173,6 +173,7 @@ void finish_run_off_ledge_fall(ModContext*, void* args, void*, void*) {
 }
 
 bool g_manualJumpPendingPress = false;
+bool g_manualJumpInputLatchedThisFrame = false;
 bool g_manualJumpLeftStickWasHeld = false;
 bool g_manualJumpRightStickWasHeld = false;
 bool g_manualJumpLeftStickTriggered = false;
@@ -181,6 +182,8 @@ bool g_manualJumpLeftBumperWasHeld = false;
 bool g_manualJumpLeftBumperTriggered = false;
 bool g_droppingBomblingFromGlide = false;
 bool g_warnedMissingNativeButtonPoller = false;
+
+bool manual_jump_binding_held(int64_t binding);
 
 bool native_left_bumper_held() {
 #if TARGET_PC
@@ -289,6 +292,7 @@ bool z_slot_midna_left_triggered() {
 
 void reset_manual_jump_input_state() {
     g_manualJumpPendingPress = false;
+    g_manualJumpInputLatchedThisFrame = false;
     g_manualJumpLeftStickWasHeld = false;
     g_manualJumpRightStickWasHeld = false;
     g_manualJumpLeftStickTriggered = false;
@@ -358,6 +362,7 @@ void update_manual_jump_button_input(ModContext*, void*, void*, void*) {
     const bool blocked = dComIfGp_isPauseFlag() || documentVisible;
     if (blocked) {
         g_manualJumpPendingPress = false;
+        g_manualJumpInputLatchedThisFrame = false;
         g_manualJumpLeftStickWasHeld = leftStickHeld;
         g_manualJumpRightStickWasHeld = rightStickHeld;
         g_manualJumpLeftBumperWasHeld = leftBumperHeld;
@@ -371,7 +376,8 @@ void update_manual_jump_button_input(ModContext*, void*, void*, void*) {
     g_manualJumpRightStickTriggered = rightStickHeld && !g_manualJumpRightStickWasHeld;
     g_manualJumpLeftBumperTriggered = leftBumperPressed;
     bool selectedBindingPressed = false;
-    switch (manualJumpBinding()) {
+    const int64_t binding = manualJumpBinding();
+    switch (binding) {
     case 0:
         selectedBindingPressed = rPressed;
         break;
@@ -388,6 +394,11 @@ void update_manual_jump_button_input(ModContext*, void*, void*, void*) {
         break;
     }
     g_manualJumpPendingPress = g_manualJumpPendingPress || selectedBindingPressed;
+    if (selectedBindingPressed) {
+        g_manualJumpInputLatchedThisFrame = true;
+    } else if (!g_manualJumpPendingPress && !manual_jump_binding_held(binding)) {
+        g_manualJumpInputLatchedThisFrame = false;
+    }
     g_manualJumpLeftStickWasHeld = leftStickHeld;
     g_manualJumpRightStickWasHeld = rightStickHeld;
     g_manualJumpLeftBumperWasHeld = leftBumperHeld;
@@ -1498,8 +1509,14 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     if (alink == nullptr) {
         return;
     }
+    const u8 itemTriggerAtEntry = alink->mItemTrigger;
+    const u8 itemButtonAtEntry = alink->mItemButton;
     const bool pendingManualJumpPress = g_manualJumpPendingPress;
     g_manualJumpPendingPress = false;
+    g_manualJumpInputLatchedThisFrame =
+        g_manualJumpInputLatchedThisFrame || pendingManualJumpPress ||
+        manual_jump_binding_triggered(
+            manualJumpBinding(), pendingManualJumpPress);
     const bool hoverMovementInput = g_hoverBootsEquipped &&
         (manual_jump_binding_triggered(
              manualJumpBinding(), pendingManualJumpPress) ||
@@ -1551,10 +1568,7 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     if (try_manual_jump(alink, pendingManualJumpPress)) {
         return;
     }
-    if (g_hoverBootsEquipped &&
-        manual_jump_binding_triggered(
-            manualJumpBinding(), pendingManualJumpPress))
-    {
+    if (g_hoverBootsEquipped && g_manualJumpInputLatchedThisFrame) {
         g_secondaryItemInputHandled = true;
         return;
     }
@@ -1713,7 +1727,35 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
                                                    "Goron Mask removed");
         break;
     case kGiantMaskItem:
-        if (hoverMovementInput) {
+        {
+            char diagnostic[256]{};
+            std::snprintf(
+                diagnostic, sizeof(diagnostic),
+                "Giant Mask input: button=%d slot=%02X item=%02X local=%d "
+                "proc=%d hover=%d jump=%lld held=%d latched=%d pending=%d "
+                "owner=%d trig=%d%d%d item=%02X/%02X",
+                button, g_secondarySelectedItems[button], itemId,
+                alink == daAlink_getAlinkActorClass(), alink->mProcID,
+                g_hoverBootsEquipped, static_cast<long long>(manualJumpBinding()),
+                manual_jump_binding_held(manualJumpBinding()),
+                g_manualJumpInputLatchedThisFrame, pendingManualJumpPress,
+                g_manualJumpOwner == alink, xTriggered, yTriggered, zTriggered,
+                itemTriggerAtEntry, itemButtonAtEntry);
+            svc_log->warn(mod_ctx, diagnostic);
+        }
+        if (g_hoverBootsEquipped && !g_giantMaskActive) {
+            svc_log->warn(
+                mod_ctx, "Giant's Mask cannot be activated while Hover Boots are active");
+            break;
+        }
+        if (hoverMovementInput ||
+            (g_hoverBootsEquipped &&
+             (g_manualJumpInputLatchedThisFrame ||
+              manual_jump_binding_held(manualJumpBinding()) ||
+              alink->mProcID == daAlink_c::PROC_AUTO_JUMP ||
+              (g_manualJumpOwner == alink &&
+               alink->mProcID == daAlink_c::PROC_FALL))))
+        {
             break;
         }
         if (alink->checkWolf()) {

@@ -403,7 +403,9 @@ void apply_mask_damage_multiplier(ModContext*, void* args, void*, void*) {
     int64_t percent = 100;
     if (g_darkLinkVisualActive) {
         percent = darkLinkDamageMultiplierPercent();
-    } else if (g_giantMaskActive && !link->checkWolf()) {
+    } else if (g_giantMaskActive && !g_hoverBootsEquipped &&
+               !link->checkWolf())
+    {
         percent = giantMaskDamageMultiplierPercent();
     } else {
         return;

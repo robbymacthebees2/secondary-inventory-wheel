@@ -674,7 +674,7 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.kind = UI_CONTROL_TOGGLE;
     control.label = "Lantern flame";
     control.help_rml =
-        "Each Lantern swing uses Din's Fire's attack, including its fire damage and knockback. "
+        "Each Lantern swing independently deals fire damage and knockback to nearby enemies. "
         "Nearby enemies caught by the flame burn for five seconds. Off by default.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_lanternIgnitesEnemies;

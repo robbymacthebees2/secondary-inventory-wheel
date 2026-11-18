@@ -7,13 +7,28 @@ constexpr f32 kGiantMaskFaceOffsetY = -8.0f;
 constexpr s16 kGiantMaskFaceRotationY = 0x4000;
 constexpr f32 kGiantMaskPlayerScale = 2.0f;
 
+bool g_giantMaskObservedActive = false;
+
 bool giant_mask_active_for_player(const daAlink_c* player) {
     return player != nullptr && player == daAlink_getAlinkActorClass() &&
-           g_giantMaskActive && !player->checkWolf();
+           g_giantMaskActive && !g_hoverBootsEquipped && !player->checkWolf();
 }
 
 void update_giant_mask_resource() {
-    if (!g_giantMaskActive || g_giantMaskArchiveLoaded || g_giantMaskLoadFailed) {
+    if (!g_giantMaskActive || g_giantMaskLoadFailed) {
+        return;
+    }
+    if (g_giantMaskModel != nullptr) {
+        g_giantMaskArchiveLoaded = true;
+        return;
+    }
+    if (g_giantMaskArchiveLoaded) {
+        return;
+    }
+    if (g_giantMaskHeap != nullptr) {
+        svc_log->error(
+            mod_ctx, "Giant's Mask heap exists without its model; refusing another allocation");
+        g_giantMaskLoadFailed = true;
         return;
     }
 
@@ -56,8 +71,21 @@ void update_giant_mask_resource() {
 
 void update_giant_mask() {
     auto* player = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
-    if (player != nullptr && player->checkWolf()) {
+    if (g_hoverBootsEquipped ||
+        (player != nullptr && player->checkWolf()))
+    {
         g_giantMaskActive = false;
+    }
+    if (g_giantMaskActive != g_giantMaskObservedActive) {
+        char diagnostic[160]{};
+        std::snprintf(
+            diagnostic, sizeof(diagnostic),
+            "Giant's Mask state changed: %d->%d proc=%d hover=%d model=%p heap=%p",
+            g_giantMaskObservedActive, g_giantMaskActive,
+            player != nullptr ? player->mProcID : -1,
+            g_hoverBootsEquipped, g_giantMaskModel, g_giantMaskHeap);
+        svc_log->warn(mod_ctx, diagnostic);
+        g_giantMaskObservedActive = g_giantMaskActive;
     }
     if (g_giantMaskActive) {
         update_giant_mask_resource();
