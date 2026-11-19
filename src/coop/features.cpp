@@ -2318,6 +2318,37 @@ bool should_log_breadcrumb(uint8_t type) {
     }
 }
 
+namespace {
+
+void apply_song_of_healing_locally() {
+    auto* alink = daAlink_getAlinkActorClass();
+    if (alink == nullptr || alink->checkDeadHP()) {
+        return;
+    }
+
+    const uint16_t life = dComIfGs_getLife();
+    const uint16_t maxLifeGauge = dComIfGs_getMaxLifeGauge();
+    if (life >= maxLifeGauge) {
+        return;
+    }
+
+    const float missingLife = static_cast<float>(maxLifeGauge - life);
+    const float pendingLife = dComIfGp_getItemLifeCount();
+    const float pendingHeal = pendingLife > 0.0f ? pendingLife : 0.0f;
+    if (missingLife > pendingHeal) {
+        dComIfGp_setItemLifeCount(missingLife - pendingHeal, 1);
+    }
+}
+
+}
+
+void coop_song_of_healing_heal_room() {
+    apply_song_of_healing_locally();
+    if (coop_net_connected()) {
+        coop_net_send(kMsgSongOfHealing, nullptr, 0);
+    }
+}
+
 void features_on_message(uint8_t type, const uint8_t* payload, size_t size, uint8_t from) {
     if (should_log_breadcrumb(type)) {
         char line[64];
@@ -2361,6 +2392,9 @@ void features_on_message(uint8_t type, const uint8_t* payload, size_t size, uint
         break;
     case kMsgItem:
         if (size >= sizeof(MsgItem)) apply_remote_item(payload[0], from);
+        break;
+    case kMsgSongOfHealing:
+        if (size == 0) apply_song_of_healing_locally();
         break;
     case kMsgBottle:
         if (size >= sizeof(MsgBottle)) apply_remote_bottle(payload[0], payload[1], from);

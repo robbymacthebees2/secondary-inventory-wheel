@@ -1573,13 +1573,19 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         return;
     }
 
-    if (alink->checkWolf()) {
+    const bool wolfSongAssigned = zItemSlotEnabled() &&
+        secondaryItemAssigned(kZItemSelectIndex) &&
+        secondaryItemIdForSlot(
+            g_secondarySelectedItems[kZItemSelectIndex]) == kSongOfHealingItem;
+    const bool wolfLink = alink->checkWolf();
+    if (wolfLink && !wolfSongAssigned) {
         return;
     }
 
-    const bool xTriggered = mDoCPd_c::getTrigX(PAD_1) != 0;
-    const bool yTriggered = mDoCPd_c::getTrigY(PAD_1) != 0;
-    const bool zTriggered = zItemSlotEnabled() && mDoCPd_c::getTrigZ(PAD_1) != 0;
+    const bool xTriggered = !wolfLink && mDoCPd_c::getTrigX(PAD_1) != 0;
+    const bool yTriggered = !wolfLink && mDoCPd_c::getTrigY(PAD_1) != 0;
+    const bool zTriggered = zItemSlotEnabled() &&
+        (!wolfLink || wolfSongAssigned) && mDoCPd_c::getTrigZ(PAD_1) != 0;
     if (!xTriggered && !yTriggered && !zTriggered) {
         return;
     }
@@ -1791,6 +1797,14 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
         break;
     case kFireSphereItem:
         begin_fire_sphere_use(alink);
+        break;
+    case kNayruLoveItem:
+        begin_nayru_love_use(alink);
+        break;
+    case kSongOfHealingItem:
+        if (button == kZItemSelectIndex) {
+            request_song_of_healing(alink);
+        }
         break;
     default:
         break;

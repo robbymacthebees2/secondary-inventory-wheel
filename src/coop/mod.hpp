@@ -108,6 +108,7 @@ void coop_net_join();
 void coop_net_disconnect();
 
 void coop_net_send(uint8_t type, const void* payload, size_t size);
+void coop_song_of_healing_heal_room();
 
 void coop_net_send_to(uint8_t playerId, uint8_t type, const void* payload, size_t size);
 
