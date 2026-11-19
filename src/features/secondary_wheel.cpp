@@ -822,6 +822,8 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
         const bool iceArrowSlot = is_ice_arrow_slot(ring);
         const bool lightArrowSlot = is_light_arrow_slot(ring);
         const bool bowArrowSlot = iceArrowSlot || lightArrowSlot;
+        const bool songOfHealingSlot =
+            secondaryItemIdForSlot(selected) == kSongOfHealingItem;
         auto* player = daAlink_getAlinkActorClass();
         if (ring->mStatus == dMenu_Ring_c::STATUS_WAIT && bowArrowSlot &&
             mDoCPd_c::getTrigR(PAD_1) != 0 &&
@@ -839,7 +841,9 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
                 selectingArrow ? Z2SE_SY_ITEM_COMBINE_ON : Z2SE_SY_ITEM_COMBINE_OFF,
                 NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
         }
-        if (!bowArrowSlot && mDoCPd_c::getTrigX(PAD_1) != 0) {
+        if (!bowArrowSlot && !songOfHealingSlot &&
+            mDoCPd_c::getTrigX(PAD_1) != 0)
+        {
             g_secondarySelectedItems[0] = selected;
             ring->mXButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(0, secondaryDisplayItemForSlot(selected));
@@ -858,7 +862,9 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
                 g_secondaryItemInputHandled = true;
             }
         }
-        if (!bowArrowSlot && mDoCPd_c::getTrigY(PAD_1) != 0) {
+        if (!bowArrowSlot && !songOfHealingSlot &&
+            mDoCPd_c::getTrigY(PAD_1) != 0)
+        {
             g_secondarySelectedItems[1] = selected;
             ring->mYButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(1, secondaryDisplayItemForSlot(selected));
@@ -1787,7 +1793,9 @@ void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
          g_secondaryIconContext != SecondaryIconContext::GiantMask &&
          g_secondaryIconContext != SecondaryIconContext::ArmosHammer &&
          g_secondaryIconContext != SecondaryIconContext::DekuNut &&
-         g_secondaryIconContext != SecondaryIconContext::DinFire) ||
+         g_secondaryIconContext != SecondaryIconContext::DinFire &&
+         g_secondaryIconContext != SecondaryIconContext::NayruLove &&
+         g_secondaryIconContext != SecondaryIconContext::SongOfHealing) ||
         (g_secondaryIconContext == SecondaryIconContext::LightArrow
              ? mods::arg<u8>(args, 0) != dItemNo_LIGHT_ARROW_e
              : mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e))
@@ -1873,6 +1881,10 @@ const char* secondary_custom_icon_resource(SecondaryIconContext context) {
         return kDekuNutIconResource;
     case SecondaryIconContext::DinFire:
         return kDinFireIconResource;
+    case SecondaryIconContext::NayruLove:
+        return kNayruLoveIconResource;
+    case SecondaryIconContext::SongOfHealing:
+        return kSongOfHealingIconResource;
     case SecondaryIconContext::DarkLink:
         return kDarkLinkIconResource;
     case SecondaryIconContext::HoverBoots:
@@ -1912,7 +1924,9 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
         g_secondaryIconContext != SecondaryIconContext::GiantMask &&
         g_secondaryIconContext != SecondaryIconContext::ArmosHammer &&
         g_secondaryIconContext != SecondaryIconContext::DekuNut &&
-        g_secondaryIconContext != SecondaryIconContext::DinFire)
+        g_secondaryIconContext != SecondaryIconContext::DinFire &&
+        g_secondaryIconContext != SecondaryIconContext::NayruLove &&
+        g_secondaryIconContext != SecondaryIconContext::SongOfHealing)
     {
         mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
         return HOOK_CONTINUE;
@@ -2311,7 +2325,9 @@ void update_z_slot_hud_for_meter(dMeter2Draw_c* meter) {
     {
         return;
     }
-    if (alink != nullptr && alink->checkWolf()) {
+    const bool wolfSongAssigned = assigned &&
+        secondaryItemIdForSlot(assignedSlot) == kSongOfHealingItem;
+    if (alink != nullptr && alink->checkWolf() && !wolfSongAssigned) {
         update_z_slot_ammo_display(meter, dItemNo_NONE_e);
         if (assigned) {
             meter->mpItemR->hide();

@@ -457,6 +457,12 @@ u8 secondaryDisplayItemForId(u8 itemId) {
     if (itemId == kFireSphereItem) {
         return dItemNo_WOOD_STICK_e;
     }
+    if (itemId == kNayruLoveItem) {
+        return dItemNo_WOOD_STICK_e;
+    }
+    if (itemId == kSongOfHealingItem) {
+        return dItemNo_WOOD_STICK_e;
+    }
     if (itemId == kHawkGrassItem || itemId == kHoverBootsItem) {
         return dItemNo_WOOD_STICK_e;
     }
@@ -551,6 +557,18 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
         g_secondarySlots[slotId - kSecondarySlotBase] == kFireSphereItem)
     {
         return SecondaryIconContext::DinFire;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kNayruLoveItem)
+    {
+        return SecondaryIconContext::NayruLove;
+    }
+    if (slotId >= kSecondarySlotBase &&
+        slotId < kSecondarySlotBase + MAX_ITEM_SLOTS &&
+        g_secondarySlots[slotId - kSecondarySlotBase] == kSongOfHealingItem)
+    {
+        return SecondaryIconContext::SongOfHealing;
     }
     return SecondaryIconContext::None;
 }
@@ -711,6 +729,12 @@ const char* secondaryItemNameForSlot(u8 slotId) {
         }
         if (item == kFireSphereItem) {
             return "Din's Fire";
+        }
+        if (item == kNayruLoveItem) {
+            return "Nayru's Love";
+        }
+        if (item == kSongOfHealingItem) {
+            return "Song of Healing";
         }
     }
 

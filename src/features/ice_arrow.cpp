@@ -310,6 +310,157 @@ void set_bow_combo_arrow_type_after_creation(ModContext*, void* args, void*, voi
     }
 }
 
+constexpr u16 kIceArrowPlatformLifetimeFrames = 15 * 30;
+constexpr size_t kIceArrowPlatformCount = 16;
+constexpr f32 kIceArrowPlatformScale = 0.4f;
+
+struct IceArrowWaterPlatform {
+    fpc_ProcID actorId = fpcM_ERROR_PROCESS_ID_e;
+    fpc_ProcID arrowId = fpcM_ERROR_PROCESS_ID_e;
+    u16 framesRemaining = 0;
+};
+
+std::array<IceArrowWaterPlatform, kIceArrowPlatformCount> g_iceArrowWaterPlatforms{};
+
+bool spawn_ice_arrow_water_platform(const cXyz& position, daArrow_c* arrow) {
+    size_t slotIndex = g_iceArrowWaterPlatforms.size();
+    for (size_t i = 0; i < g_iceArrowWaterPlatforms.size(); ++i) {
+        if (g_iceArrowWaterPlatforms[i].actorId == fpcM_ERROR_PROCESS_ID_e &&
+            g_iceArrowWaterPlatforms[i].arrowId == fpcM_ERROR_PROCESS_ID_e)
+        {
+            slotIndex = i;
+            break;
+        }
+    }
+    if (slotIndex == g_iceArrowWaterPlatforms.size()) {
+        svc_log->warn(mod_ctx, "Ice Arrow platform limit reached; wait for one to melt");
+        return false;
+    }
+
+    const csXyz uprightAngle(0, 0, 0);
+    const fpc_ProcID actorId = fopAcM_create(
+        fpcNm_Obj_Ice_s_e, 0u, &position, fopAcM_GetRoomNo(arrow),
+        &uprightAngle, nullptr, -1);
+    if (actorId == fpcM_ERROR_PROCESS_ID_e) {
+        svc_log->error(mod_ctx, "Failed to create Ice Arrow water platform");
+        return false;
+    }
+
+    g_iceArrowWaterPlatforms[slotIndex] = {
+        actorId, fopAcM_GetID(arrow), kIceArrowPlatformLifetimeFrames};
+    return true;
+}
+
+void scale_ice_arrow_water_platform(ModContext*, void* args, void*, void*) {
+    auto* platform = mods::arg<daObjIce_s_c*>(args, 0);
+    if (platform == nullptr || platform->mModel == nullptr) {
+        return;
+    }
+
+    const fpc_ProcID actorId = fopAcM_GetID(platform);
+    const bool isIceArrowPlatform = std::any_of(
+        g_iceArrowWaterPlatforms.begin(), g_iceArrowWaterPlatforms.end(),
+        [actorId](const IceArrowWaterPlatform& entry) {
+            return entry.actorId == actorId;
+        });
+    if (!isIceArrowPlatform) {
+        return;
+    }
+
+    const cXyz platformScale(
+        kIceArrowPlatformScale, kIceArrowPlatformScale,
+        kIceArrowPlatformScale);
+    platform->mModel->setBaseScale(platformScale);
+    platform->field_0x5c8.set(
+        kIceArrowPlatformScale, kIceArrowPlatformScale,
+        kIceArrowPlatformScale);
+    for (size_t row = 0; row < 3; ++row) {
+        for (size_t column = 0; column < 3; ++column) {
+            platform->mBgMtx[row][column] *= kIceArrowPlatformScale;
+        }
+    }
+}
+
+void create_ice_arrow_water_platform_on_execute(
+    ModContext*, void* args, void*, void*)
+{
+    auto* arrow = mods::arg<daArrow_c*>(args, 0);
+    if (arrow == nullptr || arrow->mArrowType != kIceArrowType ||
+        arrow->checkWait())
+    {
+        return;
+    }
+
+    const fpc_ProcID arrowId = fopAcM_GetID(arrow);
+    const bool platformAlreadyCreated = std::any_of(
+        g_iceArrowWaterPlatforms.begin(), g_iceArrowWaterPlatforms.end(),
+        [arrowId](const IceArrowWaterPlatform& platform) {
+            return platform.arrowId == arrowId;
+        });
+    if (platformAlreadyCreated) {
+        return;
+    }
+
+    cXyz waterQuery = arrow->current.pos;
+    if (!fopAcM_wt_c::waterCheck(&waterQuery)) {
+        return;
+    }
+
+    const f32 waterY = fopAcM_wt_c::getWaterY();
+    if (waterQuery.y >= waterY) {
+        return;
+    }
+
+    waterQuery.y = waterY;
+    spawn_ice_arrow_water_platform(waterQuery, arrow);
+}
+
+void update_ice_arrow_water_platforms(ModContext*, void*, void*, void*) {
+    if (dComIfGp_isPauseFlag()) {
+        return;
+    }
+
+    for (IceArrowWaterPlatform& platform : g_iceArrowWaterPlatforms) {
+        if (platform.arrowId != fpcM_ERROR_PROCESS_ID_e &&
+            fopAcM_SearchByID(platform.arrowId) == nullptr)
+        {
+            platform.arrowId = fpcM_ERROR_PROCESS_ID_e;
+        }
+        if (platform.actorId == fpcM_ERROR_PROCESS_ID_e) {
+            if (platform.arrowId == fpcM_ERROR_PROCESS_ID_e) {
+                platform = {};
+            }
+            continue;
+        }
+        fopAc_ac_c* actor = fopAcM_SearchByID(platform.actorId);
+        if (platform.framesRemaining <= 1) {
+            if (actor != nullptr) {
+                fopAcM_delete(actor);
+            }
+            platform.actorId = fpcM_ERROR_PROCESS_ID_e;
+            platform.framesRemaining = 0;
+            if (platform.arrowId == fpcM_ERROR_PROCESS_ID_e) {
+                platform = {};
+            }
+            continue;
+        }
+        --platform.framesRemaining;
+    }
+}
+
+void clear_ice_arrow_water_platforms() {
+    for (IceArrowWaterPlatform& platform : g_iceArrowWaterPlatforms) {
+        if (platform.actorId != fpcM_ERROR_PROCESS_ID_e) {
+            if (fopAc_ac_c* actor = fopAcM_SearchByID(platform.actorId);
+                actor != nullptr)
+            {
+                fopAcM_delete(actor);
+            }
+        }
+        platform = {};
+    }
+}
+
 constexpr u8 kLightArrowLinkHandMarker = 0xA7;
 constexpr int kTrackedLightArrows = 32;
 constexpr f32 kLightArrowLightPower = 250.0f;
@@ -709,6 +860,7 @@ DEFINE_HOOK(&daAlink_c::draw, PlayerDraw);
 DEFINE_HOOK(&daAlink_c::makeArrow, MakeArrow);
 DEFINE_HOOK(&daAlink_c::changeArrowType, ChangeArrowType);
 DEFINE_HOOK(&daArrow_c::setKeepMatrix, ArrowKeepMatrix);
+DEFINE_HOOK(&daObjIce_s_c::Execute, IcePlatformExecute);
 DEFINE_HOOK(&daAlink_c::modelCalc, ModelCalc);
 DEFINE_HOOK(&daArrow_c::atHitCallBack, ArrowAtHitCallBack);
 DEFINE_HOOK(&daArrow_c::draw, ArrowDraw);

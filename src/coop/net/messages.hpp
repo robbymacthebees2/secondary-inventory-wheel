@@ -122,6 +122,7 @@ enum CoopMsgType : uint8_t {
     kMsgCatchUpWant = 77,
     kMsgCatchUp = 78,
     kMsgEponaSkin = 79,
+    kMsgSongOfHealing = 80,
 };
 
 const int kBundleFlags = 16;

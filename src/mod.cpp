@@ -29,6 +29,7 @@
 #include "JSystem/JKernel/JKRExpHeap.h"
 #include "JSystem/JUtility/JUTNameTab.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_arrow.h"
 #include "d/actor/d_a_e_po.h"
 #include "d/actor/d_a_ni.h"
@@ -36,6 +37,7 @@
 #include "d/actor/d_a_spinner.h"
 #include "d/actor/d_a_e_zs.h"
 #include "d/actor/d_a_obj_iceleaf.h"
+#include "d/actor/d_a_obj_ice_s.h"
 #include "d/actor/d_a_npc_chin.h"
 #include "d/d_a_item_static.h"
 #include "d/actor/d_a_boomerang.h"
@@ -69,6 +71,7 @@
 #include "d/d_stage.h"
 #include "d/d_select_cursor.h"
 #include "Z2AudioLib/Z2AudioMgr.h"
+#include "Z2AudioLib/Z2SoundStarter.h"
 #include "Z2AudioLib/Z2SeMgr.h"
 #include "Z2AudioLib/Z2SceneMgr.h"
 #include "Z2AudioLib/Z2Param.h"
@@ -189,6 +192,8 @@ constexpr u8 kGiantMaskItem = 0xF3;
 constexpr u8 kArmosHammerItem = 0xF2;
 constexpr u8 kDekuNutItem = 0xF1;
 constexpr u8 kFireSphereItem = 0xEE;
+constexpr u8 kNayruLoveItem = 0xE8;
+constexpr u8 kSongOfHealingItem = 0xEA;
 constexpr u16 kFireDamagePulseInterval = 15;
 constexpr u8 kFireDamageAmount = 1;
 constexpr u8 kSecondarySlotBase = 0x80;
@@ -215,6 +220,8 @@ constexpr char kGiantMaskIconResource[] = "giants_mask.bti";
 constexpr char kArmosHammerIconResource[] = "armos_hammer.bti";
 constexpr char kDekuNutIconResource[] = "deku_nut.bti";
 constexpr char kDinFireIconResource[] = "din_fire.bti";
+constexpr char kNayruLoveIconResource[] = "nayru_love.bti";
+constexpr char kSongOfHealingIconResource[] = "song_of_healing.bti";
 constexpr char kIceLeafIconResource[] = "ice_leaf.bti";
 constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
@@ -271,6 +278,8 @@ enum class SecondaryIconContext : u8 {
     ArmosHammer,
     DekuNut,
     DinFire,
+    NayruLove,
+    SongOfHealing,
 };
 
 enum class SitActionState : u8 {
@@ -330,6 +339,7 @@ ConfigVarHandle g_sitMusicTrack = 0;
 ConfigVarHandle g_sitHealingEnabled = 0;
 ConfigVarHandle g_disableSpinnerSurfaceBounce = 0;
 ConfigVarHandle g_spinnerAttackAlwaysActive = 0;
+ConfigVarHandle g_nayruLoveCooldownDisabled = 0;
 ConfigVarHandle g_fairyCompanionColor = 0;
 ConfigVarHandle g_fairyCompanionAppearance = 0;
 ConfigVarHandle g_fairyCompanionLight = 0;
@@ -492,6 +502,8 @@ std::array<u8, MAX_ITEM_SLOTS> g_secondarySlots = [] {
     slots[9] = kDekuNutItem;
     slots[10] = kLightArrowItem;
     slots[11] = kFireSphereItem;
+    slots[12] = kNayruLoveItem;
+    slots[13] = kSongOfHealingItem;
     return slots;
 }();
 std::array<u8, MAX_SELECT_ITEM> g_secondarySelectedItems = [] {
@@ -561,6 +573,10 @@ void reset_manual_jump_input_state();
 bool z_slot_midna_left_triggered();
 void begin_deku_nut_use(daAlink_c* alink);
 void begin_fire_sphere_use(daAlink_c* alink);
+void begin_nayru_love_use(daAlink_c* alink);
+void request_song_of_healing(daAlink_c* alink);
+void update_song_of_healing();
+void cancel_song_of_healing();
 void set_goron_tunic_active(bool active);
 namespace fire_arrows {
 ModResult add_settings(UiElementHandle panel);
@@ -594,6 +610,8 @@ void update();
 #include "features/fire_arrows.cpp"
 #include "features/deku_nut.cpp"
 #include "features/fire_sphere.cpp"
+#include "features/nayru_love.cpp"
+#include "features/song_of_healing.cpp"
 #include "features/lens_of_truth.cpp"
 #include "features/truth_mask.cpp"
 #include "features/goron_mask.cpp"
@@ -645,6 +663,7 @@ ModResult install_hooks(ModError* error) {
     using flurry_rush::FlurryColliderSet;
     using flurry_rush::FlurryLinkDamageAction;
     using arrow_damage::ArrowDamageAttackPower;
+    using nayru_love::NayruLoveDamageAction;
 
     ADD_PRE(OpenExplain, suppress_secondary_explain);
     ADD_POST(SetNameString, name_secondary_item);
@@ -712,6 +731,7 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(gale_bomb::GaleBombThrowBoomerang, gale_bomb::attach_bomb_to_boomerang);
     ADD_PRE(FlurryColliderSet, flurry_rush::before_collider_set_callback);
     ADD_PRE(FlurryLinkDamageAction, flurry_rush::before_link_damage_action_callback);
+    ADD_PRE(NayruLoveDamageAction, nayru_love::before_damage_action);
     ADD_PRE(PlayerExecute, flurry_rush::update);
     ADD_POST(ArrowDamageAttackPower, arrow_damage::apply_modifier);
     ADD_PRE(WheelSprintCheckMoveDoAction, defer_sprint_roll_for_window);
@@ -819,6 +839,7 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(PlayerExecute, enable_goron_roll_attack);
     ADD_POST(PlayerExecute, fire_arrows::update_lantern_ignition_after_player_execute);
     ADD_POST(PlayerExecute, fire_sphere::update);
+    ADD_POST(PlayerExecute, nayru_love::update);
     ADD_POST(GiantMaskSetMatrix, apply_giant_mask_player_scale);
     ADD_PRE(PlayerExecute, update_ice_arrow_freezes);
     ADD_POST(PlayerExecute, process_shield_surf_transition);
@@ -863,8 +884,11 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(IceLeafExecute, keep_shield_surf_board_in_ride_mode);
     ADD_PRE(IceLeafDraw, draw_shield_surf_on_native_board);
     ADD_POST(MakeArrow, set_bow_combo_arrow_type_after_creation);
+    ADD_POST(PlayerExecute, update_ice_arrow_water_platforms);
     ADD_PRE(fire_arrows::ArrowExecute, initialize_light_arrow_on_first_execute);
     ADD_POST(fire_arrows::ArrowExecute, update_light_arrow_visual_effects);
+    ADD_POST(fire_arrows::ArrowExecute, create_ice_arrow_water_platform_on_execute);
+    ADD_POST(IcePlatformExecute, scale_ice_arrow_water_platform);
     ADD_POST(PlayerExecute, cleanup_light_arrow_lights);
     ADD_PRE(ArrowKeepMatrix, use_link_hand_for_held_light_arrow);
     ADD_POST(ArrowKeepMatrix, restore_light_arrow_type_after_keep_matrix);
@@ -1532,6 +1556,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
         return result;
     }
 
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "nayruLoveCooldownDisabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_nayruLoveCooldownDisabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Nayru's Love cooldown setting");
+        return result;
+    }
+
     int64_t sitMusicTrack = 0;
     result = svc_config->get_int(mod_ctx, g_sitMusicTrack, &sitMusicTrack);
     if (result != MOD_OK) {
@@ -1643,6 +1677,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_ice_keese_resource();
     update_spawned_hawk_cleanup();
     update_lens_of_truth_poes();
+    update_song_of_healing();
     update_truth_mask_resource();
     update_fairy_companion();
     update_goron_mask();
@@ -1657,9 +1692,11 @@ MOD_EXPORT ModResult mod_update(ModError*) {
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    cancel_song_of_healing();
     flurry_rush::shutdown();
     enemy_spawner::shutdown();
     oot_hearts::shutdown();
+    clear_ice_arrow_water_platforms();
     bow_aim::stop_bow_bullet_time();
     shutdown_fairy_companion();
     g_revaliGaleVisual.release();
