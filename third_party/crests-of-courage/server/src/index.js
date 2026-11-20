@@ -9,6 +9,8 @@ const CODE_LENGTH = 6;
 const NAME_MIN = 4;
 const NAME_MAX = 24;
 const MAX_JOINERS_WAITING = 8;
+const ROOM_PRESENCE_TIMEOUT_MS = 60_000;
+const ROOM_LEGACY_PRESENCE_TIMEOUT_MS = 10 * 60_000;
 
 const HOST_KEY = /^[0-9a-f]{16,64}$/;
 const GLOBAL_TAG = /^[0-9a-f]{16}$/;
@@ -102,6 +104,11 @@ function send(ws, obj) {
 
 function fail(ws, why, detail) {
   send(ws, { op: "error", why, detail });
+  const info = ws.deserializeAttachment();
+  if (info) {
+    info.expired = true;
+    ws.serializeAttachment(info);
+  }
   try {
     ws.close(4000, why);
   } catch {
@@ -179,7 +186,7 @@ export class Room {
   }
 
   host(except = null) {
-    for (const ws of this.ctx.getWebSockets("host")) {
+    for (const ws of this.sockets("host")) {
       if (ws === except) continue;
       const info = ws.deserializeAttachment() || {};
       if (info.role === "host") return ws;
@@ -189,6 +196,70 @@ export class Room {
 
   getOtherHost(except) {
     return this.host(except);
+  }
+
+  isExpired(info, now = Date.now()) {
+    if (!info || info.expired) return true;
+    const lastSeen = Number.isFinite(info.lastSeen) ? info.lastSeen : now;
+    const timeout = info.hello && !info.heartbeat
+      ? ROOM_LEGACY_PRESENCE_TIMEOUT_MS
+      : ROOM_PRESENCE_TIMEOUT_MS;
+    return now - lastSeen >= timeout;
+  }
+
+  sockets(tag) {
+    return this.ctx.getWebSockets(tag).filter((ws) => !this.isExpired(ws.deserializeAttachment()));
+  }
+
+  async scheduleCleanup() {
+    let next = null;
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      const info = ws.deserializeAttachment();
+      if (!info || info.cleaned) continue;
+      if (info.expired || this.isExpired(info, now)) {
+        next = now + 1;
+        continue;
+      }
+      const lastSeen = Number.isFinite(info.lastSeen) ? info.lastSeen : now;
+      if (info.lastSeen !== lastSeen) {
+        info.lastSeen = lastSeen;
+        ws.serializeAttachment(info);
+      }
+      const timeout = info.hello && !info.heartbeat
+        ? ROOM_LEGACY_PRESENCE_TIMEOUT_MS
+        : ROOM_PRESENCE_TIMEOUT_MS;
+      const expiresAt = lastSeen + timeout;
+      next = next === null ? expiresAt : Math.min(next, expiresAt);
+    }
+    if (next === null) {
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      await this.ctx.storage.setAlarm(Math.max(Date.now() + 1, next));
+    }
+  }
+
+  async pruneExpired() {
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      const info = ws.deserializeAttachment();
+      if (!info || info.cleaned) continue;
+      if (!info.expired && !this.isExpired(info, now)) continue;
+      const role = info.role;
+      info.expired = true;
+      info.expiredRole = role;
+      info.role = "expired";
+      info.cleaned = true;
+      ws.serializeAttachment(info);
+      if (role === "host") {
+        for (const joiner of this.sockets("join")) fail(joiner, "no_room");
+      }
+      try {
+        ws.close(4001, "presence timed out");
+      } catch {
+      }
+    }
+    await this.scheduleCleanup();
   }
 
   takeOver(key) {
@@ -208,6 +279,7 @@ export class Room {
   }
 
   async fetch(request) {
+    await this.pruneExpired();
     const url = new URL(request.url);
     const role = url.pathname === "/host" ? "host" : "join";
     const code = url.searchParams.get("code");
@@ -225,7 +297,15 @@ export class Room {
 
     this.ctx.acceptWebSocket(server, [role]);
 
-    server.serializeAttachment({ role, ip, hello: null, key: HOST_KEY.test(key) ? key : "" });
+    server.serializeAttachment({
+      role,
+      ip,
+      hello: null,
+      key: HOST_KEY.test(key) ? key : "",
+      lastSeen: Date.now(),
+      heartbeat: false,
+      expired: false,
+    });
 
     if (role === "host" && strict && this.getOtherHost(server)) {
 
@@ -234,18 +314,23 @@ export class Room {
     } else if (role === "join") {
       if (!this.host()) {
         fail(server, "no_room");
-      } else if (this.ctx.getWebSockets("join").length > MAX_JOINERS_WAITING) {
+      } else if (this.sockets("join").length > MAX_JOINERS_WAITING) {
         fail(server, "busy");
       } else {
-        send(server, { op: "welcome", ip, stun: await stunServers() });
+        send(server, { op: "welcome", ip, stun: await stunServers(), heartbeat: true });
       }
     } else {
-      send(server, { op: "welcome", code, ip, stun: await stunServers() });
+      send(server, { op: "welcome", code, ip, stun: await stunServers(), heartbeat: true });
     }
+    await this.scheduleCleanup();
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws, message) {
+    const me = ws.deserializeAttachment();
+    if (!me || me.expired) return;
+    me.lastSeen = Date.now();
+    ws.serializeAttachment(me);
     if (typeof message !== "string" || message.length > MAX_MESSAGE_BYTES) {
       return fail(ws, "bad_message");
     }
@@ -255,10 +340,17 @@ export class Room {
     } catch {
       return fail(ws, "bad_message");
     }
-    const me = ws.deserializeAttachment();
+    if (msg.op === "ping") {
+      me.heartbeat = true;
+      ws.serializeAttachment(me);
+      send(ws, { op: "pong" });
+      await this.scheduleCleanup();
+      return;
+    }
 
     if (me.role === "host") {
       if (msg.op === "hello") {
+        me.heartbeat = msg.heartbeat === true || me.heartbeat === true;
         me.hello = {
           v: Number(msg.v) || 0,
           ep: isEndpoint(msg.ep) ? msg.ep : "",
@@ -269,7 +361,7 @@ export class Room {
         };
         ws.serializeAttachment(me);
 
-        for (const j of this.ctx.getWebSockets("join")) {
+        for (const j of this.sockets("join")) {
           const info = j.deserializeAttachment();
           if (info.hello && !info.paired) this.pair(ws, me, j, info);
         }
@@ -277,10 +369,12 @@ export class Room {
         me.hello.upnp = isEndpoint(msg.upnp) ? msg.upnp : "";
         ws.serializeAttachment(me);
       }
+      await this.scheduleCleanup();
       return;
     }
 
     if (msg.op !== "hello" || me.hello) return fail(ws, "bad_message");
+    me.heartbeat = msg.heartbeat === true || me.heartbeat === true;
     me.hello = {
       v: Number(msg.v) || 0,
       ep: isEndpoint(msg.ep) ? msg.ep : "",
@@ -293,6 +387,7 @@ export class Room {
     if (!host) return fail(ws, "no_room");
     const hostInfo = host.deserializeAttachment();
     if (hostInfo.hello) this.pair(host, hostInfo, ws, me);
+    await this.scheduleCleanup();
   }
 
   pair(hostWs, hostInfo, joinWs, joinInfo) {
@@ -329,21 +424,37 @@ export class Room {
     joinWs.serializeAttachment(joinInfo);
   }
 
-  async webSocketClose(ws, code) {
+  async webSocketClose(ws, code, reason = "") {
+    const me = ws.deserializeAttachment();
+    if (me) {
+      me.expired = true;
+      ws.serializeAttachment(me);
+    }
     try {
-      ws.close(code === 1005 ? 1000 : code);
+      if (code >= 1000 && code < 5000 && ![1004, 1005, 1006, 1015].includes(code)) {
+        ws.close(code, reason);
+      } else {
+        ws.close();
+      }
     } catch {
 
     }
-    const me = ws.deserializeAttachment();
-
     if (me && me.role === "host") {
-      for (const j of this.ctx.getWebSockets("join")) fail(j, "no_room");
+      for (const j of this.sockets("join")) fail(j, "no_room");
     }
+    if (me) {
+      me.cleaned = true;
+      ws.serializeAttachment(me);
+    }
+    await this.scheduleCleanup();
   }
 
   async webSocketError(ws) {
     await this.webSocketClose(ws, 1011);
+  }
+
+  async alarm() {
+    await this.pruneExpired();
   }
 }
 
@@ -352,6 +463,7 @@ const GLOBAL_MAX = 400;
 const GLOBAL_AREA = /^[A-Za-z0-9_]{0,8}$/;
 const GLOBAL_AREA_CHANGES = 30;
 const GLOBAL_PRESENCE_TIMEOUT_MS = 60_000;
+const GLOBAL_LEGACY_PRESENCE_TIMEOUT_MS = 10 * 60_000;
 
 const GLOBAL_CHAT_MAX = 100;
 const GLOBAL_CHAT_GAP_MS = 2000;
@@ -529,7 +641,16 @@ export class Global {
   }
 
   all() {
-    return this.ctx.getWebSockets("global");
+    const now = Date.now();
+    return this.ctx.getWebSockets("global").filter((ws) => {
+      const info = ws.deserializeAttachment();
+      if (!info || info.expired || info.removed) return false;
+      const lastSeen = Number.isFinite(info.lastSeen) ? info.lastSeen : now;
+      const timeout = info.hello && !info.heartbeat
+        ? GLOBAL_LEGACY_PRESENCE_TIMEOUT_MS
+        : GLOBAL_PRESENCE_TIMEOUT_MS;
+      return now - lastSeen < timeout;
+    });
   }
 
   byId(id) {
@@ -587,7 +708,7 @@ export class Global {
     }
   }
 
-  part(ws, info) {
+  part(ws, info, reintroduce = true) {
     const freed = [];
     for (const otherId of info.peers || []) {
       const other = this.byId(otherId);
@@ -604,18 +725,28 @@ export class Global {
     for (const other of freed) {
       const theirs = other.deserializeAttachment();
       if (!theirs) continue;
-      this.introduce(other, theirs, ws);
+      if (reintroduce) this.introduce(other, theirs, ws);
       other.serializeAttachment(theirs);
     }
   }
 
-  async removeGlobal(ws, info) {
+  async removeGlobal(ws, info, reintroduce = true) {
+    if (info.removed) return;
     const wasOnline = info.hello;
-    this.part(ws, info);
+    info.expired = true;
     info.hello = false;
+    this.part(ws, info, reintroduce);
+    info.removed = true;
     this.blockedTagsById.delete(info.id);
-    await this.ctx.storage.delete(this.blockedTagsKey(info.id));
     ws.serializeAttachment(info);
+    try {
+      await this.ctx.storage.delete(this.blockedTagsKey(info.id));
+    } catch (error) {
+      console.error(JSON.stringify({
+        message: "failed to delete stale player block data",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
     if (wasOnline) {
       this.broadcastRoster(ws);
       this.broadcastCounts(ws);
@@ -684,7 +815,7 @@ export class Global {
       return fail(ws, "bad_message");
     }
     const info = ws.deserializeAttachment();
-    if (!info) return;
+    if (!info || info.expired || info.removed) return;
     await this.restoreBlockedTags();
     info.lastSeen = Date.now();
     ws.serializeAttachment(info);
@@ -721,11 +852,21 @@ export class Global {
           if (other === ws) continue;
           const theirs = other.deserializeAttachment();
           if (!theirs?.hello || theirs.tag !== info.tag) continue;
-          this.part(other, theirs);
+          theirs.expired = true;
           theirs.hello = false;
           other.serializeAttachment(theirs);
+          this.part(other, theirs);
+          theirs.removed = true;
+          other.serializeAttachment(theirs);
           this.blockedTagsById.delete(theirs.id);
-          await this.ctx.storage.delete(this.blockedTagsKey(theirs.id));
+          try {
+            await this.ctx.storage.delete(this.blockedTagsKey(theirs.id));
+          } catch (error) {
+            console.error(JSON.stringify({
+              message: "failed to delete replaced player block data",
+              error: error instanceof Error ? error.message : String(error),
+            }));
+          }
           try {
             send(other, { op: "superseded" });
             other.close(4001, "replaced by newer session");
@@ -775,14 +916,27 @@ export class Global {
   }
 
   async webSocketClose(ws, code) {
+    const info = ws.deserializeAttachment();
     try {
-      ws.close(code === 1005 ? 1000 : code);
+      if (code >= 1000 && code < 5000 && ![1004, 1005, 1006, 1015].includes(code)) {
+        ws.close(code);
+      } else {
+        ws.close();
+      }
     } catch {
 
     }
-    await this.restoreBlockedTags();
-    const info = ws.deserializeAttachment();
-    if (info) await this.removeGlobal(ws, info);
+    let restored = true;
+    try {
+      await this.restoreBlockedTags();
+    } catch (error) {
+      restored = false;
+      console.error(JSON.stringify({
+        message: "failed to restore player block data while removing session",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+    if (info) await this.removeGlobal(ws, info, restored);
     await this.scheduleCleanup();
   }
 
@@ -793,10 +947,13 @@ export class Global {
   async scheduleCleanup() {
     let next = null;
     const now = Date.now();
-    for (const ws of this.all()) {
+    for (const ws of this.ctx.getWebSockets("global")) {
       const info = ws.deserializeAttachment();
-      if (!info) continue;
-      if (info.hello && !info.heartbeat) continue;
+      if (!info || info.removed) continue;
+      if (info.expired) {
+        next = now + 1;
+        continue;
+      }
       const lastSeen = Number.isFinite(info.lastSeen)
         ? info.lastSeen
         : Number.isFinite(info.window) ? info.window : now;
@@ -804,7 +961,14 @@ export class Global {
         info.lastSeen = lastSeen;
         ws.serializeAttachment(info);
       }
-      const expiresAt = lastSeen + GLOBAL_PRESENCE_TIMEOUT_MS;
+      const timeout = info.hello && !info.heartbeat
+        ? GLOBAL_LEGACY_PRESENCE_TIMEOUT_MS
+        : GLOBAL_PRESENCE_TIMEOUT_MS;
+      if (now - lastSeen >= timeout) {
+        next = now + 1;
+        continue;
+      }
+      const expiresAt = lastSeen + timeout;
       next = next === null ? expiresAt : Math.min(next, expiresAt);
     }
     if (next === null) {
@@ -815,31 +979,34 @@ export class Global {
   }
 
   async pruneExpired() {
-    await this.restoreBlockedTags();
+    let restored = true;
+    try {
+      await this.restoreBlockedTags();
+    } catch (error) {
+      restored = false;
+      console.error(JSON.stringify({
+        message: "failed to restore player block data while pruning sessions",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
     const now = Date.now();
-    let changed = false;
-    for (const ws of this.all()) {
+    for (const ws of this.ctx.getWebSockets("global")) {
       const info = ws.deserializeAttachment();
-      if (!info) continue;
-      if (info.hello && !info.heartbeat) continue;
-      const lastSeen = Number.isFinite(info.lastSeen)
-        ? info.lastSeen
-        : Number.isFinite(info.window) ? info.window : now;
-      if (now - lastSeen < GLOBAL_PRESENCE_TIMEOUT_MS) continue;
-      this.part(ws, info);
-      info.hello = false;
-      this.blockedTagsById.delete(info.id);
-      await this.ctx.storage.delete(this.blockedTagsKey(info.id));
-      ws.serializeAttachment(info);
+      if (!info || info.removed) continue;
+      if (!info.expired) {
+        const lastSeen = Number.isFinite(info.lastSeen)
+          ? info.lastSeen
+          : Number.isFinite(info.window) ? info.window : now;
+        const timeout = info.hello && !info.heartbeat
+          ? GLOBAL_LEGACY_PRESENCE_TIMEOUT_MS
+          : GLOBAL_PRESENCE_TIMEOUT_MS;
+        if (now - lastSeen < timeout) continue;
+      }
+      await this.removeGlobal(ws, info, restored);
       try {
         ws.close(4001, "presence timed out");
       } catch {
       }
-      changed = true;
-    }
-    if (changed) {
-      this.broadcastRoster();
-      this.broadcastCounts();
     }
   }
 

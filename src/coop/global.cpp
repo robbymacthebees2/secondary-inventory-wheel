@@ -50,6 +50,7 @@ const uint64_t kPunchEveryMs = 100;
 const uint64_t kQuietDropMs = 15000;
 const uint64_t kStunWaitMs = 2500;
 const uint64_t kPresenceHeartbeatMs = 15000;
+const uint64_t kPresenceHeartbeatTimeoutMs = 45000;
 
 const int kMaxPacketsPerSecond = 400;
 const int kFloodStrikes = 3;
@@ -132,6 +133,7 @@ uint64_t s_retryDelayMs = 5000;
 std::string s_status = "Off";
 uint32_t s_tick = 0;
 uint64_t s_lastPresenceHeartbeatMs = 0;
+uint64_t s_lastPresencePongMs = 0;
 bool s_superseded = false;
 bool s_presenceHeartbeatSupported = false;
 ConfigVarHandle s_enabledVar = 0;
@@ -717,9 +719,14 @@ void on_server_message(const std::string& text) {
         s_retryAtMs = 0;
         return;
     }
+    if (op == "pong") {
+        s_lastPresencePongMs = now_ms();
+        return;
+    }
     if (op == "welcome") {
         s_myId = static_cast<uint32_t>(std::strtoul(msg.str("id").c_str(), nullptr, 10));
         s_presenceHeartbeatSupported = msg.boolean("heartbeat");
+        s_lastPresencePongMs = now_ms();
         s_stun = msg.list("stun");
         s_stunAsks.clear();
         s_mapped.clear();
@@ -841,6 +848,9 @@ void on_server_message(const std::string& text) {
 }
 
 void connect() {
+    s_presenceHeartbeatSupported = false;
+    s_lastPresenceHeartbeatMs = 0;
+    s_lastPresencePongMs = 0;
     int port = 0;
     if (!coop_global_udp_open(&port)) {
         s_status = "Couldn't start networking";
@@ -878,6 +888,7 @@ void disconnect(const char* why) {
     s_total = 0;
     s_here = 0;
     s_lastPresenceHeartbeatMs = 0;
+    s_lastPresencePongMs = 0;
     s_superseded = false;
     s_presenceHeartbeatSupported = false;
     s_area = "\x01";
@@ -1112,6 +1123,7 @@ void global_on_ws_event(const mods::ws::Event& event) {
         s_total = 0;
         s_here = 0;
         s_lastPresenceHeartbeatMs = 0;
+        s_lastPresencePongMs = 0;
         s_presenceHeartbeatSupported = false;
         s_seen.clear();
         s_onlineRoster.clear();
@@ -1352,6 +1364,15 @@ void global_update() {
     if (s_phase == Phase::Connecting && now - s_phaseMs > 10000) {
         disconnect("the server did not answer");
         s_status = "The server did not answer, trying again...";
+        s_retryAtMs = now + s_retryDelayMs;
+        s_retryDelayMs = std::min<uint64_t>(s_retryDelayMs * 2, 120000);
+        return;
+    }
+    if (s_phase == Phase::Live && s_presenceHeartbeatSupported &&
+        now - s_lastPresencePongMs >= kPresenceHeartbeatTimeoutMs)
+    {
+        disconnect("server heartbeat timed out");
+        s_status = "Lost the server, trying again...";
         s_retryAtMs = now + s_retryDelayMs;
         s_retryDelayMs = std::min<uint64_t>(s_retryDelayMs * 2, 120000);
         return;

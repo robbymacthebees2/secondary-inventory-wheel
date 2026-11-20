@@ -18,22 +18,13 @@ DEFINE_HOOK(&daNbomb_c::procWait, GlideBomblingWait);
 struct AutoJumpFlagScope {
     daAlink_c* link = nullptr;
     bool added = false;
-    bool groundMovement = false;
     f32 forwardSpeed = 0.0f;
     s16 moveAngle = 0;
 };
 
 thread_local std::vector<AutoJumpFlagScope> g_autoJumpFlagScopes;
 
-struct RunOffLedgeState {
-    daAlink_c* owner = nullptr;
-    u8 framesRemaining = 0;
-};
-
-constexpr u8 kRunOffLedgeAnimationFrames = 7;
-RunOffLedgeState g_runOffLedgeState{};
-
-bool disable_auto_jump_ground_movement_proc(daAlink_c* link) {
+bool ground_movement_proc(daAlink_c* link) {
     switch (link->mProcID) {
     case daAlink_c::PROC_GRAB_WAIT:
         return !link->checkWolf() && link->checkGrabAnime() &&
@@ -73,7 +64,6 @@ HookAction before_check_auto_jump_action(ModContext*, void* args, void*, void*) 
     link->onEndResetFlg0(daPy_py_c::ERFLG0_NOT_AUTO_JUMP);
     AutoJumpFlagScope& scope = g_autoJumpFlagScopes.back();
     scope.added = true;
-    scope.groundMovement = disable_auto_jump_ground_movement_proc(link);
     scope.forwardSpeed = link->speedF;
     scope.moveAngle = link->current.angle.y;
     return HOOK_CONTINUE;
@@ -87,17 +77,11 @@ void after_check_auto_jump_action(ModContext*, void*, void*, void*) {
     g_autoJumpFlagScopes.pop_back();
     if (scope.added && scope.link != nullptr) {
         scope.link->mEndResetFlg0 &= ~daPy_py_c::ERFLG0_NOT_AUTO_JUMP;
-        if (g_runOffLedgeState.owner == scope.link &&
-            (scope.link->mProcID != daAlink_c::PROC_MOVE ||
-             scope.link->mLinkAcch.ChkGroundHit()))
-        {
-            g_runOffLedgeState = {};
-        }
     }
 }
 
-HookAction preserve_sprint_speed_on_ledge_fall(
-    ModContext*, void* args, void* retval, void*)
+HookAction before_ledge_fall_init(
+    ModContext*, void* args, void*, void*)
 {
     if (g_autoJumpFlagScopes.empty()) {
         return HOOK_CONTINUE;
@@ -106,70 +90,16 @@ HookAction preserve_sprint_speed_on_ledge_fall(
     const AutoJumpFlagScope& scope = g_autoJumpFlagScopes.back();
     if (link == nullptr || !scope.added || scope.link != link ||
         mods::arg<int>(args, 1) != 1 || link->mLinkAcch.ChkGroundHit() ||
-        !disable_auto_jump_ground_movement_proc(link))
+        !ground_movement_proc(link))
     {
         return HOOK_CONTINUE;
     }
 
-    if (link->checkWolf() || is_hover_boots_hovering(link))
-    {
-        g_runOffLedgeState = {};
-        mods::arg_ref<int>(args, 1) = 2;
-        link->mNormalSpeed = scope.forwardSpeed;
-        link->current.angle.y = scope.moveAngle;
-        link->speed.y = 0.0f;
-        return HOOK_CONTINUE;
-    }
-    if (link->mpHIO == nullptr || link->mProcID != daAlink_c::PROC_MOVE) {
-        return HOOK_CONTINUE;
-    }
-
-    const f32 runSpeed = link->mpHIO->mMove.m.mMaxSpeed;
-    if (runSpeed <= 0.0f || scope.forwardSpeed < runSpeed * 0.6f) {
-        g_runOffLedgeState = {};
-        return HOOK_CONTINUE;
-    }
-
-    if (g_runOffLedgeState.owner != link) {
-        g_runOffLedgeState.owner = link;
-        g_runOffLedgeState.framesRemaining = kRunOffLedgeAnimationFrames;
-    }
-    if (g_runOffLedgeState.framesRemaining > 0) {
-        --g_runOffLedgeState.framesRemaining;
-        const auto& jump = link->mpHIO->mAutoJump.m;
-        link->setSpecialGravity(jump.mGravity, jump.mMaxFallSpeed, TRUE);
-        link->speed.y = std::min(link->speed.y, -0.5f);
-        if (retval != nullptr) *static_cast<int*>(retval) = 1;
-        return HOOK_SKIP_ORIGINAL;
-    }
+    mods::arg_ref<int>(args, 1) = 2;
+    link->mNormalSpeed = scope.forwardSpeed;
+    link->current.angle.y = scope.moveAngle;
+    link->speed.y = 0.0f;
     return HOOK_CONTINUE;
-}
-
-void finish_run_off_ledge_fall(ModContext*, void* args, void*, void*) {
-    auto* link = mods::arg<daAlink_c*>(args, 0);
-    if (link == nullptr || g_autoJumpFlagScopes.empty()) {
-        return;
-    }
-    const AutoJumpFlagScope& scope = g_autoJumpFlagScopes.back();
-    if (!scope.added || !scope.groundMovement || scope.link != link ||
-        mods::arg<int>(args, 1) != 1 || link->checkWolf() ||
-        is_hover_boots_hovering(link) || link->mLinkAcch.ChkGroundHit() ||
-        link->mProcID != daAlink_c::PROC_FALL || link->mpHIO == nullptr)
-    {
-        return;
-    }
-
-    const bool running = g_runOffLedgeState.owner == link &&
-        g_runOffLedgeState.framesRemaining == 0;
-    if (running) {
-        link->mNormalSpeed = scope.forwardSpeed;
-        link->current.angle.y = scope.moveAngle;
-        g_runOffLedgeState = {};
-    }
-    link->setSingleAnimeBaseSpeed(
-        daAlink_c::ANM_DMG_FALL, 0.0f,
-        link->mpHIO->mDamage.mDamFall.m.mFallAnmMorf);
-    link->mProcVar2.field_0x300c = 1;
 }
 
 bool g_manualJumpPendingPress = false;

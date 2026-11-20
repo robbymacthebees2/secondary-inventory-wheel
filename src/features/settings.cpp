@@ -589,6 +589,291 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     }
 
     control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Lazy Tweaks: Sword Damage";
+    control.help_rml =
+        "Scale human Link's sword damage. 100% is unchanged; 0% disables sword damage.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksSwordDamageMultiplier;
+    control.min = kLazyTweaksDamageMultiplierMinPercent;
+    control.max = kLazyTweaksDamageMultiplierMaxPercent;
+    control.step = 1;
+    control.suffix = "%";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Lazy Tweaks: Bow Damage";
+    control.help_rml =
+        "Scale damage dealt by Link's arrows. 100% is unchanged; 0% disables arrow damage.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksBowDamageMultiplier;
+    control.min = kLazyTweaksDamageMultiplierMinPercent;
+    control.max = kLazyTweaksDamageMultiplierMaxPercent;
+    control.step = 1;
+    control.suffix = "%";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Lazy Tweaks: Wolf Link Damage";
+    control.help_rml =
+        "Scale damage dealt by Wolf Link's attacks. 100% is unchanged; 0% disables his damage.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksWolfDamageMultiplier;
+    control.min = kLazyTweaksDamageMultiplierMinPercent;
+    control.max = kLazyTweaksDamageMultiplierMaxPercent;
+    control.step = 1;
+    control.suffix = "%";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Progressive Combos";
+    control.help_rml =
+        "Increase human Link's sword damage by 20% on the second combo hit and 40% on the third.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksProgressiveCombos;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Combined Parrying";
+    control.help_rml =
+        "Enable timed deflects and a B-button finisher riposte after a successful parry.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksCombinedParry;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Crouch Shielding";
+    control.help_rml =
+        "Hold R while crouching to shield; B performs a crouch sword attack and A performs a "
+        "directional roll or back jump.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksCrouchShield;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Manual Shielding";
+    control.help_rml =
+        "Require R to be held or pressed for the shield to remain raised, instead of raising it "
+        "automatically while targeting.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksManualShield;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Attack Dodge Cancel";
+    control.help_rml =
+        "During the first three sword-combo hits, press R+A to roll in the selected direction.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksDodgeCancel;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Jump Strike Cancel";
+    control.help_rml =
+        "During the first three sword-combo hits, hold A with no directional input to charge a "
+        "Jump Strike.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksJumpStrikeCancel;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Lazy Tweaks: Damage Received";
+    control.help_rml =
+        "Multiply incoming damage from 1x to 8x. This affects the vanilla damage multiplier "
+        "before Wolf Link and Zora Armor weaknesses are applied.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksReceivedDamageMultiplier;
+    control.min = kLazyTweaksReceivedDamageMinMultiplier;
+    control.max = kLazyTweaksReceivedDamageMaxMultiplier;
+    control.step = 1;
+    control.suffix = "x";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Instant Death";
+    control.help_rml = "Any hit will instantly kill Link.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksInstantDeath;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Progressive Defense";
+    control.help_rml =
+        "After the halfway story milestone, add 2x to the configured incoming damage multiplier.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksProgressiveDefense;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Insulated Zora Armor";
+    control.help_rml = "Remove Zora Armor's extra damage weakness to ice and fire.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksInsulatedZoraArmor;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Sturdier Wolf Link";
+    control.help_rml = "Prevent Wolf Link from taking twice as much damage as human Link.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksSturdierWolfLink;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: No Heart Drops";
+    control.help_rml = "Prevent heart item actors from appearing.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksNoHeartDrops;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Lazy Tweaks: Heart Drop Rate";
+    control.help_rml = "Set the chance that heart item actors appear, from 0% to 100%.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksHeartDropRate;
+    control.min = kLazyTweaksHeartDropRateMinPercent;
+    control.max = kLazyTweaksHeartDropRateMaxPercent;
+    control.step = 10;
+    control.suffix = "%";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: No Arrow Drops";
+    control.help_rml = "Prevent arrow item actors from appearing.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksNoArrowDrops;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: No Rupee Drops";
+    control.help_rml = lazy_tweaks_difficulty::rupee_drop_filter_supported()
+        ? "Prevent rupee drops without removing rupees placed in stage data."
+        : "Unavailable on this runtime: it does not expose the stage-origin marker needed to "
+          "distinguish drops from rupees placed in a stage. Enabling this setting logs a warning.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksNoRupeeDrops;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
+    control.label = "Lazy Tweaks: Death Rupee Tax";
+    control.help_rml = "Lose this many rupees when Link dies.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksDeathRupeeTax;
+    control.min = kLazyTweaksDeathRupeeTaxDefault;
+    control.max = kLazyTweaksDeathRupeeTaxMax;
+    control.step = 50;
+    control.suffix = " Rupees";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Death Rupee Tax (Half)";
+    control.help_rml = "Lose half of Link's rupees when he dies.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksHalfDeathTax;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: Death Rupee Tax (Quarter)";
+    control.help_rml = "Lose one quarter of Link's rupees when he dies.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksQuarterDeathTax;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Lazy Tweaks: No Hitstop";
+    control.help_rml =
+        "Remove the brief freeze-frame pause after attacks connect.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_lazyTweaksNoHitstop;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
     control.label = "OOT Style Hearts";
     control.help_rml =
@@ -765,9 +1050,9 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
-    control.label = "Unrestricted movement in houses and shops";
+    control.label = "Move Normally in Houses";
     control.help_rml =
-        "Allow normal movement in houses and shops, including rolling and outdoor movement speed. Off by default.";
+        "Allow normal movement in houses, including rolling and normal movement speed. Off by default.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_indoorMovementUnrestricted;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
@@ -777,9 +1062,9 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
-    control.label = "First-person view in Castle Town";
+    control.label = "Enable FPV in Castle Town";
     control.help_rml =
-        "Allow subject/first-person camera mode in Castle Town. Off by default.";
+        "Allow first-person view in Castle Town. Off by default.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_castleTownFirstPerson;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
@@ -789,10 +1074,10 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_TOGGLE;
-    control.label = "Clawshots stick to any surface";
+    control.label = "Unrestricted Clawshots";
     control.help_rml =
-        "Allow the Clawshot and Double Clawshot to latch onto any background surface. "
-        "Other hookshot restrictions remain in effect. Off by default.";
+        "Allow the Clawshot and Double Clawshot to attach to surfaces normally rejected by the game. "
+        "Off by default.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_clawshotAnySurface;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);

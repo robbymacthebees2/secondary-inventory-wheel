@@ -32,12 +32,13 @@ not receive them. Blocks use a stable per-install tag rather than a display name
 session ID, so renaming or restarting the game does not clear a block. This is not an account ban:
 clearing or replacing the installation key creates a new identity. The server validates and filters
 text, limits messages to 100 characters and one per two seconds per connection, and does not store
-or log chat history. Hyrule Online sessions refresh their presence periodically and send an explicit
-leave when they shut down; inactive sessions expire, and reconnects replace an older session with
-the same installation identity. The player roster contains each online session's configured display
-name. Room-code co-op chat continues over the existing encrypted direct peer connection. The
-combined Wheel no longer connects to Remia's Co-op chat relay; it uses this Worker's `/global`
-endpoint instead.
+or log chat history. Hyrule Online and room-code sessions refresh presence periodically and send an
+explicit leave when they shut down. Heartbeat-aware sessions expire after 60 seconds without a
+heartbeat; older clients get a 10-minute idle grace period. Reconnects replace an older Hyrule Online
+session with the same installation identity. The player roster contains each online session's
+configured display name. Room-code co-op chat continues over the existing encrypted direct peer
+connection. The combined Wheel no longer connects to Remia's Co-op chat relay; it uses this Worker's
+`/global` endpoint instead.
 
 ## Try it without deploying anything
 
@@ -45,6 +46,7 @@ endpoint instead.
 node dev-server.mjs
 node test-flow.mjs
 node test-global-blocks.mjs
+node test-stale-connections.mjs
 ```
 
 `dev-server.mjs` runs the same code on your own machine at `ws://127.0.0.1:8787`. Plain `ws://` is

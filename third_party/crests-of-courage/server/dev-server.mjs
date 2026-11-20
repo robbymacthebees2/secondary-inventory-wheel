@@ -68,6 +68,11 @@ const { default: worker, Room, Global } = await import("./src/index.js");
 class RoomContext {
   constructor() {
     this.sockets = new Set();
+    this.alarmAt = null;
+    this.storage = {
+      setAlarm: async (at) => void (this.alarmAt = at),
+      deleteAlarm: async () => void (this.alarmAt = null),
+    };
   }
   acceptWebSocket(ws, tags) {
     ws.tags = tags;

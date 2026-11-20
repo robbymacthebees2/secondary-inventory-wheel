@@ -195,11 +195,6 @@ HookAction handle_hover_airborne_action(ModContext*, void* args, void* retval, v
         return HOOK_SKIP_ORIGINAL;
     }
 
-    if (vanillaAutoJumpDisabled()) {
-        *static_cast<BOOL*>(retval) = FALSE;
-        return HOOK_SKIP_ORIGINAL;
-    }
-
     return HOOK_CONTINUE;
 }
 

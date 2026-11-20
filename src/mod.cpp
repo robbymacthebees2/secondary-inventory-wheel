@@ -36,6 +36,7 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_arrow.h"
+#include "d/actor/d_a_obj_item.h"
 #include "d/actor/d_a_e_po.h"
 #include "d/actor/d_a_ni.h"
 #include "d/actor/d_a_obj_glowSphere.h"
@@ -55,7 +56,9 @@
 #include "SSystem/SComponent/c_cc_d.h"
 #include "SSystem/SComponent/c_cc_s.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_item.h"
 #include "d/d_camera.h"
+#include "d/d_s_play.h"
 #include "d/d_lib.h"
 #include "d/d_meter2.h"
 #include "d/d_particle_name.h"
@@ -68,6 +71,7 @@
 #include "d/d_meter_map.h"
 #include "d/d_meter2_info.h"
 #include "d/d_meter_HIO.h"
+#include "d/d_cc_uty.h"
 #include "d/d_msg_object.h"
 #include "d/d_kankyo.h"
 #include "d/d_kankyo_rain.h"
@@ -109,6 +113,7 @@
 #include <chrono>
 #include <mutex>
 #include <span>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -171,6 +176,17 @@ constexpr int64_t kBulletTimeModeDefault = 1;
 constexpr int64_t kBulletTimeArrowDamageDefaultPercent = 100;
 constexpr int64_t kBulletTimeArrowDamageMinPercent = 0;
 constexpr int64_t kBulletTimeArrowDamageMaxPercent = 1000;
+constexpr int64_t kLazyTweaksDamageMultiplierDefaultPercent = 100;
+constexpr int64_t kLazyTweaksDamageMultiplierMinPercent = 0;
+constexpr int64_t kLazyTweaksDamageMultiplierMaxPercent = 1000;
+constexpr int64_t kLazyTweaksReceivedDamageDefaultMultiplier = 1;
+constexpr int64_t kLazyTweaksReceivedDamageMinMultiplier = 1;
+constexpr int64_t kLazyTweaksReceivedDamageMaxMultiplier = 8;
+constexpr int64_t kLazyTweaksHeartDropRateDefaultPercent = 100;
+constexpr int64_t kLazyTweaksHeartDropRateMinPercent = 0;
+constexpr int64_t kLazyTweaksHeartDropRateMaxPercent = 100;
+constexpr int64_t kLazyTweaksDeathRupeeTaxDefault = 0;
+constexpr int64_t kLazyTweaksDeathRupeeTaxMax = 2000;
 constexpr int64_t kDarkLinkDamageMultiplierDefaultPercent = 200;
 constexpr int64_t kDarkLinkDamageMultiplierMinPercent = 0;
 constexpr int64_t kDarkLinkDamageMultiplierMaxPercent = 1000;
@@ -305,6 +321,28 @@ ConfigVarHandle g_zItemSlotEnabled = 0;
 ConfigVarHandle g_darkLinkDamageMultiplier = 0;
 ConfigVarHandle g_giantMaskDamageMultiplier = 0;
 ConfigVarHandle g_bulletTimeArrowDamageMultiplier = 0;
+ConfigVarHandle g_lazyTweaksSwordDamageMultiplier = 0;
+ConfigVarHandle g_lazyTweaksBowDamageMultiplier = 0;
+ConfigVarHandle g_lazyTweaksWolfDamageMultiplier = 0;
+ConfigVarHandle g_lazyTweaksProgressiveCombos = 0;
+ConfigVarHandle g_lazyTweaksReceivedDamageMultiplier = 0;
+ConfigVarHandle g_lazyTweaksInstantDeath = 0;
+ConfigVarHandle g_lazyTweaksProgressiveDefense = 0;
+ConfigVarHandle g_lazyTweaksInsulatedZoraArmor = 0;
+ConfigVarHandle g_lazyTweaksSturdierWolfLink = 0;
+ConfigVarHandle g_lazyTweaksNoHeartDrops = 0;
+ConfigVarHandle g_lazyTweaksHeartDropRate = 0;
+ConfigVarHandle g_lazyTweaksNoArrowDrops = 0;
+ConfigVarHandle g_lazyTweaksNoRupeeDrops = 0;
+ConfigVarHandle g_lazyTweaksDeathRupeeTax = 0;
+ConfigVarHandle g_lazyTweaksHalfDeathTax = 0;
+ConfigVarHandle g_lazyTweaksQuarterDeathTax = 0;
+ConfigVarHandle g_lazyTweaksNoHitstop = 0;
+ConfigVarHandle g_lazyTweaksCombinedParry = 0;
+ConfigVarHandle g_lazyTweaksCrouchShield = 0;
+ConfigVarHandle g_lazyTweaksManualShield = 0;
+ConfigVarHandle g_lazyTweaksDodgeCancel = 0;
+ConfigVarHandle g_lazyTweaksJumpStrikeCancel = 0;
 ConfigVarHandle g_flurryRushEnabled = 0;
 ConfigVarHandle g_ootStyleHeartsEnabled = 0;
 ConfigVarHandle g_enemySpawnerProfile = 0;
@@ -599,6 +637,13 @@ ModResult add_settings(UiElementHandle panel);
 ModResult initialize();
 void update();
 }
+namespace unrestricted_items {
+ModResult initialize();
+}
+namespace lazy_tweaks_combat {
+bool manual_shield_enabled();
+bool try_manual_shield_attack(daAlink_c* player);
+}
 namespace dawnlight {
 struct DualWieldSnapshot {
     uint8_t sword;
@@ -617,6 +662,7 @@ void shutdown_dual_wield();
 }
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
+#include "features/unrestricted_items.cpp"
 #include "features/new_save_modes.cpp"
 #include "features/gale_bomb.cpp"
 #include "features/hover_boots.cpp"
@@ -634,6 +680,8 @@ void shutdown_dual_wield();
 #include "features/bow_aim.cpp"
 #include "features/flurry_rush.cpp"
 #include "features/arrow_damage.cpp"
+#include "features/lazy_tweaks_combat.cpp"
+#include "features/lazy_tweaks_difficulty.cpp"
 #include "features/oot_hearts.cpp"
 #include "features/enemy_spawner.cpp"
 #include "features/manual_glider_visual.cpp"
@@ -713,6 +761,17 @@ ModResult install_hooks(ModError* error) {
     using flurry_rush::FlurryColliderSet;
     using flurry_rush::FlurryLinkDamageAction;
     using arrow_damage::ArrowDamageAttackPower;
+    using lazy_tweaks_combat::AtPowerCheck;
+    using lazy_tweaks_combat::CcAtCheck;
+    using lazy_tweaks_difficulty::AlinkDamageMagnification;
+    using lazy_tweaks_difficulty::AlinkDeadInit;
+    using lazy_tweaks_difficulty::ItemCreate;
+    using lazy_tweaks_difficulty::CalcPauseTimer;
+    using lazy_tweaks_combat::ManualShield;
+    using lazy_tweaks_combat::CrouchShieldMove;
+    using lazy_tweaks_combat::CrouchShieldWait;
+    using lazy_tweaks_combat::GuardAttackInit;
+    using lazy_tweaks_combat::SmallGuard;
     using nayru_love::NayruLoveDamageAction;
 
     ADD_PRE(OpenExplain, suppress_secondary_explain);
@@ -787,6 +846,23 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(NayruLoveDamageAction, nayru_love::before_damage_action);
     ADD_PRE(PlayerExecute, flurry_rush::update);
     ADD_POST(ArrowDamageAttackPower, arrow_damage::apply_modifier);
+    ADD_POST(AtPowerCheck, lazy_tweaks_combat::apply_damage_multipliers);
+    ADD_POST(CcAtCheck, lazy_tweaks_combat::apply_progressive_combo_damage);
+    ADD_POST(AlinkDamageMagnification, lazy_tweaks_difficulty::apply_received_damage_settings);
+    ADD_PRE(AlinkDeadInit, lazy_tweaks_difficulty::apply_death_rupee_tax);
+    ADD_PRE(ItemCreate, lazy_tweaks_difficulty::suppress_configured_item_drops);
+    ADD_POST(CalcPauseTimer, lazy_tweaks_difficulty::disable_hitstop);
+    ADD_POST(ManualShield, lazy_tweaks_combat::apply_manual_shield);
+    ADD_PRE(CrouchShieldWait, lazy_tweaks_combat::apply_crouch_shield);
+    ADD_PRE(CrouchShieldMove, lazy_tweaks_combat::apply_crouch_shield);
+    ADD_POST(GuardAttackInit, lazy_tweaks_combat::begin_parry_window);
+    ADD_POST(SmallGuard, lazy_tweaks_combat::on_shield_hit);
+    ADD_POST(PlayerExecute, lazy_tweaks_combat::update_combat_cancels);
+    ADD_POST(PlayerExecute, lazy_tweaks_combat::update_crouch_stab_pose);
+    ADD_PRE(lazy_tweaks_combat::CrouchShieldNormalCutInit, lazy_tweaks_combat::force_crouch_stab_cut);
+    ADD_POST(lazy_tweaks_combat::CrouchShieldNormalCutInit, lazy_tweaks_combat::apply_crouch_stab_after_cut_init);
+    ADD_PRE(lazy_tweaks_combat::CrouchShieldFinishCutInit, lazy_tweaks_combat::replace_crouch_shield_finisher);
+    ADD_POST(lazy_tweaks_combat::CrouchShieldStabMotion, lazy_tweaks_combat::stop_crouch_stab_lunge);
     ADD_PRE(WheelSprintCheckMoveDoAction, defer_sprint_roll_for_window);
     ADD_PRE(WheelSprintProcMove, before_sprint_proc_move);
     ADD_POST(WheelSprintProcMove, after_sprint_proc_move);
@@ -822,9 +898,8 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(CheckAutoJumpAction, handle_hover_airborne_action);
     ADD_PRE(CheckAutoJumpAction, before_check_auto_jump_action);
     ADD_POST(CheckAutoJumpAction, after_check_auto_jump_action);
-    ADD_PRE(DisableAutoJumpFallInit, preserve_sprint_speed_on_ledge_fall);
-    ADD_POST(DisableAutoJumpFallInit, finish_run_off_ledge_fall);
-    ADD_PRE(DisableAutoJumpWolfFallInit, preserve_sprint_speed_on_ledge_fall);
+    ADD_PRE(DisableAutoJumpFallInit, before_ledge_fall_init);
+    ADD_PRE(DisableAutoJumpWolfFallInit, before_ledge_fall_init);
     ADD_PRE(ProcHangStartInit, suppress_hover_ledge_grab);
     ADD_PRE(ProcHangFallStartInit, suppress_hover_ledge_grab);
     ADD_PRE(CheckLandAction, land_on_lava_surface);
@@ -1434,6 +1509,231 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksSwordDamageMultiplier";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kLazyTweaksDamageMultiplierDefaultPercent;
+    result = svc_config->register_var(
+        mod_ctx, &config, &g_lazyTweaksSwordDamageMultiplier);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks sword damage setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksBowDamageMultiplier";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kLazyTweaksDamageMultiplierDefaultPercent;
+    result = svc_config->register_var(
+        mod_ctx, &config, &g_lazyTweaksBowDamageMultiplier);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks bow damage setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksWolfDamageMultiplier";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kLazyTweaksDamageMultiplierDefaultPercent;
+    result = svc_config->register_var(
+        mod_ctx, &config, &g_lazyTweaksWolfDamageMultiplier);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks Wolf Link damage setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksProgressiveCombos";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(
+        mod_ctx, &config, &g_lazyTweaksProgressiveCombos);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks progressive combos setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksReceivedDamageMultiplier";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kLazyTweaksReceivedDamageDefaultMultiplier;
+    result = svc_config->register_var(
+        mod_ctx, &config, &g_lazyTweaksReceivedDamageMultiplier);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks received damage setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksInstantDeath";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksInstantDeath);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks instant death setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksProgressiveDefense";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksProgressiveDefense);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks progressive defense setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksInsulatedZoraArmor";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksInsulatedZoraArmor);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks Zora Armor setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksSturdierWolfLink";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksSturdierWolfLink);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks Wolf Link defense setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksNoHeartDrops";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksNoHeartDrops);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks no-heart-drops setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksHeartDropRate";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kLazyTweaksHeartDropRateDefaultPercent;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksHeartDropRate);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks heart drop rate setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksNoArrowDrops";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksNoArrowDrops);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks no-arrow-drops setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksNoRupeeDrops";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksNoRupeeDrops);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks no-rupee-drops setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksDeathRupeeTax";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kLazyTweaksDeathRupeeTaxDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksDeathRupeeTax);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks death rupee tax setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksHalfDeathTax";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksHalfDeathTax);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks half death tax setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksQuarterDeathTax";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksQuarterDeathTax);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks quarter death tax setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksNoHitstop";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksNoHitstop);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks no-hitstop setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksCombinedParry";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksCombinedParry);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks combined parry setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksCrouchShield";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksCrouchShield);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks crouch shield setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksManualShield";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksManualShield);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks manual shield setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksDodgeCancel";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksDodgeCancel);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks dodge cancel setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "lazyTweaksJumpStrikeCancel";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_lazyTweaksJumpStrikeCancel);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Lazy Tweaks jump strike cancel setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
     config.name = "flurryRushEnabled";
     config.type = CONFIG_VAR_BOOL;
     config.default_bool = false;
@@ -1696,6 +1996,12 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     result = fire_arrows::initialize();
     if (result != MOD_OK) {
         set_mod_init_error(error, result, "Fire Arrows hook initialization failed");
+        return result;
+    }
+
+    result = unrestricted_items::initialize();
+    if (result != MOD_OK) {
+        set_mod_init_error(error, result, "Unrestricted Items hook initialization failed");
         return result;
     }
 

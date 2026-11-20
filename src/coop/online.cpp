@@ -42,6 +42,8 @@ const uint64_t kPeerTimeoutMs = 15000;
 const uint64_t kPunchEveryMs = 100;
 const uint64_t kJoinPunchMs = 8000;
 const uint64_t kHostPunchMs = 15000;
+const uint64_t kRoomHeartbeatMs = 15000;
+const uint64_t kRoomHeartbeatTimeoutMs = 45000;
 
 uint64_t now_ms() {
     using namespace std::chrono;
@@ -158,6 +160,9 @@ std::vector<PendingPeer> s_peers;
 std::string s_sentUpnp;
 int s_reconnects = 0;
 uint64_t s_reconnectAtMs = 0;
+uint64_t s_lastRoomHeartbeatMs = 0;
+uint64_t s_lastRoomPongMs = 0;
+bool s_roomHeartbeatSupported = false;
 
 PendingPeer s_target;
 std::string s_hostUpnp;
@@ -172,6 +177,9 @@ void set_phase(Phase phase, std::string status) {
 void close_ws() {
     if (s_ws) s_ws.close(1000, "done");
     s_ws = mods::ws::Connection{};
+    s_lastRoomHeartbeatMs = 0;
+    s_lastRoomPongMs = 0;
+    s_roomHeartbeatSupported = false;
 }
 
 void joiner_give_up(const std::string& why) {
@@ -233,6 +241,9 @@ bool open_ws(const std::string& path) {
                                      : "Could not reach the room server.");
         return false;
     }
+    s_roomHeartbeatSupported = false;
+    s_lastRoomHeartbeatMs = now_ms();
+    s_lastRoomPongMs = 0;
     set_phase(Phase::Connecting, s_host ? "Getting a room code..." : "Looking for room " + s_code +
                                                                        "...");
     coop_log::info("coop_mod: [ONLINE] connecting to {}", options.url);
@@ -262,6 +273,7 @@ void say_hello() {
     std::string hello = "{\"op\":\"hello\",\"v\":" + std::to_string(kCoopWireVersion) +
                         ",\"ep\":\"" + json_escape(s_mapped) + "\",\"port\":" +
                         std::to_string(s_localPort);
+    if (s_roomHeartbeatSupported) hello += ",\"heartbeat\":true";
     const std::string lan = coop_lan_address();
     if (!lan.empty()) hello += ",\"lan\":\"" + lan + "\"";
     coop_log::info("coop_mod: [ONLINE] local address {}", lan.empty() ? "unknown" : "known");
@@ -461,6 +473,9 @@ void on_server_message(const std::string& text) {
     const std::string op = msg.str("op");
 
     if (op == "welcome") {
+        s_roomHeartbeatSupported = msg.boolean("heartbeat");
+        s_lastRoomHeartbeatMs = now_ms();
+        s_lastRoomPongMs = s_lastRoomHeartbeatMs;
         if (s_host) {
             s_code = msg.str("code");
             s_reconnects = 0;
@@ -471,6 +486,11 @@ void on_server_message(const std::string& text) {
         s_mappedOther.clear();
         set_phase(Phase::Stun, s_host ? "" : "Found room " + s_code + ". Checking your network...");
         send_stun_requests();
+        return;
+    }
+
+    if (op == "pong") {
+        s_lastRoomPongMs = now_ms();
         return;
     }
 
@@ -678,6 +698,19 @@ void online_update() {
         s_reconnectAtMs = 0;
         if (!open_ws(host_path())) host_lost_server("could not reach it");
         return;
+    }
+
+    if (s_ws && s_roomHeartbeatSupported && s_phase != Phase::Done &&
+        s_phase != Phase::Failed && s_phase != Phase::Idle)
+    {
+        if (now - s_lastRoomPongMs >= kRoomHeartbeatTimeoutMs) {
+            fail("the room server stopped responding");
+            return;
+        }
+        if (now - s_lastRoomHeartbeatMs >= kRoomHeartbeatMs) {
+            send_json("{\"op\":\"ping\"}");
+            s_lastRoomHeartbeatMs = now;
+        }
     }
 
     switch (s_phase) {
