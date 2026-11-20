@@ -91,20 +91,6 @@ ExternalStaminaState external_stamina_state(
                                   ExternalStaminaState::Disabled;
 }
 
-bool external_sprint_source_enabled(uint32_t source) {
-    const auto* service = svc_te_stamina;
-    if (service == nullptr ||
-        service->header.struct_size < sizeof(TwilitEssentialsStaminaService) ||
-        service->get_source == nullptr)
-    {
-        return false;
-    }
-    TwilitEssentialsStaminaSourceInfo info =
-        TWILIT_ESSENTIALS_STAMINA_SOURCE_INFO_INIT;
-    return service->get_source(mod_ctx, source, &info) == MOD_OK &&
-        info.enabled != 0;
-}
-
 f32 external_sprint_drain_rate(uint32_t source) {
     const auto* service = svc_te_stamina;
     if (service == nullptr ||
@@ -121,10 +107,11 @@ f32 external_sprint_drain_rate(uint32_t source) {
         return -1.0f;
     }
     return info.enabled != 0 ?
-        kSprintStaminaExternalCostPerSecond * info.cost_multiplier : 0.0f;
+        kSprintStaminaExternalCostPerSecond * info.cost_multiplier :
+        kSprintStaminaExternalCostPerSecond;
 }
 
-bool sprint_stamina_available(daAlink_c* link, bool wolf) {
+bool sprint_stamina_available(daAlink_c* link) {
     if (link == nullptr) {
         return false;
     }
@@ -142,12 +129,6 @@ bool sprint_stamina_available(daAlink_c* link, bool wolf) {
             if (svc_te_stamina->deny != nullptr) {
                 svc_te_stamina->deny(mod_ctx);
             }
-            return false;
-        }
-        const uint32_t source = wolf ?
-            TWILIT_ESSENTIALS_STAMINA_SOURCE_WOLF_SPRINT :
-            TWILIT_ESSENTIALS_STAMINA_SOURCE_SPRINT;
-        if (external_sprint_source_enabled(source)) {
             return false;
         }
         return true;
@@ -169,7 +150,7 @@ bool sprint_roll_window_eligible(daAlink_c* link) {
         !link->checkEventRun() && !dComIfGp_event_runCheck() &&
         !link->checkMagneBootsOn() && !link->getSumouMode() &&
         link->mGrabItemAcKeep.getActor() == nullptr &&
-        sprint_stamina_available(link, false);
+        sprint_stamina_available(link);
 }
 
 HookAction defer_sprint_roll_for_window(ModContext*, void* args, void* retval, void*) {
@@ -209,7 +190,7 @@ bool sprint_requested(daAlink_c* link) {
         !link->checkEventRun() && !dComIfGp_event_runCheck() &&
         !link->checkMagneBootsOn() && !link->getSumouMode() &&
         link->mGrabItemAcKeep.getActor() == nullptr;
-    return canSprint && sprint_stamina_available(link, false);
+    return canSprint && sprint_stamina_available(link);
 }
 
 bool sprint_ground_movement_proc(daAlink_c* link) {
@@ -251,7 +232,7 @@ bool wolf_sprint_requested(daAlink_c* link) {
     {
         return false;
     }
-    return sprint_stamina_available(link, true);
+    return sprint_stamina_available(link);
 }
 
 f32 wolf_dash_speed(daAlink_c* link) {
@@ -446,6 +427,7 @@ void update_sprint_stamina(ModContext*, void* args, void*, void*) {
 
     const bool sprintActive = g_sprintStamina.sprintActive;
     const bool wolfSprintActive = g_sprintStamina.wolfSprintActive;
+    const bool glideActive = g_manualCuccoGlideActive;
     g_sprintStamina.sprintActive = false;
     g_sprintStamina.wolfSprintActive = false;
 
@@ -476,6 +458,12 @@ void update_sprint_stamina(ModContext*, void* args, void*, void*) {
             drainRate += external_sprint_drain_rate(
                 TWILIT_ESSENTIALS_STAMINA_SOURCE_WOLF_SPRINT);
         }
+        if (glideActive) {
+            drainRate += external_sprint_drain_rate(
+                TWILIT_ESSENTIALS_STAMINA_SOURCE_SPRINT) *
+                (static_cast<f32>(glideStaminaDrain()) /
+                    static_cast<f32>(kSprintStaminaDrainDefault));
+        }
         if (drainRate < 0.0f) {
             if (svc_te_stamina->deny != nullptr) {
                 svc_te_stamina->deny(mod_ctx);
@@ -499,12 +487,17 @@ void update_sprint_stamina(ModContext*, void* args, void*, void*) {
         return;
     }
 
-    if ((sprintActive || wolfSprintActive) && !g_sprintStamina.exhausted) {
-        g_sprintStamina.value = std::max(
-            0.0f, g_sprintStamina.value -
-                elapsed * static_cast<f32>(sprintStaminaDrain()));
-        if (g_sprintStamina.value <= 0.0f) {
-            g_sprintStamina.exhausted = true;
+    if (sprintActive || wolfSprintActive || glideActive) {
+        if (!g_sprintStamina.exhausted) {
+            const f32 drainRate =
+                (sprintActive || wolfSprintActive
+                    ? static_cast<f32>(sprintStaminaDrain()) : 0.0f) +
+                (glideActive ? static_cast<f32>(glideStaminaDrain()) : 0.0f);
+            g_sprintStamina.value = std::max(
+                0.0f, g_sprintStamina.value - elapsed * drainRate);
+            if (g_sprintStamina.value <= 0.0f) {
+                g_sprintStamina.exhausted = true;
+            }
         }
     } else {
         g_sprintStamina.value = std::min(

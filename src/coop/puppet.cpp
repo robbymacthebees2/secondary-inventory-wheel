@@ -88,6 +88,8 @@ DEFINE_HOOK(&daAlink_c::loadAramItemBtp, LocalBottleBtpHook);
 DEFINE_HOOK((static_cast<void* (*)(const char*, s32, dRes_info_c*, int)>(&dRes_control_c::getRes)),
     LocalSkinResByIndexHook);
 
+void local_skin_equipment_update();
+
 namespace {
 
 const f32 kPuppetSpawnDist = 150.0f;
@@ -254,13 +256,23 @@ struct Puppet {
     J3DModel* swordModel = nullptr;
     J3DModel* sheathModel = nullptr;
     J3DModel* shieldModel = nullptr;
+    J3DModel* dualSwordModel = nullptr;
+    J3DModel* dualSheathModel = nullptr;
     u8 swordId = kPuppetSwordNone;
     u16 swordTries = 0;
     u8 sheathId = kPuppetSheathNone;
+    u8 dualSwordId = kPuppetSwordNone;
+    u8 dualSheathId = kPuppetSheathNone;
     char shieldArc[16] = {};
     u8 wantSword = kPuppetSwordNone;
     u8 wantSheath = kPuppetSheathNone;
+    u8 wantDualSword = kPuppetSwordNone;
+    u8 wantDualSheath = kPuppetSheathNone;
     u8 wantSwordVisible = 0;
+    u8 wantDualSwordVisible = 0;
+    u8 wantDualSwordDrawn = 0;
+    f32 dualSwordMtx[12] = {};
+    f32 dualSheathMtx[12] = {};
     u8 wantShield = 0;
     u8 poseFlags = 0;
     f32 sinkShapeOffset = 0.0f;
@@ -891,6 +903,7 @@ void release_puppet_models_only() {
     J3DModel** const models[] = {
         &pup().model, &pup().faceModel, &pup().hatModel, &pup().handsModel,
         &pup().swordModel, &pup().sheathModel, &pup().shieldModel,
+        &pup().dualSwordModel, &pup().dualSheathModel,
         &pup().companionFairyModel,
     };
     for (J3DModel** m : models) puppet_free_later(*m);
@@ -903,6 +916,8 @@ void release_puppet_models_only() {
     pup().swordId = kPuppetSwordNone;
     pup().swordTries = 0;
     pup().sheathId = kPuppetSheathNone;
+    pup().dualSwordId = kPuppetSwordNone;
+    pup().dualSheathId = kPuppetSheathNone;
 
     for (int k = 0; k < kPuppetAttachSlots; ++k) {
 
@@ -947,6 +962,8 @@ void release_puppet() {
     puppet_free_later(pup().swordModel);
     puppet_free_later(pup().sheathModel);
     puppet_free_later(pup().shieldModel);
+    puppet_free_later(pup().dualSwordModel);
+    puppet_free_later(pup().dualSheathModel);
     puppet_free_later(pup().companionFairyModel);
     if (pup().shieldArc[0] != '\0') {
         private_arc_release(pup().shieldArc);
@@ -968,6 +985,8 @@ void release_puppet() {
     pup().swordId = kPuppetSwordNone;
     pup().swordTries = 0;
     pup().sheathId = kPuppetSheathNone;
+    pup().dualSwordId = kPuppetSwordNone;
+    pup().dualSheathId = kPuppetSheathNone;
 
     clear_installed_mtx_calc();
     if (pup().under.tbl != nullptr) JKR_DELETE(pup().under.tbl);
@@ -2076,6 +2095,11 @@ J3DModel* puppet_private_part_idx(const char* arc, u32 index, const cXyz& scale)
 
 bool skin_fits_original(J3DModelData* mine, J3DModelData* theirs, const char* what);
 bool skin_fits_counts(J3DModelData* mine, u16 joints, u16 mats, const char* what);
+bool skin_fits_equipment_model(
+    J3DModelData* mine, J3DModelData* theirs, const char* file, const char* skinName);
+bool skin_fits_equipment_counts(
+    J3DModelData* mine, u16 joints, u16 mats, const char* file, const char* skinName);
+std::string local_equipment_skin_name(const char* file);
 J3DModelData* guard_skin_data(J3DModelData* data, const char* what);
 void remember_aram_original(u16 index, J3DModelData* data);
 bool aram_original(u16 index, u16& joints, u16& mats);
@@ -2125,7 +2149,8 @@ J3DModelData* get_or_load_item_data(u8 kind, u16 wireIdx) {
                 ? guard_skin_data(skins_equipment_data(skinName, "al_crod.bmd"), "al_crod.bmd")
                 : nullptr;
             if (skinData != nullptr &&
-                skin_fits_original(skinData, model->getModelData(), "al_crod.bmd"))
+                skin_fits_equipment_model(
+                    skinData, model->getModelData(), "al_crod.bmd", skinName))
             {
                 J3DModel* skinModel = coop_create_model(skinData, 0x80000, 0x11000284);
                 if (skinModel != nullptr) {
@@ -2259,7 +2284,9 @@ J3DModelData* get_or_load_item_data(u8 kind, u16 wireIdx) {
             (skinName != nullptr) ? guard_skin_data(skins_equipment_data(skinName, skinFile),
                                         skinFile)
                                   : nullptr;
-        if (mine != nullptr && skin_fits_original(mine, modelData, skinFile)) {
+        if (mine != nullptr &&
+            skin_fits_equipment_model(mine, modelData, skinFile, skinName))
+        {
             J3DModel* skinModel = coop_create_model(mine, 0x80000, 0x11000284);
             if (skinModel != nullptr) {
                 slot.data = mine;
@@ -2428,7 +2455,8 @@ J3DModelData* chain_link_data() {
         skins_equipment_data(skinName, "al_pend.bmd"), "al_pend.bmd");
     if (mine == nullptr) return s_chainLinkData;
 
-    return skin_fits_original(mine, s_chainLinkData, "al_pend.bmd")
+    return skin_fits_equipment_model(
+               mine, s_chainLinkData, "al_pend.bmd", skinName)
         ? mine
         : s_chainLinkData;
 }
@@ -3038,6 +3066,11 @@ const char* puppet_skin_for(int slot) {
 
     const SkinChoices& chosen = pup().builtSkins;
     const char* name = chosen.name[slot];
+    if (slot >= kSkinChoiceFirstItem &&
+        std::strncmp(name, kDefaultLinkSkinName, kSkinNameMax) == 0)
+    {
+        return name;
+    }
     if (name[0] == '\0' || !skins_have(name, chosen.hash[slot])) return nullptr;
     return name;
 }
@@ -3114,6 +3147,97 @@ bool skin_fits_counts(J3DModelData* mine, u16 refJoints, u16 refMats, const char
         what, myJoints, refJoints, myMats, refMats);
     breadcrumb2("local: REFUSED mismatched part", what);
     return false;
+}
+
+bool is_independent_equipment_skin(const char* skinName, const char* file) {
+    if (skinName == nullptr || file == nullptr) return false;
+
+    if (std::strcmp(skinName, "N64 HoT") == 0 &&
+        (std::strcmp(file, "al_swb.bmd") == 0 ||
+            std::strcmp(file, "al_shb.bmd") == 0 ||
+            std::strcmp(file, "al_kantera.bmd") == 0))
+    {
+        return true;
+    }
+
+    if (std::strcmp(skinName, "Hero of Time") != 0) return false;
+    const char* const files[] = {
+        "al_ib.bmd", "al_pend.bmd", "al_pachi.bmd", "al_crod.bmd", "crod_ball.bmd",
+        "rod_ukia.bmd", "rod_ukib.bmd", "rod_ukic.bmd", "sango_fook.bmd", "sfook.bmd",
+        "uki.bmd", "uki_saki.bmd",
+    };
+    for (const char* candidate : files) {
+        if (std::strcmp(file, candidate) == 0) return true;
+    }
+    return false;
+}
+
+bool independent_equipment_data_is_sane(J3DModelData* data) {
+    if (!skin_data_looks_sane(data) || data->getMaterialNum() == 0 ||
+        data->getShapeNum() == 0)
+    {
+        return false;
+    }
+    return coop_ptr_looks_live(data->getMaterialNodePointer(0)) &&
+        coop_ptr_looks_live(data->getShapeNodePointer(0));
+}
+
+bool skin_fits_equipment_model(
+    J3DModelData* mine, J3DModelData* theirs, const char* file, const char* skinName)
+{
+    if (!coop_ptr_looks_live(mine) || !coop_ptr_looks_live(theirs)) {
+        return skin_fits_original(mine, theirs, file);
+    }
+    if (is_independent_equipment_skin(skinName, file) &&
+        independent_equipment_data_is_sane(mine))
+    {
+        return true;
+    }
+    return skin_fits_original(mine, theirs, file);
+}
+
+bool skin_fits_equipment_counts(
+    J3DModelData* mine, u16 joints, u16 mats, const char* file, const char* skinName)
+{
+    if (is_independent_equipment_skin(skinName, file) &&
+        independent_equipment_data_is_sane(mine))
+    {
+        return true;
+    }
+    return skin_fits_counts(mine, joints, mats, file);
+}
+
+bool local_skin_fits_equipment_model(
+    J3DModelData* mine, J3DModelData* theirs, const char* file, const char* skinName)
+{
+    if (file != nullptr && skinName != nullptr &&
+        std::strcmp(file, "al_crod.bmd") == 0 &&
+        std::strcmp(skinName, "Hero of Time") == 0)
+    {
+        return skin_fits_original(mine, theirs, file);
+    }
+    return skin_fits_equipment_model(mine, theirs, file, skinName);
+}
+
+bool local_skin_fits_equipment_counts(
+    J3DModelData* mine, u16 joints, u16 mats, const char* file, const char* skinName)
+{
+    if (file != nullptr && skinName != nullptr &&
+        std::strcmp(file, "al_crod.bmd") == 0 &&
+        std::strcmp(skinName, "Hero of Time") == 0)
+    {
+        return skin_fits_counts(mine, joints, mats, file);
+    }
+    return skin_fits_equipment_counts(mine, joints, mats, file, skinName);
+}
+
+std::string local_equipment_skin_name(const char* file) {
+    const int slot = skins_slot_for_equipment_file(file);
+    std::string name = skins_local_slot(slot);
+    if (name.empty() && slot != kSkinChoiceEquipment) {
+        name = skins_local_slot(kSkinChoiceEquipment);
+    }
+    return name;
 }
 
 J3DModelData* guard_skin_data(J3DModelData* data, const char* what) {
@@ -3220,7 +3344,7 @@ J3DModel* puppet_skin_equipment(const char* file, const cXyz& scale) {
         PuppetModelLoadScope scope;
         J3DModelData* theirs = static_cast<J3DModelData*>(
             dComIfG_getObjectRes(equipment_arc_for_file(file), file));
-        if (!skin_fits_original(data, theirs, file)) return nullptr;
+        if (!skin_fits_equipment_model(data, theirs, file, name)) return nullptr;
     }
 
     J3DModel* model = modelFromData(data, scale);
@@ -4066,6 +4190,8 @@ void on_alink_execute_puppet_post(ModContext*, void*, void*, void*) {
     update_midna_hair_pose_state(alink);
     if (release_puppets_for_link(alink)) return;
 
+    local_skin_equipment_update();
+
     for (int i = 0; i < kMaxPuppets; ++i) {
         if (i == coop_net_local_id()) continue;
         PuppetScope scope(static_cast<uint8_t>(i));
@@ -4386,7 +4512,15 @@ void puppet_hook_on_network_snapshot(uint8_t playerId, float x, float y, float z
     pup().bodyRotZ = equipment.bodyRotZ;
     pup().wantSword = equipment.sword;
     pup().wantSheath = equipment.sheath;
+    pup().wantDualSword =
+        equipment.dualSword <= kPuppetSwordWood ? equipment.dualSword : kPuppetSwordNone;
+    pup().wantDualSheath =
+        equipment.dualSheath <= kPuppetSheathMaster ? equipment.dualSheath : kPuppetSheathNone;
     pup().wantSwordVisible = equipment.swordVisible;
+    pup().wantDualSwordVisible = equipment.dualSwordVisible != 0;
+    pup().wantDualSwordDrawn = equipment.dualSwordDrawn != 0;
+    std::memcpy(pup().dualSwordMtx, equipment.dualSwordMtx, sizeof(pup().dualSwordMtx));
+    std::memcpy(pup().dualSheathMtx, equipment.dualSheathMtx, sizeof(pup().dualSheathMtx));
     pup().wantShield = equipment.shieldVisible;
     pup().swordInHand = equipment.swordInHand;
     pup().shieldInHand = equipment.shieldInHand;
@@ -4538,7 +4672,7 @@ struct LocalEquipSlot {
 
 LocalEquipSlot s_localEquip[] = {
     {"al_swa.bmd"}, {"al_poda.bmd"}, {"al_swm.bmd"}, {"al_podm.bmd"}, {"al_sha.bmd"},
-    {"al_swb.bmd"},
+    {"al_swb.bmd"}, {"al_kantera.bmd"},
 };
 
 void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
@@ -4579,7 +4713,12 @@ void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
 
         if (rec.ours != nullptr && *slot != rec.ours) {
             J3DModelData* inSlot = (*slot != nullptr) ? (*slot)->getModelData() : nullptr;
-            if (!skin_fits_original(want, inSlot, rec.file)) return;
+            const std::string skinName = local_equipment_skin_name(rec.file);
+            if (!skin_fits_equipment_model(
+                    want, inSlot, rec.file, skinName.c_str()))
+            {
+                return;
+            }
             rec.originalData = inSlot;
             models_reset_for_game(want, rec.file);
             *slot = rec.ours;
@@ -4589,7 +4728,8 @@ void local_equip_install(J3DModel** slot, LocalEquipSlot& rec) {
     }
 
     J3DModelData* theirs = (*slot != nullptr) ? (*slot)->getModelData() : nullptr;
-    if (!skin_fits_original(want, theirs, rec.file)) return;
+    const std::string skinName = local_equipment_skin_name(rec.file);
+    if (!skin_fits_equipment_model(want, theirs, rec.file, skinName.c_str())) return;
 
     models_reset_for_game(want, rec.file);
     J3DModel* built = modelFromData(want, cXyz(1.0f, 1.0f, 1.0f));
@@ -4616,6 +4756,7 @@ void local_skin_rebuild_equipment(daAlink_c* alink) {
     J3DModel** const slots[] = {
         &alink->mpSwAModel, &alink->mpSwASheathModel, &alink->mpSwMModel,
         &alink->mpSwMSheathModel, &alink->mShieldModel, &alink->mWoodSwordModel,
+        &alink->mpKanteraModel,
     };
     const int count = static_cast<int>(sizeof(slots) / sizeof(slots[0]));
 
@@ -4640,8 +4781,91 @@ void local_skin_rebuild_equipment(daAlink_c* alink) {
     }
 }
 
+struct LocalBootOverlapShape {
+    J3DShape* shape = nullptr;
+    bool wasVisible = false;
+};
+
+std::array<LocalBootOverlapShape, 3> s_localBootOverlapShapes{};
+J3DModelData* s_localBootOverlapData = nullptr;
+u8 s_localBootOverlapShapeCount = 0;
+
+void restore_local_boot_overlap() {
+    for (u8 i = 0; i < s_localBootOverlapShapeCount; ++i) {
+        const LocalBootOverlapShape& saved = s_localBootOverlapShapes[i];
+        if (saved.shape == nullptr) continue;
+        if (saved.wasVisible) saved.shape->show();
+        else saved.shape->hide();
+    }
+    s_localBootOverlapShapes = {};
+    s_localBootOverlapData = nullptr;
+    s_localBootOverlapShapeCount = 0;
+}
+
+void update_local_boot_overlap(daAlink_c* alink) {
+    const int outfit = alink != nullptr ? local_skin_outfit() : -1;
+    const int skinChoice = outfit == kSkinOutfitZora
+        ? kSkinChoiceZora
+        : (outfit == kSkinOutfitHero ? kSkinChoiceHero : -1);
+    const bool hideBuiltInBoots = alink != nullptr && !alink->checkWolf() &&
+        alink->checkEquipHeavyBoots() &&
+        skinChoice >= 0 && skins_local_slot(skinChoice) == "Hero of Time";
+    if (!hideBuiltInBoots) {
+        restore_local_boot_overlap();
+        return;
+    }
+
+    J3DModelData* data = alink->mpLinkModel != nullptr
+        ? alink->mpLinkModel->getModelData() : nullptr;
+    if (data == nullptr) {
+        restore_local_boot_overlap();
+        return;
+    }
+    if (s_localBootOverlapData != data) {
+        restore_local_boot_overlap();
+        s_localBootOverlapData = data;
+        JUTNameTab* names = data->getMaterialName();
+        for (u16 i = 0; names != nullptr && i < data->getMaterialNum(); ++i) {
+            const char* name = names->getName(i);
+            if (name == nullptr ||
+                (std::strcmp(name, "al_boots") != 0 &&
+                    std::strcmp(name, "al_boots_m") != 0 &&
+                    std::strcmp(name, "zl_boots") != 0 &&
+                    std::strcmp(name, "zl_bootsA_m") != 0 &&
+                    std::strcmp(name, "zl_bootsB_m") != 0))
+            {
+                continue;
+            }
+            J3DMaterial* material = data->getMaterialNodePointer(i);
+            J3DShape* shape = material != nullptr ? material->getShape() : nullptr;
+            if (shape == nullptr) continue;
+            bool alreadySaved = false;
+            for (u8 saved = 0; saved < s_localBootOverlapShapeCount; ++saved) {
+                if (s_localBootOverlapShapes[saved].shape == shape) {
+                    alreadySaved = true;
+                    break;
+                }
+            }
+            if (alreadySaved ||
+                s_localBootOverlapShapeCount >= s_localBootOverlapShapes.size())
+            {
+                continue;
+            }
+            s_localBootOverlapShapes[s_localBootOverlapShapeCount++] = {
+                shape, shape->checkFlag(J3DShpFlag_Visible)};
+        }
+    }
+    for (u8 i = 0; i < s_localBootOverlapShapeCount; ++i) {
+        if (s_localBootOverlapShapes[i].shape != nullptr) {
+            s_localBootOverlapShapes[i].shape->hide();
+        }
+    }
+}
+
 void local_skin_equipment_update() {
-    local_skin_rebuild_equipment(daAlink_getAlinkActorClass());
+    daAlink_c* alink = daAlink_getAlinkActorClass();
+    local_skin_rebuild_equipment(alink);
+    update_local_boot_overlap(alink);
 }
 
 void local_skin_rebuild_link() {
@@ -5035,6 +5259,69 @@ void sync_equipment_models() {
             static_cast<void*>(pup().sheathModel));
     }
 
+    if (pup().wantDualSword != pup().dualSwordId) {
+        puppet_free_later(pup().dualSwordModel);
+        const char* file = nullptr;
+        int resource = -1;
+        const char* outfitFile = nullptr;
+        switch (pup().wantDualSword) {
+        case kPuppetSwordOrdon:
+            file = "al_swa.bmd";
+            resource = dRes_INDEX_ALINK_BMD_AL_SWA_e;
+            break;
+        case kPuppetSwordMaster:
+            file = "al_swm.bmd";
+            resource = dRes_INDEX_ALINK_BMD_AL_SWM_e;
+            break;
+        case kPuppetSwordWood:
+            file = "al_swb.bmd";
+            outfitFile = "al_SWB.bmd";
+            break;
+        default: break;
+        }
+        if (file != nullptr) {
+            pup().dualSwordModel = puppet_skin_equipment(file, cXyz(1.0f, 1.0f, 1.0f));
+            prep_equipment_model(pup().dualSwordModel);
+        }
+        if (pup().dualSwordModel == nullptr && outfitFile != nullptr) {
+            pup().dualSwordModel = puppet_private_part(outfitFile, cXyz(1.0f, 1.0f, 1.0f));
+            prep_equipment_model(pup().dualSwordModel);
+        }
+        if (pup().dualSwordModel == nullptr && resource >= 0) {
+            pup().dualSwordModel =
+                puppet_private_part_idx("Alink", resource, cXyz(1.0f, 1.0f, 1.0f));
+            prep_equipment_model(pup().dualSwordModel);
+        }
+        pup().dualSwordId = pup().wantDualSword;
+    }
+
+    if (pup().wantDualSheath != pup().dualSheathId) {
+        puppet_free_later(pup().dualSheathModel);
+        int resource = -1;
+        const char* file = nullptr;
+        switch (pup().wantDualSheath) {
+        case kPuppetSheathOrdon:
+            file = "al_poda.bmd";
+            resource = dRes_INDEX_ALINK_BMD_AL_PODA_e;
+            break;
+        case kPuppetSheathMaster:
+            file = "al_podm.bmd";
+            resource = dRes_INDEX_ALINK_BMD_AL_PODM_e;
+            break;
+        default: break;
+        }
+        if (file != nullptr) {
+            pup().dualSheathModel = puppet_skin_equipment(file, cXyz(1.0f, 1.0f, 1.0f));
+            prep_equipment_model(pup().dualSheathModel);
+        }
+        if (pup().dualSheathModel == nullptr && resource >= 0) {
+            pup().dualSheathModel =
+                puppet_private_part_idx("Alink", resource, cXyz(1.0f, 1.0f, 1.0f));
+            prep_equipment_model(pup().dualSheathModel);
+        }
+        pup().dualSheathId = pup().wantDualSheath;
+    }
+
     const bool wantShield = pup().wantShield != 0 && pup().wantShieldArc[0] != '\0';
     const bool archiveChanged = std::strncmp(pup().wantShieldArc, pup().shieldArc,
                                              sizeof(pup().shieldArc)) != 0;
@@ -5217,12 +5504,17 @@ void draw_equipment_at_joint(J3DModel* model, u16 joint, int hideMaterial = -1) 
     if (guarded) puppet_guard_end(guard);
 }
 
-void draw_equipment_at_matrix(J3DModel* model, MtxP matrix) {
+void draw_equipment_at_matrix(J3DModel* model, MtxP matrix, int hideMaterial = -1) {
     if (model == nullptr || pup().model == nullptr) return;
     PuppetGuard guard;
     const bool guarded = puppet_guard_begin(model, guard);
     ShapeVisGuard vis;
     const bool visGuarded = shape_vis_force_show(model, vis);
+    if (hideMaterial >= 0 && visGuarded && hideMaterial < model->getModelData()->getMaterialNum()) {
+        J3DMaterial* mat =
+            model->getModelData()->getMaterialNodePointer(static_cast<u16>(hideMaterial));
+        if (mat != nullptr && mat->getShape() != nullptr) mat->getShape()->hide();
+    }
     renderModelAtMtx(model, matrix, nullptr);
     if (visGuarded) shape_vis_restore(vis);
     if (guarded) puppet_guard_end(guard);
@@ -5268,6 +5560,27 @@ void draw_puppet_equipment() {
             draw_equipment_on_back(pup().swordModel, pup().sheathJoint,
                 -18.5f, 0.14f, 12.2f, 0, cM_deg2s(33.1f), 0, blade);
         }
+    }
+
+    if (pup().wantDualSwordVisible && pup().dualSwordModel != nullptr) {
+        auto drawDualModel = [&](J3DModel* model, const f32* packed, int hideMaterial) {
+            if (model == nullptr) return;
+            Mtx local;
+            Mtx world;
+            for (int row = 0; row < 3; ++row) {
+                for (int column = 0; column < 4; ++column) {
+                    local[row][column] = packed[row * 4 + column];
+                }
+            }
+            mDoMtx_concat(pup().model->getBaseTRMtx(), local, world);
+            draw_equipment_at_matrix(model, world, hideMaterial);
+        };
+        const bool wooden = pup().dualSwordId == kPuppetSwordWood;
+        const int hideSwordMaterial = wooden
+            ? (pup().wantDualSwordDrawn ? 1 : -1)
+            : (pup().wantDualSwordDrawn ? -1 : 0);
+        drawDualModel(pup().dualSwordModel, pup().dualSwordMtx, hideSwordMaterial);
+        drawDualModel(pup().dualSheathModel, pup().dualSheathMtx, -1);
     }
 
     daAlink_c* localAlink = daAlink_getAlinkActorClass();
@@ -7428,7 +7741,12 @@ void puppet_hook_init() {
             remember_aram_original(index, *result);
             J3DModelData* mine = skins_local_aram_data(index);
             const char* file = skins_aram_file_for_index(index);
-            if (mine == nullptr || !skin_fits_original(mine, *result, file)) return;
+            const std::string skinName = local_equipment_skin_name(file);
+            if (mine == nullptr ||
+                !local_skin_fits_equipment_model(mine, *result, file, skinName.c_str()))
+            {
+                return;
+            }
             models_reset_for_game(mine, file);
             *result = mine;
             breadcrumb2("local: held item (first draw)", file);
@@ -7445,7 +7763,12 @@ void puppet_hook_init() {
             if (!aram_original(index, joints, mats)) return HOOK_CONTINUE;
             J3DModelData* mine = skins_local_aram_data(index);
             const char* file = skins_aram_file_for_index(index);
-            if (mine == nullptr || !skin_fits_counts(mine, joints, mats, file)) return HOOK_CONTINUE;
+            const std::string skinName = local_equipment_skin_name(file);
+            if (mine == nullptr ||
+                !local_skin_fits_equipment_counts(mine, joints, mats, file, skinName.c_str()))
+            {
+                return HOOK_CONTINUE;
+            }
             models_reset_for_game(mine, file);
             *result = mine;
             breadcrumb2("local: held item", file);
@@ -7505,9 +7828,12 @@ void puppet_hook_init() {
             if (result == nullptr || *result == nullptr) return;
             const char* resName = mods::arg<const char*>(args, 1);
             J3DModelData* mine = local_skin_for(mods::arg<const char*>(args, 0), resName);
+            const std::string skinName = local_equipment_skin_name(resName);
 
             if (mine != nullptr &&
-                skin_fits_original(mine, static_cast<J3DModelData*>(*result), resName)) {
+                local_skin_fits_equipment_model(
+                    mine, static_cast<J3DModelData*>(*result), resName, skinName.c_str()))
+            {
 
                 models_reset_for_game(mine, resName);
                 *result = mine;
@@ -7549,6 +7875,18 @@ void puppet_hook_init() {
                     equipmentFile = "rod_ukib.bmd";
                 } else if (index == dRes_INDEX_ALINK_BMD_ROD_UKIC_e) {
                     equipmentFile = "rod_ukic.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_SANGO_FOOK_e) {
+                    equipmentFile = "sango_fook.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_SFOOK_e) {
+                    equipmentFile = "sfook.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_UKI_e) {
+                    equipmentFile = "uki.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_UKI_SAKI_e) {
+                    equipmentFile = "uki_saki.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_WORM_e) {
+                    equipmentFile = "worm.bmd";
+                } else if (index == dRes_INDEX_ALINK_BMD_WORM_HOLE_e) {
+                    equipmentFile = "worm_hole.bmd";
                 }
             } else if (std::strcmp(arc, "Kmdl") == 0 && index == kWoodSwordKmdlIndex) {
                 equipmentFile = "al_swb.bmd";
@@ -7567,9 +7905,11 @@ void puppet_hook_init() {
             }
             if (equipmentFile != nullptr) {
                 J3DModelData* mine = skins_local_equipment_data(equipmentFile);
+                const std::string skinName = local_equipment_skin_name(equipmentFile);
                 if (mine != nullptr &&
-                    skin_fits_original(
-                        mine, static_cast<J3DModelData*>(*result), equipmentFile))
+                    local_skin_fits_equipment_model(
+                        mine, static_cast<J3DModelData*>(*result), equipmentFile,
+                        skinName.c_str()))
                 {
                     models_reset_for_game(mine, equipmentFile);
                     *result = mine;

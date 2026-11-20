@@ -239,6 +239,8 @@ enum SkinChoiceSlot {
     kSkinChoiceFirstItem = kSkinChoiceWoodSword,
 };
 
+constexpr char kDefaultLinkSkinName[] = "__default_link__";
+
 struct SkinChoices {
     char name[kSkinChoiceCount][kSkinNameMax];
     uint32_t hash[kSkinChoiceCount];
@@ -888,6 +890,7 @@ uint32_t global_total();
 bool global_connecting();
 void global_on_ws_event(const mods::ws::Event& event);
 bool global_on_datagram(const std::string& from, const uint8_t* data, size_t size);
+bool coop_fill_dual_wield_snapshot(PlayerSnapshot* snapshot);
 void global_send_snapshot(const PlayerSnapshot& snapshot);
 void global_send_colors(const MsgColorEntry* entries);
 bool global_send_chat(const std::string& text);

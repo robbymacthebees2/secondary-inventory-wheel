@@ -250,6 +250,10 @@ int64_t sprintStaminaRecovery() {
         g_sprintStaminaRecovery, kSprintStaminaRecoveryDefault, 1, 100);
 }
 
+int64_t glideStaminaDrain() {
+    return get_int_option(g_glideStaminaDrain, kGlideStaminaDrainDefault, 0, 20);
+}
+
 bool glideEnabled() {
     return get_bool_option(g_glideEnabled, false);
 }
