@@ -1389,7 +1389,14 @@ bool add_slot_dropdown(UiElementHandle pane, int slot) {
     s_slotOptionPtrs[slot].clear();
     s_slotModelNames[slot].clear();
 
-    s_slotOptions[slot].push_back(slot >= kSkinChoiceFirstItem ? "Same as Equipment" : "Default");
+    const bool itemSlot = slot >= kSkinChoiceFirstItem;
+    s_slotOptions[slot].push_back(
+        itemSlot ? "Same as Equipment" :
+            (slot == kSkinChoiceEquipment ? "Link (Default)" : "Default"));
+    if (itemSlot) {
+        s_slotOptions[slot].push_back("Link");
+        s_slotModelNames[slot].push_back(kDefaultLinkSkinName);
+    }
     for (size_t i = 0; i < s_modelNames.size(); ++i) {
         if (!skins_covers_slot(s_modelNames[i].c_str(), slot)) continue;
         s_slotOptions[slot].push_back(s_modelTitles[i]);

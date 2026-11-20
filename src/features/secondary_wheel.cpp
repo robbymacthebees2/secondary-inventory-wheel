@@ -1978,7 +1978,8 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
         return HOOK_SKIP_ORIGINAL;
     }
     picture->setBlackWhite(
-        JUtility::TColor(0, 0, 0, 0), JUtility::TColor(255, 255, 255, 255));
+        JUtility::TColor(0, 0, 0, 0),
+        JUtility::TColor(255, 255, 255, 255));
     meter->mpItemXYPane[button]->hide();
 
     const f32 customIconScale =
@@ -2545,7 +2546,6 @@ void refresh_secondary_hud_assignments(ModContext*, void* args, void*, void*) {
             g_secondaryHudRefreshPending[button] = secondaryItemAssigned(button);
         }
         g_secondaryHudAssignmentsInitialized = true;
-        return;
     }
 
     for (int button = 0; button < 2; ++button) {
@@ -2554,6 +2554,14 @@ void refresh_secondary_hud_assignments(ModContext*, void* args, void*, void*) {
             g_secondaryHudAssignments[button] = slot;
             g_secondaryHudRefreshPending[button] = true;
         }
+        const bool assigned = secondaryItemAssigned(button);
+        const u8 item = assigned
+                            ? secondaryDisplayItemForSlot(slot)
+                            : meter->mItemStatus[button * 2];
+        if (assigned) {
+            // The vanilla Lantern meter follows this item status, not the HUD icon.
+            meter->mItemStatus[button * 2] = item;
+        }
         if (!g_secondaryHudRefreshPending[button] || meter->field_0x128 != 0 ||
             meter->mpMeterDraw->mpItemXY[button] == nullptr ||
             meter->mpMeterDraw->mpItemXYPane[button] == nullptr)
@@ -2561,9 +2569,6 @@ void refresh_secondary_hud_assignments(ModContext*, void* args, void*, void*) {
             continue;
         }
 
-        const u8 item = secondaryItemAssigned(button)
-                            ? secondaryDisplayItemForSlot(slot)
-                            : meter->mItemStatus[button * 2];
         const u8 status = meter->mItemStatus[button * 2 + 1];
         meter->mpMeterDraw->drawButtonXY(
             button, item, status, true, false);

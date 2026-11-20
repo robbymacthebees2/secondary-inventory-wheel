@@ -9,8 +9,13 @@
 #include "mods/svc/save.h"
 #include "mods/svc/texture.h"
 #include "mods/svc/ui.h"
+#include "mods/svc/game_mode.h"
+#include "d/d_file_select.h"
+#include "d/d_s_name.h"
 #include "coop/mod.hpp"
+#include "coop/net/protocol.hpp"
 #include "twilit_essentials/stamina.h"
+#include "twilit_essentials/collection.h"
 
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DPacket.h"
@@ -38,6 +43,7 @@
 #include "d/actor/d_a_e_zs.h"
 #include "d/actor/d_a_obj_iceleaf.h"
 #include "d/actor/d_a_obj_ice_s.h"
+#include "d/actor/d_a_npc.h"
 #include "d/actor/d_a_npc_chin.h"
 #include "d/d_a_item_static.h"
 #include "d/actor/d_a_boomerang.h"
@@ -83,6 +89,7 @@
 #include "f_pc/f_pc_layer.h"
 #include "f_pc/f_pc_leaf.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "mods/svc/host.h"
 #include "m_Do/m_Do_ext.h"
 
 #include <dolphin/os.h>
@@ -101,6 +108,7 @@
 #include <new>
 #include <chrono>
 #include <mutex>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -118,6 +126,7 @@ IMPORT_OPTIONAL_SERVICE(ActorService, s_manualJumpActorService);
 IMPORT_OPTIONAL_SERVICE(TextureService, s_ootHeartsTextureService);
 IMPORT_OPTIONAL_SERVICE_VERSION(
     TwilitEssentialsStaminaService, svc_te_stamina, 0);
+extern const HostService* svc_host;
 
 #include "features/dark_link_eye_bloom.cpp"
 
@@ -140,6 +149,7 @@ constexpr int64_t kManualJumpMaxHeightPercent = 500;
 constexpr int64_t kSprintSpeedDefaultPercent = 150;
 constexpr int64_t kSprintStaminaDrainDefault = 5;
 constexpr int64_t kSprintStaminaRecoveryDefault = 5;
+constexpr int64_t kGlideStaminaDrainDefault = 5;
 constexpr int64_t kGlideItemDefault = 0;
 constexpr int64_t kGaleHeightDefaultPercent = 500;
 constexpr int64_t kGaleHeightMinPercent = 100;
@@ -149,6 +159,8 @@ constexpr int64_t kGaleChargeCapacityMax = 12;
 constexpr int64_t kGaleRecoveryDefaultSeconds = 120;
 constexpr int64_t kGaleRecoveryMaxSeconds = 3600;
 constexpr int64_t kAimModeDefault = 2;
+constexpr int64_t kNewSaveModeDefault = 0;
+constexpr int64_t kDualWieldSwordDefault = 1;
 constexpr int64_t kCinemaZoomDefaultPercent = 100;
 constexpr int64_t kCinemaZoomMinPercent = 25;
 constexpr int64_t kCinemaZoomMaxPercent = 400;
@@ -307,6 +319,7 @@ ConfigVarHandle g_wolfSprintSpeedPercent = 0;
 ConfigVarHandle g_sprintStaminaEnabled = 0;
 ConfigVarHandle g_sprintStaminaDrain = 0;
 ConfigVarHandle g_sprintStaminaRecovery = 0;
+ConfigVarHandle g_glideStaminaDrain = 0;
 ConfigVarHandle g_glideEnabled = 0;
 ConfigVarHandle g_glideItem = 0;
 ConfigVarHandle g_revalisGaleEnabled = 0;
@@ -315,6 +328,9 @@ ConfigVarHandle g_galeChargeCapacity = 0;
 ConfigVarHandle g_galeRecoverySeconds = 0;
 ConfigVarHandle g_aimMode = 0;
 ConfigVarHandle g_aimMovementEnabled = 0;
+ConfigVarHandle g_newSaveMode = 0;
+ConfigVarHandle g_dualWieldEnabled = 0;
+ConfigVarHandle g_dualWieldSword = 0;
 ConfigVarHandle g_hawkeyeMidairBowAimEnabled = 0;
 ConfigVarHandle g_cinemaZoomPercent = 0;
 ConfigVarHandle g_thirdPersonReticleOffsetY = 0;
@@ -583,8 +599,25 @@ ModResult add_settings(UiElementHandle panel);
 ModResult initialize();
 void update();
 }
+namespace dawnlight {
+struct DualWieldSnapshot {
+    uint8_t sword;
+    uint8_t sheath;
+    uint8_t visible;
+    uint8_t drawn;
+    float swordMtx[12];
+    float sheathMtx[12];
+};
+bool dual_wield_snapshot(DualWieldSnapshot& snapshot);
+ModResult install_collection_dual_wield(ModError* error);
+void update_collection_dual_wield();
+void shutdown_collection_dual_wield();
+ModResult install_dual_wield_hooks(ModError* error);
+void shutdown_dual_wield();
+}
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
+#include "features/new_save_modes.cpp"
 #include "features/gale_bomb.cpp"
 #include "features/hover_boots.cpp"
 #include "features/secondary_wheel.cpp"
@@ -616,7 +649,24 @@ void update();
 #include "features/truth_mask.cpp"
 #include "features/goron_mask.cpp"
 #include "features/giant_mask.cpp"
+#include "features/dual_wield/config.cpp"
+#include "features/dual_wield/collection_service.cpp"
+#include "features/dual_wield/collection_dual_wield.cpp"
+#include "features/dual_wield/dual_wield.cpp"
 
+}
+
+bool coop_fill_dual_wield_snapshot(PlayerSnapshot* snapshot) {
+    if (snapshot == nullptr) return false;
+    dawnlight::DualWieldSnapshot dualWield{};
+    if (!dawnlight::dual_wield_snapshot(dualWield)) return false;
+    snapshot->dualSword = dualWield.sword;
+    snapshot->dualSheath = dualWield.sheath;
+    snapshot->dualSwordVisible = dualWield.visible;
+    snapshot->dualSwordDrawn = dualWield.drawn;
+    std::memcpy(snapshot->dualSwordMtx, dualWield.swordMtx, sizeof(snapshot->dualSwordMtx));
+    std::memcpy(snapshot->dualSheathMtx, dualWield.sheathMtx, sizeof(snapshot->dualSheathMtx));
+    return true;
 }
 
 bool coop_fairy_companion_network_state(FairyCompanionNetworkState* out) {
@@ -710,6 +760,9 @@ ModResult install_hooks(ModError* error) {
     ADD_PRE(bow_aim::BulletTimeLinkPosMove, bow_aim::slow_link_movement);
     ADD_POST(bow_aim::BulletTimeLinkPosMove, bow_aim::finish_slow_link_movement);
     ADD_PRE(bow_aim::BowSubject, bow_aim::replace_bow_subject);
+    ADD_POST(bow_aim::BowSubject, bow_aim::restore_vanilla_bow_movement_input);
+    ADD_PRE(bow_aim::FirstPersonSubjectivity, bow_aim::route_first_person_subjectivity_to_right_stick);
+    ADD_POST(bow_aim::FirstPersonSubjectivity, bow_aim::restore_first_person_subjectivity_input);
     ADD_POST(bow_aim::BoomerangSubject, bow_aim::adjust_boomerang_subject);
     ADD_PRE(bow_aim::ClawshotSubject, bow_aim::isolate_aim_movement_input);
     ADD_POST(bow_aim::ClawshotSubject, bow_aim::adjust_clawshot_subject);
@@ -756,6 +809,10 @@ ModResult install_hooks(ModError* error) {
     ADD_POST(ManualGliderDrawHand, manual_glider_visual::after_draw_hand);
     ADD_PRE(ManualGliderCarrierDraw, manual_glider_visual::before_carrier_draw);
     ADD_PRE(CollectChangeClothe, prevent_goron_tunic_clothing_change);
+    ADD_POST(new_save_modes::IntroSkipNameInput2, new_save_modes::after_name_input2);
+    ADD_PRE(new_save_modes::IntroSkipNameSceneChange, new_save_modes::before_name_scene_change);
+    ADD_POST(new_save_modes::IntroSkipNameSceneChange, new_save_modes::after_name_scene_change);
+    ADD_PRE(new_save_modes::IntroSkipSetNextStage, new_save_modes::before_set_next_stage);
     ADD_PRE(GetGroundAngle, flatten_hover_water_ground_angle);
     ADD_PRE(GetSlidePolygon, suppress_submerged_water_slide_polygon);
     ADD_PRE(CheckSlope, suppress_submerged_water_slope);
@@ -1205,6 +1262,16 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     config = CONFIG_VAR_DESC_INIT;
+    config.name = "glideStaminaDrain";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kGlideStaminaDrainDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_glideStaminaDrain);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register glide stamina drain setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
     config.name = "glideEnabled";
     config.type = CONFIG_VAR_BOOL;
     config.default_bool = false;
@@ -1271,6 +1338,36 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     result = svc_config->register_var(mod_ctx, &config, &g_aimMode);
     if (result != MOD_OK) {
         svc_log->error(mod_ctx, "failed to register bow aim mode setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "newSaveMode";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kNewSaveModeDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_newSaveMode);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register new save mode setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "dualWieldEnabled";
+    config.type = CONFIG_VAR_BOOL;
+    config.default_bool = false;
+    result = svc_config->register_var(mod_ctx, &config, &g_dualWieldEnabled);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Dual Wield setting");
+        return result;
+    }
+
+    config = CONFIG_VAR_DESC_INIT;
+    config.name = "dualWieldSword";
+    config.type = CONFIG_VAR_INT;
+    config.default_int = kDualWieldSwordDefault;
+    result = svc_config->register_var(mod_ctx, &config, &g_dualWieldSword);
+    if (result != MOD_OK) {
+        svc_log->error(mod_ctx, "failed to register Dual Wield sword setting");
         return result;
     }
 
@@ -1631,6 +1728,17 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) {
         return result;
     }
+    result = dawnlight::install_collection_dual_wield(error);
+    if (result != MOD_OK) {
+        set_mod_init_error(error, result, "Dual Wield Collection integration failed");
+        return result;
+    }
+    result = dawnlight::install_dual_wield_hooks(error);
+    if (result != MOD_OK) {
+        set_mod_init_error(error, result, "Dual Wield combat hooks failed");
+        dawnlight::shutdown_collection_dual_wield();
+        return result;
+    }
     result = initialize_dark_link_visual_hooks(error);
     if (result != MOD_OK) {
         set_mod_init_error(error, result, "Dark Link visual hook initialization failed");
@@ -1683,6 +1791,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     update_goron_mask();
     update_giant_mask();
     update_armos_hammer();
+    dawnlight::update_collection_dual_wield();
     fire_arrows::update();
     enemy_spawner::update();
     oot_hearts::update();
@@ -1698,6 +1807,8 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     oot_hearts::shutdown();
     clear_ice_arrow_water_platforms();
     bow_aim::stop_bow_bullet_time();
+    dawnlight::shutdown_dual_wield();
+    dawnlight::shutdown_collection_dual_wield();
     shutdown_fairy_companion();
     g_revaliGaleVisual.release();
     g_revaliGaleVisualOwner = nullptr;

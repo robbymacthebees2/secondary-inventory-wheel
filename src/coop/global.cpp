@@ -422,6 +422,12 @@ bool clean_snapshot(PlayerSnapshot& s) {
     for (float v : s.armosHammerMtx) {
         if (!sane_float(v)) return false;
     }
+    for (float v : s.dualSwordMtx) {
+        if (!sane_float(v)) return false;
+    }
+    for (float v : s.dualSheathMtx) {
+        if (!sane_float(v)) return false;
+    }
     for (const AnmSlotSnapshot* half : {s.under, s.upper}) {
         for (int i = 0; i < 3; ++i) {
             if (!sane_float(half[i].frame, 1.0e5f) || !sane_float(half[i].rate, 1.0e3f)) return false;
@@ -446,6 +452,10 @@ bool clean_snapshot(PlayerSnapshot& s) {
     if (s.outfit > kPuppetOutfitSumo) s.outfit = kPuppetOutfitDefault;
     if (s.sword > kPuppetSwordWood) s.sword = kPuppetSwordNone;
     if (s.sheath > kPuppetSheathMaster) s.sheath = kPuppetSheathNone;
+    if (s.dualSword > kPuppetSwordWood) s.dualSword = kPuppetSwordNone;
+    if (s.dualSheath > kPuppetSheathMaster) s.dualSheath = kPuppetSheathNone;
+    s.dualSwordVisible = s.dualSwordVisible != 0;
+    s.dualSwordDrawn = s.dualSwordDrawn != 0;
     if (s.chainKind > kPuppetChainRodLure) s.chainKind = kPuppetChainNone;
     if (s.chainCount > kPuppetChainPts) s.chainCount = kPuppetChainPts;
     s.poseFlags &= kPuppetPoseSeated | kPuppetPoseShieldSurf |

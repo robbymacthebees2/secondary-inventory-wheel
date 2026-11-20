@@ -1732,6 +1732,7 @@ void send_local_snapshot() {
         snapshot.swordJoint = alink->mLeftItemJntNo;
         snapshot.sheathJoint = alink->field_0x30b6;
         snapshot.shieldJoint = alink->mRightItemJntNo;
+        if (!modelsUnsafe) coop_fill_dual_wield_snapshot(&snapshot);
 
         auto origin_of = [](MtxP m) {
             cXyz v(0.0f, 0.0f, 0.0f);

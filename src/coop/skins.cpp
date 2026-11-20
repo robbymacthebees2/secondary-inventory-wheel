@@ -21,6 +21,7 @@
 #include "d/d_item_data.h"
 #include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
 #include "JSystem/J3DGraphAnimator/J3DJoint.h"
+#include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphLoader/J3DModelLoader.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
@@ -1894,11 +1895,16 @@ void skins_local_choices(SkinChoices* out) {
     std::memset(out, 0, sizeof(*out));
     for (int i = 0; i < kSkinChoiceCount; ++i) {
 
+        const std::string choice = skins_local_slot(i);
+        if (i >= kSkinChoiceFirstItem && choice == kDefaultLinkSkinName) {
+            std::strncpy(out->name[i], kDefaultLinkSkinName, kSkinNameMax - 1);
+            continue;
+        }
         if (i == kSkinChoiceVoice && skins_local_slot(i) == kSilentVoice) {
             std::strncpy(out->name[i], kSilentVoice, kSkinNameMax - 1);
             continue;
         }
-        const Skin* skin = find(skins_local_slot(i).c_str());
+        const Skin* skin = find(choice.c_str());
         if (skin == nullptr) continue;
         std::strncpy(out->name[i], skin->name.c_str(), kSkinNameMax - 1);
         out->hash[i] = skin->hash;
@@ -1909,6 +1915,12 @@ std::string preset_value(const char* name, int slot) {
     const std::string value = name != nullptr ? name : "";
     if (value == kN64HoTName && !skins_covers_slot(value.c_str(), slot)) return "";
     if (slot >= kSkinChoiceFirstItem) {
+        if (value == "Hero of Time" &&
+            (slot == kSkinChoiceWoodSword || slot == kSkinChoiceOrdonShield ||
+                slot == kSkinChoiceLantern))
+        {
+            return kN64HoTName;
+        }
         if (value == kYoungLinkSkinName &&
             (slot == kSkinChoiceWoodSword || slot == kSkinChoiceOrdonShield))
         {
@@ -2093,8 +2105,23 @@ J3DModelData* skins_equipment_data(const char* name, const char* file) {
     return equipment_data(name, file, false);
 }
 
+bool equipment_uses_plain_bmd_loader(const Skin* skin, const char* file) {
+    if (skin == nullptr || skin->name != "Hero of Time" || file == nullptr) return false;
+
+    const char* const files[] = {
+        "al_bomb.bmd", "al_sp.bmd", "al_crod.bmd", "crod_ball.bmd", "rod_ukia.bmd", "rod_ukib.bmd",
+        "rod_ukic.bmd", "sango_fook.bmd", "sfook.bmd", "uki.bmd", "uki_saki.bmd",
+        "worm.bmd", "worm_hole.bmd",
+    };
+    for (const char* candidate : files) {
+        if (std::strcmp(file, candidate) == 0) return true;
+    }
+    return false;
+}
+
 J3DModelData* equipment_data(const char* name, const char* file, bool forLink) {
     if (file == nullptr || file[0] == '\0') return nullptr;
+    if (name != nullptr && std::strcmp(name, kDefaultLinkSkinName) == 0) return nullptr;
     const Skin* skin = find(name);
     if (skin == nullptr) return nullptr;
     if (skin->builtin) return skin->name == kGanondorfSkin ? ganon_skin_equipment(file) : nullptr;
@@ -2115,14 +2142,71 @@ J3DModelData* equipment_data(const char* name, const char* file, bool forLink) {
         const std::filesystem::path outfitPath = outfitDir / file;
         if (exists_ci(outfitPath, ec) && !ec) path = outfitPath;
     }
+    if (skin->name == "Hero of Time" &&
+        (std::strcmp(file, "al_bootsh.bmd") == 0 ||
+            std::strcmp(file, "al_pachi.bmd") == 0) &&
+        !exists_ci(path, ec))
+    {
+        const Skin* n64HoT = find(kN64HoTName);
+        if (n64HoT != nullptr) {
+            path = std::filesystem::u8path(n64HoT->path) / "equipment" / file;
+        }
+    }
     LoadedCutscene loaded;
     loaded.skin = key;
     if (exists_ci(path, ec) && !ec) {
-        loaded.data = loadBmdDataFromFile(path_text(path).c_str());
-        if (loaded.data == nullptr) {
+        const std::string modelPath = path_text(path);
+        if (equipment_uses_plain_bmd_loader(skin, file)) {
+            loaded.data = loadBmdDataFromFile(modelPath.c_str());
+        } else {
             loaded.data = forLink
-                ? loadBmdDataForLink(path_text(path).c_str())
-                : loadBmdDataForPuppet(path_text(path).c_str());
+                ? loadBmdDataForLink(modelPath.c_str())
+                : loadBmdDataForPuppet(modelPath.c_str());
+        }
+        if (loaded.data == nullptr) loaded.data = loadBmdDataFromFile(path_text(path).c_str());
+    }
+    if (loaded.data != nullptr && skin->name == "Hero of Time" &&
+        std::strcmp(file, "al_swm.bmd") == 0)
+    {
+        J3DModelData* shieldData =
+            equipment_data(skin->name.c_str(), "al_sha.bmd", forLink);
+        J3DMaterial* referenceMaterial =
+            shieldData != nullptr && shieldData->getMaterialNum() > 0
+                ? shieldData->getMaterialNodePointer(0)
+                : nullptr;
+        J3DColorBlock* referenceColors =
+            referenceMaterial != nullptr ? referenceMaterial->getColorBlock() : nullptr;
+        const u8 referenceChannelCount = referenceColors != nullptr
+            ? std::min<u8>(referenceColors->getColorChanNum(), 4)
+            : 0;
+        u16 updatedMaterials = 0;
+        for (u16 i = 0; referenceChannelCount > 0 &&
+             i < loaded.data->getMaterialNum(); ++i)
+        {
+            J3DMaterial* material = loaded.data->getMaterialNodePointer(i);
+            J3DColorBlock* colors = material != nullptr ? material->getColorBlock() : nullptr;
+            if (colors == nullptr) continue;
+
+            const u8 channelCount = std::min<u8>(colors->getColorChanNum(), 4);
+            for (u8 channel = 0; channel < channelCount; ++channel) {
+                const J3DColorChan* referenceChannel = referenceColors->getColorChan(
+                    std::min<u8>(channel, referenceChannelCount - 1));
+                colors->setColorChan(channel, referenceChannel);
+            }
+            if (channelCount > 0) {
+                material->change();
+                ++updatedMaterials;
+            }
+        }
+        if (updatedMaterials == 0) {
+            coop_log::warn(
+                "coop_mod: [SKIN] could not match Hero of Time Master Sword lighting "
+                "to its Hylian Shield");
+        } else {
+            coop_log::info(
+                "coop_mod: [SKIN] matched Hero of Time Master Sword lighting to its "
+                "Hylian Shield on {} material(s)",
+                updatedMaterials);
         }
     }
     loaded.failed = loaded.data == nullptr;
@@ -2134,6 +2218,12 @@ bool skins_ships_equipment_file(const char* name, const char* file) {
     if (!s_scanned) rescan();
     const Skin* skin = find(name);
     if (skin == nullptr || file == nullptr) return false;
+    if (skin->name == "Hero of Time" &&
+        (std::strcmp(file, "al_bootsh.bmd") == 0 ||
+            std::strcmp(file, "al_pachi.bmd") == 0))
+    {
+        return true;
+    }
     if (skin->builtin) {
         return (skin->name == kGanondorfSkin && ganon_skin_ships(file)) ||
                (skin->name == kHerosShadeSkin && shade_skin_ships(file));

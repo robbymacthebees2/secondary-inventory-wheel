@@ -3,6 +3,9 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     static const char* kJumpButtonOptions[] = {"R", "L (LB)", "R3", "L3"};
     static const char* kGlideItemOptions[] = {"Cucco", "Glider"};
     static const char* kAimModeOptions[] = {"Vanilla", "3rd Person", "Cinema"};
+    static const char* kNewSaveModeOptions[] = {"Vanilla", "Skip Intro"};
+    static const char* kDualWieldSwordOptions[] = {
+        "Wooden Sword", "Ordon Sword", "Master Sword"};
     static const char* kBulletTimeModeOptions[] = {"Off", "Always", "BOTW"};
     static const char* kHoverPlaneLowerBindingOptions[] = {"L1", "L2", "L3", "R1", "R2", "R3"};
     static const char* kFairyColorOptions[] = {
@@ -274,9 +277,9 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.kind = UI_CONTROL_TOGGLE;
     control.label = "Sprint Stamina";
     control.help_rml =
-        "Enable the Wheel's green stamina bar for Sprint and Wolf Sprint. It drains while sprinting "
-        "and recovers when sprinting stops. When Twilit Essentials stamina is enabled, that system "
-        "is used instead and this bar is hidden. Off by default.";
+        "Enable the Wheel's green stamina bar for Sprint, Wolf Sprint, and Glide. It drains "
+        "during these actions and recovers when they stop. When Twilit Essentials stamina is "
+        "enabled, that system is used instead and this bar is hidden. Off by default.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_sprintStaminaEnabled;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
@@ -301,8 +304,26 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_NUMBER;
+    control.label = "Glide Stamina Drain";
+    control.help_rml =
+        "Stamina points drained per second while the Cucco or cloth Glider is deployed; "
+        "also scales its Twilit Essentials drain.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_glideStaminaDrain;
+    control.min = 0;
+    control.max = 20;
+    control.step = 1;
+    control.suffix = " /sec";
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_NUMBER;
     control.label = "Sprint Stamina Recovery";
-    control.help_rml = "Wheel stamina points recovered per second while not sprinting.";
+    control.help_rml =
+        "Wheel stamina points recovered per second while Sprint, Wolf Sprint, and Glide are inactive.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_sprintStaminaRecovery;
     control.min = 1;
@@ -402,6 +423,51 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
 
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_DROPDOWN;
+    control.label = "New Save Mode";
+    control.help_rml =
+        "Choose the starting sequence for new save files. Skip Intro applies Dawnlight's "
+        "reference progress preset and starts in Hyrule Field.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_newSaveMode;
+    control.options = kNewSaveModeOptions;
+    control.option_count =
+        sizeof(kNewSaveModeOptions) / sizeof(kNewSaveModeOptions[0]);
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_TOGGLE;
+    control.label = "Dual Wield";
+    control.help_rml =
+        "Enable Dawnlight's Dual Wield combat and equipment. Select the second sword "
+        "from the Collection screen while an owned shield is equipped.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_dualWieldEnabled;
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_DROPDOWN;
+    control.label = "Dual Wield Sword";
+    control.help_rml =
+        "Choose the sword used as the offhand weapon. Its active co-op equipment skin "
+        "is used when available.";
+    control.binding = UI_BINDING_CONFIG_VAR;
+    control.config_var = g_dualWieldSword;
+    control.options = kDualWieldSwordOptions;
+    control.option_count =
+        sizeof(kDualWieldSwordOptions) / sizeof(kDualWieldSwordOptions[0]);
+    result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
+    if (result != MOD_OK) {
+        return result;
+    }
+
+    control = UI_CONTROL_DESC_INIT;
+    control.kind = UI_CONTROL_DROPDOWN;
     control.label = "Aim Mode";
     control.help_rml =
         "Vanilla uses the original bow camera. 3rd Person keeps Link visible while aiming. "
@@ -420,7 +486,8 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.label = "Aim Movement";
     control.help_rml =
         "Allow movement while aiming. In Vanilla aim, movement uses the left stick and bow "
-        "direction uses the right stick.";
+        "direction uses the right stick. In first-person view, the left stick moves Link and "
+        "the right stick controls the camera.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_aimMovementEnabled;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);
@@ -884,6 +951,8 @@ void open_combined_credits(ModContext* ctx, void*) {
         "included in the package)</p>"
         "<p>Bow aiming and selective Bullet Time based on Dawnlight by BeZide93 (CC0 1.0; "
         "license included in the package)</p>"
+        "<p>Dual Wield combat and equipment, and the Skip Intro reference preset, ported from "
+        "Dawnlight by BeZide93 with permission.</p>"
         "<p>Flurry Rush and enemy spawner features based on Dawnlight by BeZide93 (CC0 1.0; "
         "license included in the package)</p>"
         "<p>OOT Style Hearts textures by HugAMuffin, included with permission.</p>"

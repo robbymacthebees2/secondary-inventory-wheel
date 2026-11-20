@@ -229,6 +229,13 @@ struct PlayerSnapshot {
 
     uint8_t wheelFlags;
     float armosHammerMtx[12];
+
+    uint8_t dualSword;
+    uint8_t dualSheath;
+    uint8_t dualSwordVisible;
+    uint8_t dualSwordDrawn;
+    float dualSwordMtx[12];
+    float dualSheathMtx[12];
 };
 const float kMagneRotFixed = 8192.0f;
 
@@ -358,8 +365,10 @@ static_assert(sizeof(PlayerSnapshot) ==
             16 + 16 + (kPuppetAttachSlots * 61) + 6 + 1 + 1 + 1 + 2 +
             (kPuppetChainPts * 3 * 4) + 1 + 12 + 24 + 2 + 1 + 2 + 12 + 1 + 4 + 4 +
             4   + 1   + 18   + 18   + 6   + 4   +
-            2   + 1 + 1 + 4 + 48 + 1 + 48,
+            2   + 1 + 1 + 4 + 48 + 1 + 48 + 4 + 24 * 4,
     "PlayerSnapshot must stay tightly packed");
+static_assert(sizeof(PlayerSnapshot) <= 1200,
+    "PlayerSnapshot must fit one small datagram");
 
 static_assert(sizeof(MidnaSnapshot) != sizeof(PlayerSnapshot),
     "MidnaSnapshot and PlayerSnapshot must differ in size - handle_udp_event dispatches on it");

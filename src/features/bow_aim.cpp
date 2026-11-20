@@ -16,6 +16,7 @@ DEFINE_HOOK(&daAlink_c::procBowSubject, BowSubject);
 DEFINE_HOOK(&daAlink_c::procBoomerangSubject, BoomerangSubject);
 DEFINE_HOOK(&daAlink_c::procHookshotSubject, ClawshotSubject);
 DEFINE_HOOK(&daAlink_c::procIronBallSubject, IronBallSubject);
+DEFINE_HOOK(&daAlink_c::procCoSubjectivity, FirstPersonSubjectivity);
 DEFINE_HOOK(&daAlink_c::setStickData, BowSetStickData);
 DEFINE_HOOK(&dCamera_c::nextMode, BowCameraNextMode);
 DEFINE_HOOK(&dCamera_c::nextType, BowCameraNextType);
@@ -107,6 +108,24 @@ struct AimMovementInputState {
     bool active = false;
 };
 
+struct VanillaBowMovementInputState {
+    daAlink_c* link = nullptr;
+    f32 stickValue = 0.0f;
+    f32 moveValue = 0.0f;
+    s16 stickAngle = 0;
+    s16 moveAngle = 0;
+    bool active = false;
+};
+
+struct FirstPersonSubjectivityState {
+    daAlink_c* link = nullptr;
+    f32 stickValue = 0.0f;
+    f32 moveValue = 0.0f;
+    s16 stickAngle = 0;
+    s16 moveAngle = 0;
+    bool active = false;
+};
+
 BulletTimeState g_bulletTime{};
 bool g_flurryRushSlowMotionActive = false;
 bool g_flurryRushLinkSlowed = false;
@@ -132,6 +151,8 @@ std::size_t g_enemyAnimationDepth = 0;
 std::uint64_t g_slowMotionFrame = 0;
 LinkPositionStep g_linkPositionStep{};
 AimMovementInputState g_aimMovementInput{};
+VanillaBowMovementInputState g_vanillaBowMovementInput{};
+FirstPersonSubjectivityState g_firstPersonSubjectivity{};
 bool g_customSightActive = false;
 bool g_thirdPersonAimActive = false;
 f32 g_thirdPersonDistance = 300.0f;
@@ -212,8 +233,7 @@ bool aim_subject_active(const daAlink_c* link) {
 bool vanilla_aim_camera_active(const daAlink_c* link) {
     return aimMode() == 0 &&
         (boomerang_subject_active(link) || clawshot_subject_active(link) ||
-         ironball_subject_active(link) ||
-         (bow_subject_active(link) && !link->mLinkAcch.ChkGroundHit()));
+         ironball_subject_active(link) || bow_subject_active(link));
 }
 
 bool is_hawkeye_bow(const daAlink_c* link) {
@@ -345,6 +365,24 @@ void normalize_forward_aim_speed(daAlink_c* link) {
     if (link->mNormalSpeed >= 0.0f && link->mNormalSpeed < targetSpeed) {
         link->mNormalSpeed = targetSpeed;
     }
+}
+
+void update_subject_movement(daAlink_c* link, bool preserveBodyPose = false) {
+    if (link == nullptr || !aimMovementEnabled()) {
+        return;
+    }
+
+    const s16 shapeAngle = link->shape_angle.y;
+    const s16 bodyAngleX = link->mBodyAngle.x;
+    const s16 bodyAngleY = link->mBodyAngle.y;
+    link->setSpeedAndAngleAtn();
+    link->shape_angle.y = shapeAngle;
+    if (preserveBodyPose) {
+        link->mBodyAngle.x = bodyAngleX;
+        link->mBodyAngle.y = bodyAngleY;
+    }
+    update_move_animation(link);
+    normalize_forward_aim_speed(link);
 }
 
 bool camera_aim_ray(daAlink_c* link, cXyz& eye, cXyz& direction, f32& range) {
@@ -524,16 +562,12 @@ bool update_subject_aim(daAlink_c* link) {
         face_camera_view_yaw(link);
     }
 
-    const s16 shapeAngle = link->shape_angle.y;
-    link->setSpeedAndAngleAtn();
-    link->shape_angle.y = shapeAngle;
-    update_move_animation(link);
+    update_subject_movement(link);
     if (aim_with_c_stick(link)) {
         draw_subject_aim_sight(link);
     } else if (should_keep_camera_aim_sight(link)) {
         draw_camera_center_sight(link);
     }
-    normalize_forward_aim_speed(link);
     return true;
 }
 
@@ -1495,7 +1529,22 @@ void finish_slow_link_movement(ModContext*, void* args, void*, void*) {
 
 HookAction replace_bow_subject(ModContext*, void* args, void* retval, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
-    if (link == nullptr || (aimMode() == 0 && !aimMovementEnabled())) {
+    if (link == nullptr) {
+        return HOOK_CONTINUE;
+    }
+    if (!custom_camera_enabled()) {
+        if (aimMovementEnabled()) {
+            g_vanillaBowMovementInput = {
+                .link = link,
+                .stickValue = link->mStickValue,
+                .moveValue = link->mMoveValue,
+                .stickAngle = link->mStickAngle,
+                .moveAngle = link->mMoveAngle,
+                .active = true,
+            };
+            link->mStickValue = 0.0f;
+            link->mMoveValue = 0.0f;
+        }
         return HOOK_CONTINUE;
     }
 
@@ -1513,6 +1562,67 @@ HookAction replace_bow_subject(ModContext*, void* args, void* retval, void*) {
 
     *static_cast<int*>(retval) = 1;
     return HOOK_SKIP_ORIGINAL;
+}
+
+void restore_vanilla_bow_movement_input(ModContext*, void* args, void*, void*) {
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    auto& input = g_vanillaBowMovementInput;
+    if (!input.active || input.link != link) {
+        return;
+    }
+
+    link->mStickValue = input.stickValue;
+    link->mMoveValue = input.moveValue;
+    link->mStickAngle = input.stickAngle;
+    link->mMoveAngle = input.moveAngle;
+    input = {};
+    update_subject_movement(link, true);
+}
+
+HookAction route_first_person_subjectivity_to_right_stick(
+    ModContext*, void* args, void*, void*)
+{
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    auto* process = player_camera(link);
+    if (!aimMovementEnabled() || link == nullptr ||
+        link->mProcID != daAlink_c::PROC_SUBJECTIVITY ||
+        process == nullptr || g_firstPersonSubjectivity.active)
+    {
+        return HOOK_CONTINUE;
+    }
+
+    auto& pad = mDoCPd_c::getCpadInfo(process->mCamera.mPadID);
+    g_firstPersonSubjectivity = {
+        .link = link,
+        .stickValue = link->mStickValue,
+        .moveValue = link->mMoveValue,
+        .stickAngle = link->mStickAngle,
+        .moveAngle = link->mMoveAngle,
+        .active = true,
+    };
+    const f32 rightStickValue = pad.mCStickValue;
+    const s16 rightStickAngle = pad.mCStickAngle + 0x8000;
+    link->mStickValue = rightStickValue;
+    link->mStickAngle = rightStickAngle;
+    link->mMoveValue = rightStickValue;
+    return HOOK_CONTINUE;
+}
+
+void restore_first_person_subjectivity_input(
+    ModContext*, void* args, void*, void*)
+{
+    auto* link = mods::arg<daAlink_c*>(args, 0);
+    auto& state = g_firstPersonSubjectivity;
+    if (!state.active || state.link != link) {
+        return;
+    }
+
+    link->mStickValue = state.stickValue;
+    link->mMoveValue = state.moveValue;
+    link->mStickAngle = state.stickAngle;
+    link->mMoveAngle = state.moveAngle;
+    state = {};
+    update_subject_movement(link, true);
 }
 
 void adjust_aim_subject(daAlink_c* link) {
@@ -1843,7 +1953,9 @@ void apply_unconstrained_bow_camera(dCamera_c* camera, daAlink_c* link) {
 HookAction sync_airborne_bow_root_yaw(ModContext*, void* args, void*, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
     if (link == nullptr || !is_bow_or_slingshot(link->mEquipItem) ||
-        link->mLinkAcch.ChkGroundHit() || !aim_subject_active(link) ||
+        (link->mLinkAcch.ChkGroundHit() &&
+         !(aimMode() == 0 && bow_subject_active(link))) ||
+        !aim_subject_active(link) ||
         (!custom_camera_enabled() && !vanilla_aim_camera_active(link)))
     {
         return HOOK_CONTINUE;
