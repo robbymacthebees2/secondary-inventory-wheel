@@ -2,12 +2,23 @@
 
 Made by RobinTheSoundsmith. This Dusklight code mod adds a second item wheel with 24 mod-owned item slots and a separate Goron Tunic slot. It reuses the vanilla item-wheel presentation while handling slot identity, selection, movement, and rendering independently of vanilla inventory indexes. Hawk Grass is provided in the first secondary slot and Hover Boots in the second; both can be assigned to X or Y.
 
+## Third-party asset notice and credits
+
+This mod is not an all-original-art project. It includes a community-contributed icon and uses original game art at runtime. The current `main` branch contains one standalone visual asset in `res/`; the other listed assets are loaded from the player's game installation and are not included in this repository.
+
+| Asset | Use | Credit and provenance |
+| --- | --- | --- |
+| `res/hover_boots_wings.bti` | Winged Hover Boots icon in the secondary wheel and X/Y HUD | Contributed to this repository by [@eigalum-oss](https://github.com/eigalum-oss), in [the commit that added the file](https://github.com/robbymacthebees2/secondary-inventory-wheel/commit/2eb877f2ffba069bf41d51799d9c5b0ca8d03272). The repository does not identify the icon's original source mod or its separate reuse license; contact the contributor before reusing it elsewhere. |
+| Twilight Princess item-wheel and HUD artwork, including the stock Hawk Grass icon (texture index `0x59`) and the `J_Tobi` Hawk Grass model | Vanilla wheel presentation and Hawk Grass behavior | Nintendo, *The Legend of Zelda: Twilight Princess*. These assets are loaded from the player's game data at runtime; they are not redistributed here. |
+
+No other separately bundled third-party mod asset is present in the current `main` branch. This credit list reflects the assets and runtime references currently documented by this repository; it does not grant permission to redistribute third-party or game assets.
+
 ## Repository contents
 
 - `src/mod.cpp` contains the mod implementation.
 - `mod.json` contains the Dusklight mod manifest.
 - `CMakeLists.txt` defines the mod target for Dusklight's CMake build.
-- `res/` is the mod's resource directory. The wheel loads its presentation from Dusklight at runtime and includes a custom winged Hover Boots icon.
+- `res/` is the mod's resource directory; it contains the contributor-provided winged Hover Boots icon.
 
 ## Building
 
