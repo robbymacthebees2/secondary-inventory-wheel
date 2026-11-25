@@ -2,16 +2,50 @@
 
 Made by RobinTheSoundsmith. This Dusklight code mod adds a second item wheel with 24 mod-owned item slots and a separate Goron Tunic slot. It reuses the vanilla item-wheel presentation while handling slot identity, selection, movement, and rendering independently of vanilla inventory indexes. Hawk Grass is provided in the first secondary slot and Hover Boots in the second; both can be assigned to X or Y.
 
-## Third-party asset notice and credits
+## Credits, ports, and asset provenance
 
-This mod is not an all-original-art project. It includes a community-contributed icon and uses original game art at runtime. The current `main` branch contains one standalone visual asset in `res/`; the other listed assets are loaded from the player's game installation and are not included in this repository.
+This is a mod pack, not an all-original project. The credits below consolidate the provenance recorded in the source, resource metadata, in-game Credits tab, and release notes for [all published releases from v1.0.1 through v3.9.5](https://github.com/robbymacthebees2/secondary-inventory-wheel/releases), including hotfixes. The current `main` source tree is smaller than those historical release packages: it contains one standalone visual asset, while older releases bundled additional models, textures, and integrated mod code.
 
-| Asset | Use | Credit and provenance |
-| --- | --- | --- |
-| `res/hover_boots_wings.bti` | Winged Hover Boots icon in the secondary wheel and X/Y HUD | Contributed to this repository by [@eigalum-oss](https://github.com/eigalum-oss), in [the commit that added the file](https://github.com/robbymacthebees2/secondary-inventory-wheel/commit/2eb877f2ffba069bf41d51799d9c5b0ca8d03272). The repository does not identify the icon's original source mod or its separate reuse license; contact the contributor before reusing it elsewhere. |
-| Twilight Princess item-wheel and HUD artwork, existing item icons, the stock Hawk Grass icon (texture index `0x59`), the `J_Tobi` Hawk Grass model, and the native whistle, Hawk animations, effects, and audio | Vanilla wheel presentation and Hawk Grass behavior | Nintendo, *The Legend of Zelda: Twilight Princess*. These assets are loaded from the player's game data at runtime; they are not redistributed here. |
+### Features and code adapted from other mods
 
-No other separately bundled third-party mod asset is present in the current `main` branch. This credit list reflects the assets and runtime references currently documented by this repository; it does not grant permission to redistribute third-party or game assets.
+| Original project | Feature or code used in this mod |
+| --- | --- |
+| [Dawnlight](https://github.com/BeZide93/dawnlight) by BeZide93 | Dark Link lighting, red-eye and aura visuals; Manual Jump, Disable Auto Jump, glide, Sprint, bow/camera aiming and selective Bullet Time; Dual Wield combat/equipment; Skip Intro's reference preset; Flurry Rush; and the Enemy Spawner. The Dawnlight Gale Boomerang model and tornado sound also provide Revali's Gale gust effects. The release includes Dawnlight's CC0 1.0 notice; Dual Wield and Skip Intro were ported with permission. |
+| [Fairy Companion](https://github.com/AgustinFuac/fairy-companion) v1.2.1 by AgustinFuac | Companion follow, color, light, and toggle behavior, ported with permission. Fairy abilities are not included. Midna companion appearances are this mod's additions. |
+| [Fire Arrows Standalone](https://github.com/baxlek/Fire-Arrows-Standalone) v1.2.2 by Baxlek | Fire-arrow behavior that combines the Lantern and Bow, ported with permission. |
+| [Unrestricted Items](https://github.com/baxlek/Unrestricted-Items) by Baxlek | Unrestricted item use, including FPV in Castle Town, movement in houses, and unrestricted Clawshots, plus related restricted-area and underwater item-use behavior. |
+| [Lazy Tweaks](https://github.com/kamilink7/dusklight) by kamilink7 | Difficulty and combat options: sword, bow, and Wolf Link damage; progressive sword combos and defense; incoming damage/instant death; Zora Armor insulation and Wolf Link durability; heart, arrow, and rupee drops; death rupee taxes; hitstop; parrying; manual/crouch shielding; and dodge/jump-strike cancels. Its MIT notice is preserved in the historical release source. See also kamilink7's [Mod API port](https://github.com/kamilink7/lazytweaks-modapi). |
+| [Crests of Courage](https://github.com/remiafterdark/crests-of-courage) by remiafterdark | Integrated co-op networking and remote-player/puppet code. Its source is MIT-licensed. Related credits include Fimmel (puppet/model-loading code), thyherooftime (Hyrule Online base and page), Dragonberri (Hyrule Online page UI), and the Dusklight team (port and SDK). The release source contains the full license and credits. |
+
+These are adaptations within the combined mod; they do not imply that the original authors endorse this project. Compatibility features that merely interoperate with another mod are not represented as ports.
+
+### Third-party models, textures, and other art in historical releases
+
+| Asset or mod | Creator and source |
+| --- | --- |
+| Dark Link; Hero of Time; Hero of the Sky; Hero of the Wild; Hyrule Warriors; Ordon Warrior; Ordon Warrior (No Hat) | Dark Link by **LoadingError**; the other listed models by **SkilarBabcock**. These Crests of Courage model assets were included with permission. |
+| Linkle model | **Ditrey**; concept art by **ThenMichael**; modeling help from **SkilarBabcock**. Included with permission through Crests of Courage. |
+| Hero of Time voice pack | **SkilarBabcock**. |
+| N64 Hero of Time outfit, equipment, and Epona model | **PxExYxTxOxN**. The historical release metadata does not name a source page or license. |
+| Young Link face/body variants | **madnessgod**, [GameBanana mod 724984](https://gamebanana.com/mods/724984), ported with permission. |
+| KePa - Wolf Link TP human-form outfits | **XModxGodX**, [GameBanana mod 723967](https://gamebanana.com/mods/723967), ported with permission. |
+| Twilight Wolf | Credited in its model metadata to **Misc** (`com.misc_custom_twilight_wolf`); ported with permission. No source URL is recorded in the release metadata. |
+| Zora Link and Zora Link (Alt Eyes) | Model and textures by **SkilarBabcock**, with fixes by **Oxygno**; [GameBanana mod 735675](https://gamebanana.com/mods/735675). |
+| Subi Link black-hair and red-eyes textures | **Subi**, [GameBanana mod 677266](https://gamebanana.com/mods/677266); adapted for the Ordon outfit and used with permission. |
+| OOT Style Epona skin | **HugAMuffin**, [GameBanana mod 683072](https://gamebanana.com/mods/683072), included with permission. |
+| Twilight Epona skin | **Dusk_Rain_GFX**, [GameBanana mod 678152](https://gamebanana.com/mods/678152), included with permission. |
+| Nightwalker Epona skin | **i12bp8**, [GameBanana mod 721556](https://gamebanana.com/mods/721556), included with permission. |
+| OOT Style Hearts textures | **HugAMuffin**, included with permission; the source mod URL is not recorded in the release metadata. |
+| Dawnlight Custom Glider texture | **BeZide**, [Dawnlight Custom Glider](https://github.com/BeZide93/DawnlightCustomGlider), used with permission. The glider model geometry was not taken from that mod. |
+| `res/hover_boots_wings.bti` | Contributed to this repository by [@eigalum-oss](https://github.com/eigalum-oss) in [the commit that added it](https://github.com/robbymacthebees2/secondary-inventory-wheel/commit/2eb877f2ffba069bf41d51799d9c5b0ca8d03272). The original source mod/artist and a separate reuse license are not identified in the repository history. |
+
+**Unresolved provenance:** the `Concept Art Wolf v2` texture set appears in the historical release resources, but its model metadata and repository history do not identify its original author, source mod, or permission. This README does not guess at that credit. The source mod for the Hover Boots icon is likewise undocumented; the contributor who added it is credited above, but that does not establish the original artist or reuse rights.
+
+### Game assets and licenses
+
+The mod also uses *The Legend of Zelda: Twilight Princess* content owned by **Nintendo**. This includes the vanilla wheel/HUD presentation, game icons, models, animations, effects, and audio loaded from game data, as well as game-derived resources included in some historical packages (for example, extracted/ported character and equipment models and the Deku Nut/slingshot-nut assets). The releases are unofficial fan works; Nintendo does not endorse them, and this repository does not claim ownership of Nintendo's content.
+
+Co-op voice chat uses **Opus** by Xiph.Org and contributors under its BSD license. The required notice is included with historical release credits. The repository's MIT license covers only the project's own code; it does not relicense third-party or Nintendo assets. Follow each asset's stated terms, and obtain permission from its creator before reuse where applicable.
 
 ## Repository contents
 
