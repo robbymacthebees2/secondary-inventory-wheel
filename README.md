@@ -23,20 +23,20 @@ These are adaptations within the combined mod; they do not imply that the origin
 
 | Asset or mod | Creator and source |
 | --- | --- |
-| Dark Link; Hero of Time; Hero of the Sky; Hero of the Wild; Hyrule Warriors; Ordon Warrior; Ordon Warrior (No Hat) | Dark Link by **LoadingError**; the other listed models by **SkilarBabcock**. These Crests of Courage model assets were included with permission. |
-| Linkle model | **Ditrey**; concept art by **ThenMichael**; modeling help from **SkilarBabcock**. Included with permission through Crests of Courage. |
+| Dark Link; Hero of Time; Hero of the Sky; Hero of the Wild; Hyrule Warriors; Ordon Warrior; Ordon Warrior (No Hat) | Dark Link by **LoadingError**; the other listed models by **SkilarBabcock**. The listed SkilarBabcock models were included without permission. |
+| Linkle model | **Ditrey**; concept art by **ThenMichael**; modeling help from **SkilarBabcock**. The Linkle model was included without permission. |
 | Hero of Time voice pack | **SkilarBabcock**. |
-| N64 Hero of Time outfit, equipment, and Epona model | **PxExYxTxOxN**. The historical release metadata does not name a source page or license. |
-| Young Link face/body variants | **madnessgod**, [GameBanana mod 724984](https://gamebanana.com/mods/724984), ported with permission. |
-| KePa - Wolf Link TP human-form outfits | **XModxGodX**, [GameBanana mod 723967](https://gamebanana.com/mods/723967), ported with permission. |
-| Twilight Wolf | Credited in its model metadata to **Misc** (`com.misc_custom_twilight_wolf`); ported with permission. No source URL is recorded in the release metadata. |
-| Zora Link and Zora Link (Alt Eyes) | Model and textures by **SkilarBabcock**, with fixes by **Oxygno**; [GameBanana mod 735675](https://gamebanana.com/mods/735675). |
-| Subi Link black-hair and red-eyes textures | **Subi**, [GameBanana mod 677266](https://gamebanana.com/mods/677266); adapted for the Ordon outfit and used with permission. |
-| OOT Style Epona skin | **HugAMuffin**, [GameBanana mod 683072](https://gamebanana.com/mods/683072), included with permission. |
+| N64 Hero of Time outfit, equipment, and Epona model | **PxExYxTxOxN**. The historical release metadata does not name a source page or license; these assets were included without permission. |
+| Young Link face/body variants | **madnessgod**, [GameBanana mod 724984](https://gamebanana.com/mods/724984), included without permission. |
+| KePa - Wolf Link TP human-form outfits | **XModxGodX**, [GameBanana mod 723967](https://gamebanana.com/mods/723967), included without permission. |
+| Twilight Wolf | Credited in its model metadata to **Misc** (`com.misc_custom_twilight_wolf`); included without permission. No source URL is recorded in the release metadata. |
+| Zora Link and Zora Link (Alt Eyes) | Model and textures by **SkilarBabcock**, with fixes by **Oxygno**; [GameBanana mod 735675](https://gamebanana.com/mods/735675); included without permission. |
+| Subi Link black-hair and red-eyes textures | **Subi**, [GameBanana mod 677266](https://gamebanana.com/mods/677266); adapted for the Ordon outfit and used without permission. |
+| OOT Style Epona skin | **HugAMuffin**, [GameBanana mod 683072](https://gamebanana.com/mods/683072), included without permission. |
 | Twilight Epona skin | **Dusk_Rain_GFX**, [GameBanana mod 678152](https://gamebanana.com/mods/678152), included with permission. |
-| Nightwalker Epona skin | **i12bp8**, [GameBanana mod 721556](https://gamebanana.com/mods/721556), included with permission. |
-| OOT Style Hearts textures | **HugAMuffin**, included with permission; the source mod URL is not recorded in the release metadata. |
-| Dawnlight Custom Glider texture | **BeZide**, [Dawnlight Custom Glider](https://github.com/BeZide93/DawnlightCustomGlider), used with permission. The glider model geometry was not taken from that mod. |
+| Nightwalker Epona skin | **i12bp8**, [GameBanana mod 721556](https://gamebanana.com/mods/721556), included without permission. |
+| OOT Style Hearts textures | **HugAMuffin**, included without permission; the source mod URL is not recorded in the release metadata. |
+| Dawnlight Custom Glider texture | **BeZide**, [Dawnlight Custom Glider](https://github.com/BeZide93/DawnlightCustomGlider), used without permission. The glider model geometry was not taken from that mod. |
 | `res/hover_boots_wings.bti` | Contributed to this repository by [@eigalum-oss](https://github.com/eigalum-oss) in [the commit that added it](https://github.com/robbymacthebees2/secondary-inventory-wheel/commit/2eb877f2ffba069bf41d51799d9c5b0ca8d03272). The original source mod/artist and a separate reuse license are not identified in the repository history. |
 
 **Unresolved provenance:** the `Concept Art Wolf v2` texture set appears in the historical release resources, but its model metadata and repository history do not identify its original author, source mod, or permission. This README does not guess at that credit. The source mod for the Hover Boots icon is likewise undocumented; the contributor who added it is credited above, but that does not establish the original artist or reuse rights.
