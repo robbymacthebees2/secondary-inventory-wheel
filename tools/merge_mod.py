@@ -11,6 +11,7 @@ Usage: merge_mod.py -o combined.dusk [--symgen path] input.dusk...
 
 import argparse
 import hashlib
+import json
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,16 @@ def entry_names(archive: zipfile.ZipFile) -> list[str]:
         if name.startswith("/") or ".." in name.split("/"):
             fail(f"unsafe entry name in {archive.filename}: {name}")
     return names
+
+
+def normalized_content(name: str, content: bytes, path: Path) -> bytes:
+    if name != "mod.json":
+        return content
+    try:
+        manifest = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"invalid mod.json in {path}: {error}")
+    return json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def main() -> None:
@@ -58,7 +69,8 @@ def main() -> None:
                     fail(f"unexpected lib entry in {path}: {name}")
                 platforms.add(parts[1])
                 continue
-            digest = hashlib.sha256(archive.read(name)).hexdigest()
+            content = normalized_content(name, archive.read(name), path)
+            digest = hashlib.sha256(content).hexdigest()
             seen = content_hashes.get(name)
             if seen is None:
                 content_hashes[name] = (digest, path)
