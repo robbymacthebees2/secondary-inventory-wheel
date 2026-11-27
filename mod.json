@@ -1,7 +1,7 @@
 {
   "id": "dev.twilitrealm.secondary_inventory_wheel",
   "name": "RobinWheelAndTweaks",
-  "version": "1.0.3",
+  "version": "1.5.1",
   "author": "RobinTheSoundsmith",
-  "description": "Adds a secondary inventory wheel, Hover Boots water walking, Magic Armor Twilight Ward, Rupee Magnet, Hawk Grass, Goron Tunic lava walking, and Hawk attack options."
+  "description": "Registers 12 mod items on Twilit Essentials' Modded item page, with the legacy secondary wheel as a fallback, and includes Ice Arrow water platforms, Hover Boots, Shield Surf, Din's Fire, Nayru's Love, Giant's Mask, and other gameplay features."
 }

@@ -1,23 +1,41 @@
-# Secondary Inventory Wheel 1.4.1
+# Robin's Wheel and Tweaks 1.5.1
 
-A Dusklight mod with a second item wheel and optional movement, combat, and quality-of-life features.
+A Dusklight mod for *The Legend of Zelda: Twilight Princess* with a secondary item wheel, optional movement and combat features, and integration with Twilit Essentials' Modded item page.
 
-## Secondary item wheel
+## Twilit Essentials item page
 
-- 24 secondary item slots, plus dedicated wheel entries for Shield Surf, Sit, and Goron Tunic.
-- Open the wheel with a configurable D-pad direction (Left or Down) and assign secondary items to X or Y without overwriting the vanilla item assignments.
-- Wheel items include Hawk Grass, Hover Boots, Dark Link Form, Ice Arrow (Bow), Lens of Truth, and Stone Mask.
-- Added items have their own wheel and HUD icon handling.
-- Hawk Grass starts the native whistle flow to call a Hawk; an option makes the Hawk's attacks deal one-hit damage.
-- Hover Boots let Link airwalk; optional water walking replaces airwalking, and a configurable button lowers the hover plane.
+Version 1.5.1 registers 12 mod items through the Twilit Essentials Items service (service major 1, minor 1): Hawk Grass, Hover Boots, Dark Link Form, Ice Arrow, Lens of Truth, Stone Mask, Din's Fire, Nayru's Love, Giant's Mask, Shield Surf, Sit, and Goron Tunic. Assign items to X, Y, or Z from the Modded page in the vanilla item wheel or Advanced UI.
+
+This requires a Twilit Essentials release that exports `com.dusklight.twilit_essentials.items` with the compatible v1.1 API. Twilit Essentials 3.1.3 does not include that service, so the Modded page will not appear until the provider update is installed and Dusklight is restarted. The legacy secondary wheel remains available as a fallback when enabled in the mod settings. Existing legacy-wheel assignments are not transferred to the Modded page.
+
+## Legacy secondary wheel
+
+- 24 secondary item slots, plus dedicated entries for Shield Surf, Sit, and Goron Tunic.
+- Open the wheel with a configurable D-pad direction (Left or Down) and assign items to X or Y without overwriting vanilla assignments.
+- If the Twilit Essentials Items service is missing, registration fails, or the integration is disabled, use the legacy wheel when its binding is enabled.
+
+## Items and gameplay features
+
+- Hawk Grass uses the native whistle flow to call a Hawk; an option makes the Hawk's attacks deal one-hit damage.
+- Hover Boots let Link airwalk, optionally walk on water instead, and use configurable buttons to raise or lower the hover plane. Raising the plane starts a jump and automatically follows the jump's peak.
+- Ice Arrow selects or deselects the bow combo. Hits on water create a native Twilight Princess ice-platform actor using the Snowpeak model and collision; platforms last about 15 seconds and are removed on scene changes or mod shutdown.
+- Din's Fire, Nayru's Love, and Giant's Mask have custom icons.
+- Dark Link Form, Lens of Truth, and Stone Mask retain their existing gameplay behavior.
 - Shield Surf uses Link's equipped shield and has an optional R-button speed boost.
-- Lens of Truth enables the native Wolf Sense visual effect and reveals Poes. Stone Mask provides best-effort stealth by reducing enemy distance and facing detection.
-- Sit lets Link sit, with optional healing and the File Select music while seated.
-- Goron Tunic enables lava walking.
+- Sit supports optional healing and File Select music while seated. Goron Tunic enables lava walking.
+- Twilight Ward lets Magic Armor hits deal damage without interrupting, stunning, or knocking Link back.
+- Rupee Magnet has an adjustable collection radius and can optionally collect clawshot minigame orbs.
+- Spinner options can disable surface bouncing and keep the powered-up attack hitbox active while riding.
+- Vanilla auto-jump can be disabled. The former standalone manual-jump and Cucco-glide features are not included in this build.
 
-## Optional gameplay settings
+## Extra Buttons compatibility
 
-- Manual jump for Link and Wolf Link, with adjustable height; manual Cucco gliding; optional disabling of vanilla auto-jump; and configurable bow slow time during a glide.
-- Twilight Ward for Magic Armor: hits still deal damage but do not interrupt, stun, or knock Link back.
-- Rupee Magnet with adjustable collection radius and an option to collect clawshot minigame orbs.
-- Spinner options to disable surface bouncing and keep its powered-up attack hitbox active while riding.
+With the legacy wheel, R+Z swaps the secondary X/Y assignments together with Extra Buttons' native item sets. Both sets are saved with the game save, and older single-set data remains compatible. In Twilit Essentials mode, the legacy swap is disabled and the shortcut is prevented from activating an item assigned to Twilit Essentials' Z button. The Items service does not expose alternate assignment sets, so Twilit Essentials X/Y assignments remain fixed during Extra Buttons swaps.
+
+The Items service also has no selected-item callback for showing the legacy Ice Arrow prompt.
+
+## Multi-platform builds
+
+The release workflow builds Windows (AMD64 and ARM64), macOS (Apple Silicon and Intel), iOS (Apple Silicon), Linux (x86_64 and aarch64), and Android (aarch64), then verifies and merges the platform libraries into one `.dusk` bundle.
+
+Local builds are platform-specific and should not be distributed as universal bundles. The GitHub Actions workflow produces the combined release package.
