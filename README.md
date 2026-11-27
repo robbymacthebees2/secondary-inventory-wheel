@@ -34,6 +34,12 @@ With the legacy wheel, R+Z swaps the secondary X/Y assignments together with Ext
 
 The Items service also has no selected-item callback for showing the legacy Ice Arrow prompt.
 
+## Bundled icon credits
+
+The `.dusk` includes nine standalone `.bti` icons. The maintainer confirms that all nine are cleared for redistribution with this release. Repository history credits `hover_boots_wings.bti` as contributed by [@eigalum-oss](https://github.com/eigalum-oss), but does not identify its original source or artist; provenance for the other bundled icons is not recorded here. This release's redistribution permission does not grant permission to reuse the icons separately.
+
+Twilight Princess game models, textures, audio, and other original game assets used at runtime are loaded from the player's game installation and are not bundled in this repository.
+
 ## Multi-platform builds
 
 The release workflow builds Windows (AMD64 and ARM64), macOS (Apple Silicon and Intel), iOS (Apple Silicon), Linux (x86_64 and aarch64), and Android (aarch64), then verifies and merges the platform libraries into one `.dusk` bundle.
