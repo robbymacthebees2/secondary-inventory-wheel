@@ -37,20 +37,28 @@ void begin_hover_boots_toggle(daAlink_c* alink) {
     }
 }
 
-void begin_secondary_hawk_grass_use(daAlink_c* alink, u8 button) {
+bool begin_secondary_hawk_grass_use(daAlink_c* alink, u8 button) {
+    if (!can_start_hawk_grass_whistle(alink)) {
+        return false;
+    }
+
     alink->mSelectItemId = button;
+    if (dComIfG_getObjectRes("J_Tobi", 3) != nullptr) {
+        g_hawkGrassArchiveLoaded = true;
+        return begin_hawk_grass_whistle(alink, button) != 0;
+    }
     if (g_hawkGrassArchiveLoaded) {
-        begin_hawk_grass_whistle(alink, button);
-        return;
+        reset_hawk_grass_resource_load();
     }
 
     if (g_pendingHawkGrassUse != nullptr) {
-        return;
+        return false;
     }
     g_pendingHawkGrassUse = alink;
     g_pendingHawkGrassButton = button;
     g_hawkGrassPhaseRequested = true;
     update_hawk_grass_resource();
+    return true;
 }
 
 bool begin_secondary_ocarina_use(daAlink_c* alink, u8 button) {

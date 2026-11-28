@@ -20,7 +20,6 @@
 #include "JSystem/J2DGraph/J2DPicture.h"
 #include "JSystem/J2DGraph/J2DTextBox.h"
 #include "JSystem/JAudio2/JAUSectionHeap.h"
-#include "JSystem/JAudio2/JAISeq.h"
 #include "JSystem/JAudio2/JASTrack.h"
 #include "JSystem/JAudio2/JASWaveArcLoader.h"
 #include "JSystem/JAudio2/JASWaveInfo.h"
@@ -75,7 +74,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <vector>
 
 DEFINE_MOD();
 IMPORT_SERVICE(ConfigService, svc_config);
@@ -116,7 +114,6 @@ constexpr u8 kDinFireItem = 0xF1;
 constexpr u8 kNayruLoveItem = 0xF2;
 constexpr u8 kGiantMaskItem = 0xF3;
 constexpr u8 kSecondarySlotBase = 0x80;
-constexpr int kHawkGrassIconTexture = 0x59;
 constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 4;
 constexpr u16 kFireDamagePulseInterval = 30;
 constexpr u8 kFireDamageAmount = 1;
@@ -139,6 +136,9 @@ constexpr char kSitIconResource[] = "sit.bti";
 constexpr char kDinFireIconResource[] = "din_fire.bti";
 constexpr char kNayruLoveIconResource[] = "nayru_love.bti";
 constexpr char kGiantMaskIconResource[] = "giant_mask.bti";
+constexpr char kHawkGrassIconResource[] = "hawk_grass.bti";
+constexpr char kShieldSurfIconResource[] = "shield_surf.bti";
+constexpr char kGoronTunicIconResource[] = "goron_tunic.bti";
 constexpr char kSecondaryAssignmentsBlobName[] = "secondaryAssignments";
 constexpr u8 kGoronTunicDisplayItem = dItemNo_WEAR_KOKIRI_e;
 constexpr u32 kHawkAttackType =
@@ -179,6 +179,7 @@ constexpr SitMusicWaveMapping kSitMusicWaveMappings[] = {
 
 enum class SecondaryIconContext : u8 {
     None,
+    ShieldSurf,
     Sit,
     GoronTunic,
     HawkGrass,
@@ -479,10 +480,8 @@ ModResult install_hooks() {
     ADD_PRE(RingIsMixItemOn, show_ice_arrow_combo_on_prompt);
     ADD_PRE(RingIsMixItemOff, show_ice_arrow_combo_off_prompt);
     ADD_PRE(ChangeTextureItemXY, prepare_hover_boots_hud_icon);
-    ADD_POST(ChangeTextureItemXY, tint_goron_tunic_hud_icon);
     ADD_POST(ChangeTextureItemXY, finish_hover_boots_hud_icon);
     ADD_POST(MeterMoveButtonXY, refresh_secondary_hud_assignments);
-    ADD_PRE(ReadItemTexture, apply_hawk_grass_equip_icon);
     ADD_POST(ReadItemTexture, replace_secondary_custom_icon);
     ADD_POST(SetWaterY, treat_lava_as_surface);
     ADD_POST(SetWaterY, treat_water_as_surface_with_hover_boots);

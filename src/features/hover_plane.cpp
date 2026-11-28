@@ -59,7 +59,6 @@ bool hover_plane_raise_binding_triggered(int64_t binding, int* buttonMask) {
         return false;
     }
 }
-
 void update_hover_plane_raise_jump(daAlink_c* alink) {
     if (!g_hoverPlaneRaiseJumpActive) {
         return;
@@ -323,8 +322,7 @@ bool use_secondary_item(daAlink_c* alink, u8 itemId, int button) {
         request_shield_surf_toggle(alink);
         return true;
     case kHawkGrassItem:
-        begin_secondary_hawk_grass_use(alink, static_cast<u8>(button));
-        return true;
+        return begin_secondary_hawk_grass_use(alink, static_cast<u8>(button));
     case kHoverBootsItem:
         begin_hover_boots_toggle(alink);
         return true;
@@ -370,18 +368,4 @@ bool use_secondary_item(daAlink_c* alink, u8 itemId, int button) {
     default:
         return false;
     }
-}
-
-void tint_goron_tunic_hud_icon(ModContext*, void* args, void*, void*) {
-    if (g_secondaryIconContext != SecondaryIconContext::GoronTunic) {
-        return;
-    }
-
-    const int button = mods::arg<int>(args, 1);
-    if (button < 0 || button > 1) {
-        return;
-    }
-    auto* meter = mods::arg<dMeter2Draw_c*>(args, 0);
-    tint_tunic_icon(meter->mpItemXY[button]);
-    tint_tunic_icon(meter->mpItemXYPane[button]);
 }

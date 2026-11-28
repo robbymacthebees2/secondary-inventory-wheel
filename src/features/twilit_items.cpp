@@ -11,7 +11,7 @@ struct TwilitItemEntry {
 
 TwilitItemEntry g_twilitItems[] = {
     {kHawkGrassItem, "robin.hawk_grass", "Hawk Grass",
-     "Use Hawk Grass to call a hawk.", nullptr, kHawkGrassIconTexture, 0, false},
+     "Use Hawk Grass to call a hawk.", kHawkGrassIconResource, 0xFFu, 0, false},
     {kHoverBootsItem, "robin.hover_boots", "Hover Boots",
      "Toggle the Hover Boots.", kHoverBootsIconResource, 0xFFu, 0, false},
     {kDarkLinkItem, "robin.dark_link", "Dark Link Form",
@@ -32,11 +32,12 @@ TwilitItemEntry g_twilitItems[] = {
      "Play test notes with A and the D-pad; press B to exit.", nullptr,
      kOcarinaDisplayItem, 0, false},
     {kShieldSurfItemId, "robin.shield_surf", "Shield Surf",
-     "Toggle Shield Surfing.", nullptr, 0, 0, false},
+     "Toggle Shield Surfing.", kShieldSurfIconResource, 0xFFu, 0, false},
     {kSitItemId, "robin.sit", "Sit",
      "Sit down or stand up.", kSitIconResource, 0xFFu, 0, false},
     {kGoronTunicItemId, "robin.goron_tunic", "Goron Tunic",
-     "Toggle the Goron Tunic lava-walking effect.", nullptr, kGoronTunicDisplayItem, 0, false},
+     "Toggle the Goron Tunic lava-walking effect.", kGoronTunicIconResource,
+     0xFFu, 0, false},
 };
 
 bool g_twilitItemButtonErrorLogged = false;
@@ -105,9 +106,6 @@ bool register_twilit_essentials_items() {
         desc.description = entry.description;
         desc.icon = entry.icon;
         desc.icon_item = entry.iconItem;
-        if (entry.itemId == kShieldSurfItemId) {
-            desc.icon_item = shield_surf_display_item();
-        }
         desc.use = use_twilit_item;
         desc.user_data = &entry;
 

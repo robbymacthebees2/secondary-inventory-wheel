@@ -1,35 +1,4 @@
-void tint_tunic_icon(J2DPicture* icon) {
-    if (icon != nullptr) {
-        icon->setBlackWhite(JUtility::TColor(0, 0, 0, 0),
-            JUtility::TColor(190, 24, 24, 255));
-    }
-}
-
-void tint_tunic_icon(CPaneMgr* icon) {
-    if (icon != nullptr) {
-        icon->setBlackWhite(JUtility::TColor(0, 0, 0, 0),
-            JUtility::TColor(190, 24, 24, 255));
-    }
-}
-
-void tint_secondary_ring_icons(dMenu_Ring_c* ring) {
-    if (!isSecondaryRing(ring)) {
-        return;
-    }
-
-    for (auto* icon : g_tunicWheelItemTex) {
-        tint_tunic_icon(icon);
-    }
-
-    for (int button = 0; button < 2; ++button) {
-        if (!secondaryTunicAssigned(button)) {
-            continue;
-        }
-        for (auto* icon : ring->mpSelectItemTex[button]) {
-            tint_tunic_icon(icon);
-        }
-    }
-}
+const char* secondary_custom_icon_resource(SecondaryIconContext context);
 
 void clear_tunic_wheel_textures() {
     for (auto*& picture : g_tunicWheelItemTex) {
@@ -151,6 +120,45 @@ void clear_shield_surf_wheel_textures() {
     g_shieldSurfWheelItemHeap = nullptr;
 }
 
+bool load_single_custom_wheel_icon(
+    JKRExpHeap* heap, const char* resourceName, ResTIMG** buffer,
+    J2DPicture** picture)
+{
+    ResourceBuffer icon = RESOURCE_BUFFER_INIT;
+    const ModResult result =
+        svc_resource->load(mod_ctx, resourceName, &icon);
+    if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
+        svc_log->error(mod_ctx, "failed to load a custom secondary wheel icon");
+        svc_resource->free(mod_ctx, &icon);
+        return false;
+    }
+    if (icon.size < sizeof(ResTIMG) || icon.size > kItemTextureBufferSize) {
+        svc_log->error(mod_ctx, "custom secondary wheel icon has an invalid texture size");
+        svc_resource->free(mod_ctx, &icon);
+        return false;
+    }
+
+    *buffer = static_cast<ResTIMG*>(heap->alloc(kItemTextureBufferSize, 0x20));
+    if (*buffer == nullptr) {
+        svc_log->error(mod_ctx, "failed to allocate a custom secondary wheel icon");
+        svc_resource->free(mod_ctx, &icon);
+        return false;
+    }
+    std::memcpy(*buffer, icon.data, icon.size);
+    svc_resource->free(mod_ctx, &icon);
+    DCStoreRangeNoSync(*buffer, kItemTextureBufferSize);
+
+    *picture = JKR_NEW J2DPicture(*buffer);
+    if (*picture == nullptr) {
+        heap->free(*buffer);
+        *buffer = nullptr;
+        svc_log->error(mod_ctx, "failed to create a custom secondary wheel icon");
+        return false;
+    }
+    (*picture)->setBasePosition(J2DBasePosition_4);
+    return true;
+}
+
 void load_sit_wheel_texture(dMenu_Ring_c* ring) {
     clear_sit_wheel_texture();
     ResourceBuffer icon = RESOURCE_BUFFER_INIT;
@@ -229,56 +237,23 @@ void load_ocarina_wheel_textures(dMenu_Ring_c* ring) {
 void load_shield_surf_wheel_textures(dMenu_Ring_c* ring) {
     clear_shield_surf_wheel_textures();
     g_shieldSurfWheelItemHeap = ring->mpHeap;
-    for (auto*& buffer : g_shieldSurfWheelItemBuf) {
-        buffer = static_cast<ResTIMG*>(ring->mpHeap->alloc(kItemTextureBufferSize, 0x20));
-        if (buffer == nullptr) {
-            svc_log->error(mod_ctx, "failed to allocate the Shield Surf wheel icon");
-            clear_shield_surf_wheel_textures();
-            return;
-        }
-    }
-
-    const u8 shieldItem = shield_surf_display_item();
-    const int textureCount = dMeter2Info_readItemTexture(
-        shieldItem, g_shieldSurfWheelItemBuf[0], nullptr, g_shieldSurfWheelItemBuf[1],
-        nullptr, g_shieldSurfWheelItemBuf[2], nullptr, nullptr, nullptr, -1);
-    if (textureCount <= 0) {
-        svc_log->error(mod_ctx, "failed to read the Shield Surf wheel icon");
+    if (!load_single_custom_wheel_icon(
+            g_shieldSurfWheelItemHeap, kShieldSurfIconResource,
+            &g_shieldSurfWheelItemBuf[0], &g_shieldSurfWheelItemTex[0]))
+    {
         clear_shield_surf_wheel_textures();
-        return;
     }
-    for (int texture = 0; texture < std::min(textureCount, 3); ++texture) {
-        g_shieldSurfWheelItemTex[texture] =
-            JKR_NEW J2DPicture(g_shieldSurfWheelItemBuf[texture]);
-        if (g_shieldSurfWheelItemTex[texture] == nullptr) {
-            svc_log->error(mod_ctx, "failed to create the Shield Surf wheel icon");
-            clear_shield_surf_wheel_textures();
-            return;
-        }
-        g_shieldSurfWheelItemTex[texture]->setBasePosition(J2DBasePosition_4);
-    }
-    dMeter2Info_setItemColor(
-        shieldItem, g_shieldSurfWheelItemTex[0], g_shieldSurfWheelItemTex[1],
-        g_shieldSurfWheelItemTex[2], nullptr);
 }
 
 void load_tunic_wheel_textures(dMenu_Ring_c* ring) {
     clear_tunic_wheel_textures();
     g_tunicWheelItemHeap = ring->mpHeap;
-    for (auto*& buffer : g_tunicWheelItemBuf) {
-        buffer = static_cast<ResTIMG*>(ring->mpHeap->alloc(0xC00, 0x20));
+    if (!load_single_custom_wheel_icon(
+            g_tunicWheelItemHeap, kGoronTunicIconResource,
+            &g_tunicWheelItemBuf[0], &g_tunicWheelItemTex[0]))
+    {
+        clear_tunic_wheel_textures();
     }
-
-    const int textureCount = dMeter2Info_readItemTexture(
-        kGoronTunicDisplayItem, g_tunicWheelItemBuf[0], nullptr, g_tunicWheelItemBuf[1], nullptr,
-        g_tunicWheelItemBuf[2], nullptr, nullptr, nullptr, -1);
-    for (int texture = 0; texture < std::min(textureCount, 3); ++texture) {
-        g_tunicWheelItemTex[texture] = JKR_NEW J2DPicture(g_tunicWheelItemBuf[texture]);
-        g_tunicWheelItemTex[texture]->setBasePosition(J2DBasePosition_4);
-    }
-    dMeter2Info_setItemColor(kGoronTunicDisplayItem, g_tunicWheelItemTex[0],
-        g_tunicWheelItemTex[1], g_tunicWheelItemTex[2], nullptr);
-    tint_secondary_ring_icons(ring);
 }
 
 void record_secondary_ring_pose(dMenu_Ring_c* ring);
@@ -397,17 +372,21 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
         const SecondaryIconContext previousIconContext = g_secondaryIconContext;
         g_secondaryIconContext =
             secondaryIconContextForSlot(g_secondaryWheelSlotIds[index]);
+        const bool usesCustomIcon =
+            secondary_custom_icon_resource(g_secondaryIconContext) != nullptr;
         const int textureCount = dMeter2Info_readItemTexture(
             iconItem, ring->mpItemBuf[index][0], nullptr, ring->mpItemBuf[index][1], nullptr,
-            ring->mpItemBuf[index][2], nullptr, nullptr, nullptr,
-            isHawkGrassSlot(g_secondaryWheelSlotIds[index]) ? kHawkGrassIconTexture : -1);
+            ring->mpItemBuf[index][2], nullptr, nullptr, nullptr, -1);
         g_secondaryIconContext = previousIconContext;
         for (int texture = 0; texture < std::min(textureCount, 3); ++texture) {
             ring->mpItemTex[index][texture] = JKR_NEW J2DPicture(ring->mpItemBuf[index][texture]);
             ring->mpItemTex[index][texture]->setBasePosition(J2DBasePosition_4);
         }
-        dMeter2Info_setItemColor(iconItem, ring->mpItemTex[index][0], ring->mpItemTex[index][1],
-            ring->mpItemTex[index][2], nullptr);
+        if (!usesCustomIcon) {
+            dMeter2Info_setItemColor(
+                iconItem, ring->mpItemTex[index][0], ring->mpItemTex[index][1],
+                ring->mpItemTex[index][2], nullptr);
+        }
         const f32 scale = dItem_data::getTexScale(iconItem) / 100.0f;
         ring->mItemSlotParam1[index] =
             ring->mpItemBuf[index][0]->width / 48.0f * scale * kSecondaryIconScale;
@@ -438,17 +417,11 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
                 break;
             }
         }
-        if (secondaryTunicAssigned(button)) {
-            for (auto* icon : ring->mpSelectItemTex[button]) {
-                tint_tunic_icon(icon);
-            }
-        }
     }
     ring->mpDrawCursor->setPos(
         g_secondaryWheelSlotPosX[0], g_secondaryWheelSlotPosY[0]);
     ring->mpDrawCursor->setParam(
         kSecondaryCursorScale, kSecondaryCursorScale, 0.1f, 0.6f, 0.5f);
-    tint_secondary_ring_icons(ring);
     record_secondary_ring_pose(ring);
 }
 
@@ -644,13 +617,6 @@ void move_secondary_ring(dMenu_Ring_c* ring) {
             ring->mYButtonSlot = ring->mCurrentSlot;
             ring->setSelectItem(1, secondaryDisplayItemForSlot(selected));
         }
-        for (int button = 0; button < 2; ++button) {
-            if (secondaryTunicAssigned(button)) {
-                for (auto* icon : ring->mpSelectItemTex[button]) {
-                    tint_tunic_icon(icon);
-                }
-            }
-        }
         if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1)) {
             g_goronTunicEquipped = false;
             g_goronLavaContactFrames = 0;
@@ -833,20 +799,13 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
         const f32 x = g_secondaryWheelSlotPosX[index] - 24.0f + pose.centerX;
         const f32 y = g_secondaryWheelSlotPosY[index] - 24.0f + pose.centerY;
         if (index == MAX_ITEM_SLOTS) {
-            if (g_shieldSurfWheelItemBuf[0] != nullptr) {
-                const u8 shieldItem = shield_surf_display_item();
-                const f32 scale =
-                    dItem_data::getTexScale(shieldItem) / 100.0f * kSecondaryIconScale;
-                const f32 width = g_shieldSurfWheelItemBuf[0]->width / 48.0f * scale * 48.0f;
-                const f32 height = g_shieldSurfWheelItemBuf[0]->height / 48.0f * scale * 48.0f;
-                for (auto* picture : g_shieldSurfWheelItemTex) {
-                    if (picture == nullptr) {
-                        continue;
-                    }
-                    picture->setAlpha(pose.alpha * 255.0f);
-                    picture->draw(x + (48.0f - width) * 0.5f,
-                        y + (48.0f - height) * 0.5f, width, height, 0, 0, 0);
-                }
+            if (g_shieldSurfWheelItemTex[0] != nullptr) {
+                constexpr f32 iconSize = 36.0f;
+                g_shieldSurfWheelItemTex[0]->setAlpha(pose.alpha * 255.0f);
+                g_shieldSurfWheelItemTex[0]->draw(
+                    x + (48.0f - iconSize) * 0.5f,
+                    y + (48.0f - iconSize) * 0.5f,
+                    iconSize, iconSize, 0, 0, 0);
             }
             continue;
         }
@@ -862,20 +821,13 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
             continue;
         }
         if (index == MAX_ITEM_SLOTS + 2) {
-            if (g_tunicWheelItemBuf[0] == nullptr) {
-                continue;
-            }
-            const f32 scale =
-                dItem_data::getTexScale(kGoronTunicDisplayItem) / 100.0f * kSecondaryIconScale;
-            const f32 width = g_tunicWheelItemBuf[0]->width / 48.0f * scale * 48.0f;
-            const f32 height = g_tunicWheelItemBuf[0]->height / 48.0f * scale * 48.0f;
-            for (auto* picture : g_tunicWheelItemTex) {
-                if (picture == nullptr) {
-                    continue;
-                }
-                picture->setAlpha(pose.alpha * 255.0f);
-                picture->draw(x + (48.0f - width) * 0.5f,
-                    y + (48.0f - height) * 0.5f, width, height, 0, 0, 0);
+            if (g_tunicWheelItemTex[0] != nullptr) {
+                constexpr f32 iconSize = 36.0f;
+                g_tunicWheelItemTex[0]->setAlpha(pose.alpha * 255.0f);
+                g_tunicWheelItemTex[0]->draw(
+                    x + (48.0f - iconSize) * 0.5f,
+                    y + (48.0f - iconSize) * 0.5f,
+                    iconSize, iconSize, 0, 0, 0);
             }
             continue;
         }
@@ -1174,25 +1126,13 @@ HookAction handle_secondary_ring_draw(ModContext*, void* args, void*, void*) {
     return HOOK_SKIP_ORIGINAL;
 }
 
-const char* secondary_custom_icon_resource(SecondaryIconContext context);
-
 void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
-    if ((g_secondaryIconContext != SecondaryIconContext::Sit &&
-         g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
-         g_secondaryIconContext != SecondaryIconContext::DarkLink &&
-         g_secondaryIconContext != SecondaryIconContext::IceArrow &&
-         g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
-         g_secondaryIconContext != SecondaryIconContext::TruthMask &&
-         g_secondaryIconContext != SecondaryIconContext::DinFire &&
-         g_secondaryIconContext != SecondaryIconContext::NayruLove &&
-         g_secondaryIconContext != SecondaryIconContext::GiantMask) ||
-        mods::arg<u8>(args, 0) != dItemNo_WOOD_STICK_e)
-    {
+    const char* resourceName =
+        secondary_custom_icon_resource(g_secondaryIconContext);
+    if (resourceName == nullptr) {
         return;
     }
 
-    const char* resourceName =
-        secondary_custom_icon_resource(g_secondaryIconContext);
     ResourceBuffer icon = RESOURCE_BUFFER_INIT;
     const ModResult result = svc_resource->load(mod_ctx, resourceName, &icon);
     if (result != MOD_OK || icon.data == nullptr || icon.size == 0) {
@@ -1213,18 +1153,6 @@ void replace_secondary_custom_icon(ModContext*, void* args, void*, void*) {
         }
     }
     svc_resource->free(mod_ctx, &icon);
-}
-
-HookAction apply_hawk_grass_equip_icon(ModContext*, void* args, void*, void*) {
-    if (g_twilitItemsActive) {
-        return HOOK_CONTINUE;
-    }
-    if (g_secondaryIconContext == SecondaryIconContext::HawkGrass &&
-        mods::arg<u8>(args, 0) == dItemNo_WOOD_STICK_e)
-    {
-        mods::arg_ref<int>(args, 9) = kHawkGrassIconTexture;
-    }
-    return HOOK_CONTINUE;
 }
 
 HookAction prepare_secondary_equip_icon(ModContext*, void* args, void*, void*) {
@@ -1251,8 +1179,14 @@ void finish_secondary_equip_icon(ModContext*, void*, void*, void*) {
 
 const char* secondary_custom_icon_resource(SecondaryIconContext context) {
     switch (context) {
+    case SecondaryIconContext::ShieldSurf:
+        return kShieldSurfIconResource;
     case SecondaryIconContext::Sit:
         return kSitIconResource;
+    case SecondaryIconContext::GoronTunic:
+        return kGoronTunicIconResource;
+    case SecondaryIconContext::HawkGrass:
+        return kHawkGrassIconResource;
     case SecondaryIconContext::IceArrow:
         return kIceArrowIconResource;
     case SecondaryIconContext::LensOfTruth:
@@ -1290,16 +1224,7 @@ HookAction prepare_hover_boots_hud_icon(ModContext*, void* args, void*, void*) {
 
     const u8 slot = g_secondarySelectedItems[button];
     g_secondaryIconContext = secondaryIconContextForSlot(slot);
-    if (g_secondaryIconContext != SecondaryIconContext::Sit &&
-        g_secondaryIconContext != SecondaryIconContext::HoverBoots &&
-        g_secondaryIconContext != SecondaryIconContext::DarkLink &&
-        g_secondaryIconContext != SecondaryIconContext::IceArrow &&
-        g_secondaryIconContext != SecondaryIconContext::LensOfTruth &&
-        g_secondaryIconContext != SecondaryIconContext::TruthMask &&
-        g_secondaryIconContext != SecondaryIconContext::DinFire &&
-        g_secondaryIconContext != SecondaryIconContext::NayruLove &&
-        g_secondaryIconContext != SecondaryIconContext::GiantMask)
-    {
+    if (secondary_custom_icon_resource(g_secondaryIconContext) == nullptr) {
         mods::arg_ref<u8>(args, 2) = secondaryDisplayItemForSlot(slot);
         return HOOK_CONTINUE;
     }

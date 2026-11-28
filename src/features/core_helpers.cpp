@@ -270,6 +270,9 @@ bool isHawkGrassSlot(u8 slotId) {
 }
 
 SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
+    if (slotId == kShieldSurfSlot) {
+        return SecondaryIconContext::ShieldSurf;
+    }
     if (slotId == kSitSlot) {
         return SecondaryIconContext::Sit;
     }
@@ -326,13 +329,29 @@ SecondaryIconContext secondaryIconContextForSlot(u8 slotId) {
     return SecondaryIconContext::None;
 }
 
+bool can_start_hawk_grass_whistle(const daAlink_c* alink) {
+    return alink != nullptr && !alink->checkWolf() && !alink->checkEventRun() &&
+           (alink->mProcID == daAlink_c::PROC_WAIT ||
+            alink->mProcID == daAlink_c::PROC_MOVE);
+}
+
+void reset_hawk_grass_resource_load() {
+    if (g_hawkGrassPhaseRequested) {
+        dComIfG_resDelete(&g_hawkGrassPhase, "J_Tobi");
+    }
+    g_hawkGrassPhase = {};
+    g_hawkGrassPhaseRequested = false;
+    g_hawkGrassArchiveLoaded = false;
+}
+
 int begin_hawk_grass_whistle(daAlink_c* alink, u8 button) {
-    if (alink == nullptr || alink->mProcID == daAlink_c::PROC_GRASS_WHISTLE_WAIT) {
-        return 1;
+    if (!can_start_hawk_grass_whistle(alink)) {
+        return 0;
     }
 
     if (dComIfG_getObjectRes("J_Tobi", 3) == nullptr) {
         svc_log->error(mod_ctx, "Hawk Grass model archive loaded without its model resource");
+        reset_hawk_grass_resource_load();
         return 0;
     }
 
@@ -356,17 +375,27 @@ void update_hawk_grass_resource() {
 
     const cPhs_Step phase = dComIfG_resLoad(&g_hawkGrassPhase, "J_Tobi");
     if (phase == cPhs_COMPLEATE_e) {
+        if (dComIfG_getObjectRes("J_Tobi", 3) == nullptr) {
+            svc_log->error(mod_ctx, "Loaded Hawk Grass archive is missing its model resource");
+            reset_hawk_grass_resource_load();
+            g_pendingHawkGrassUse = nullptr;
+            return;
+        }
+
         g_hawkGrassArchiveLoaded = true;
         svc_log->info(mod_ctx, "Hawk Grass model archive loaded");
         if (g_pendingHawkGrassUse != nullptr) {
-            auto* alink = g_pendingHawkGrassUse;
+            auto* pendingAlink = g_pendingHawkGrassUse;
+            auto* alink = static_cast<daAlink_c*>(dComIfGp_getLinkPlayer());
             const u8 button = g_pendingHawkGrassButton;
             g_pendingHawkGrassUse = nullptr;
-            begin_hawk_grass_whistle(alink, button);
+            if (alink == pendingAlink && can_start_hawk_grass_whistle(alink)) {
+                begin_hawk_grass_whistle(alink, button);
+            }
         }
     } else if (phase == cPhs_ERROR_e || phase == cPhs_UNK3_e) {
         g_pendingHawkGrassUse = nullptr;
-        g_hawkGrassPhaseRequested = false;
+        reset_hawk_grass_resource_load();
         svc_log->error(mod_ctx, "Failed to load the Hawk Grass model archive");
     }
 }

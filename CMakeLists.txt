@@ -7,7 +7,7 @@ if (NOT DEFINED CMAKE_BUILD_TYPE AND NOT DEFINED ENV{CMAKE_BUILD_TYPE})
     set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Build type")
 endif ()
 
-project(secondary_inventory_wheel VERSION 1.9.1 LANGUAGES CXX)
+project(secondary_inventory_wheel VERSION 2.0.0 LANGUAGES CXX)
 
 if (NOT DUSKLIGHT_VERSION)
     set(DUSKLIGHT_VERSION "v2.0.3")

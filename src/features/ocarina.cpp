@@ -26,15 +26,7 @@ constexpr u32 kOcarinaMidiNoteId = 1;
 constexpr u8 kOcarinaNoteVelocity = 0x7F;
 constexpr u8 kOcarinaNoteDurationFrames = 10;
 
-struct OcarinaSequencePauseState {
-    JAISeq* sequence;
-    u32 soundId;
-    bool wasPaused;
-};
-
 JASTrack g_ocarinaMidiTrack;
-JAISoundHandle g_ocarinaSuccessCueHandle;
-std::vector<OcarinaSequencePauseState> g_ocarinaSequencePauseStates;
 bool g_ocarinaActive = false;
 bool g_ocarinaAudioErrorLogged = false;
 bool g_ocarinaPresentationActive = false;
@@ -55,94 +47,22 @@ Z2SoundMgr* get_game_sound_manager() {
     return audioMgr != nullptr ? &audioMgr->mSoundMgr : nullptr;
 }
 
-void remember_and_pause_ocarina_sequence(JAISeq* sequence) {
-    const u32 soundId = sequence->getID();
-    const auto found = std::find_if(
-        g_ocarinaSequencePauseStates.begin(),
-        g_ocarinaSequencePauseStates.end(),
-        [sequence, soundId](const OcarinaSequencePauseState& state) {
-            return state.sequence == sequence && state.soundId == soundId;
-        });
-    if (found == g_ocarinaSequencePauseStates.end()) {
-        g_ocarinaSequencePauseStates.push_back(
-            {sequence, soundId, sequence->isPaused()});
-    }
-    sequence->pause(true);
-}
-
-void pause_ocarina_sequences_except(JAISeq* allowedSequence) {
-    auto* soundMgr = get_game_sound_manager();
-    if (soundMgr == nullptr) {
-        return;
-    }
-
-    auto* sequenceManager = soundMgr->getSeqMgr();
-    for (auto* link = sequenceManager->getSeqList()->getFirst();
-         link != nullptr;
-         link = link->getNext())
-    {
-        auto* sequence = link->getObject();
-        if (sequence == allowedSequence) {
-            sequence->pause(false);
-        } else {
-            remember_and_pause_ocarina_sequence(sequence);
-        }
-    }
-    sequenceManager->pause(false);
-}
-
-void restore_ocarina_sequences() {
-    auto* soundMgr = get_game_sound_manager();
-    if (soundMgr == nullptr) {
-        g_ocarinaSequencePauseStates.clear();
-        return;
-    }
-
-    auto* sequenceManager = soundMgr->getSeqMgr();
-    sequenceManager->pause(false);
-    for (const auto& state : g_ocarinaSequencePauseStates) {
-        for (auto* link = sequenceManager->getSeqList()->getFirst();
-             link != nullptr;
-             link = link->getNext())
-        {
-            auto* sequence = link->getObject();
-            if (sequence == state.sequence && sequence->getID() == state.soundId) {
-                sequence->pause(state.wasPaused);
-                break;
-            }
-        }
-    }
-    g_ocarinaSequencePauseStates.clear();
-}
-
 void reset_ocarina_song_progress() {
     g_songOfHealingProgress = 0;
 }
 
 void play_ocarina_song_success_cue() {
-    auto* soundMgr = get_game_sound_manager();
-    if (soundMgr == nullptr) {
-        svc_log->warn(mod_ctx, "Ocarina could not play menu_select.bms: audio manager unavailable");
+    auto* audioMgr = Z2GetAudioMgr();
+    if (audioMgr == nullptr) {
+        svc_log->warn(
+            mod_ctx, "Ocarina could not play the bow-and-arrow combo cue: audio manager unavailable");
         return;
     }
 
-    auto* sequenceManager = soundMgr->getSeqMgr();
-    pause_ocarina_sequences_except(nullptr);
-    if (g_ocarinaSuccessCueHandle) {
-        g_ocarinaSuccessCueHandle->stop(0);
-        g_ocarinaSuccessCueHandle.releaseSound();
-    }
-
-    if (!soundMgr->startSound(
-            Z2BGM_MENU_SELECT, &g_ocarinaSuccessCueHandle, nullptr))
-    {
-        sequenceManager->pause(true);
-        svc_log->warn(mod_ctx, "Ocarina could not start menu_select.bms");
-        return;
-    }
-
-    pause_ocarina_sequences_except(g_ocarinaSuccessCueHandle->asSeq());
-    svc_log->info(mod_ctx, "Ocarina started menu_select.bms as the song success cue");
+    audioMgr->seStart(
+        Z2SE_SY_ITEM_COMBINE_ON, NULL, 0, 0, 1.0f, 1.0f, -1.0f, -1.0f, 0);
+    svc_log->info(
+        mod_ctx, "Ocarina played the bow-and-arrow combo sound for a successful song");
 }
 
 void play_song_of_healing() {
@@ -177,11 +97,6 @@ void record_ocarina_song_note(u32 noteButtons) {
 }
 
 void initialize_ocarina() {
-    if (g_ocarinaSuccessCueHandle) {
-        g_ocarinaSuccessCueHandle->stop(0);
-        g_ocarinaSuccessCueHandle.releaseSound();
-    }
-    g_ocarinaSequencePauseStates.clear();
     g_ocarinaMidiTrack.setBankNumber(0);
     g_ocarinaMidiTrack.setProgNumber(kOcarinaMidiProgram);
     g_ocarinaActive = false;
@@ -209,15 +124,8 @@ void pause_ocarina_music() {
         return;
     }
 
-    const bool cuePlaying =
-        g_ocarinaSuccessCueHandle &&
-        !g_ocarinaSuccessCueHandle->status_.isDead();
     const bool wasPaused = g_ocarinaMusicPaused;
-    if (cuePlaying) {
-        pause_ocarina_sequences_except(g_ocarinaSuccessCueHandle->asSeq());
-    } else {
-        soundMgr->getSeqMgr()->pause(true);
-    }
+    soundMgr->getSeqMgr()->pause(true);
     soundMgr->getStreamMgr()->pause(true);
     g_ocarinaMusicPaused = true;
     g_ocarinaMusicPauseWarningLogged = false;
@@ -237,11 +145,7 @@ void resume_ocarina_music() {
 
     auto* soundMgr = get_game_sound_manager();
     if (soundMgr != nullptr) {
-        if (g_ocarinaSuccessCueHandle) {
-            g_ocarinaSuccessCueHandle->stop(0);
-            g_ocarinaSuccessCueHandle.releaseSound();
-        }
-        restore_ocarina_sequences();
+        soundMgr->getSeqMgr()->pause(false);
         soundMgr->getStreamMgr()->pause(false);
         svc_log->info(mod_ctx, "Ocarina resumed sequence and stream music managers");
     } else {
@@ -520,6 +424,8 @@ void update_ocarina() {
         g_songOfHealingPending = false;
         g_songOfHealingDeadline = 0;
         play_song_of_healing();
+        exit_ocarina_mode(
+            static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     }
 }
 

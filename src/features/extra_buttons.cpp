@@ -26,7 +26,6 @@ void swap_secondary_assignment_sets() {
                 g_secondaryRing->mYButtonSlot = wheelSlot;
             }
         }
-        tint_secondary_ring_icons(g_secondaryRing);
     }
 
     if (!secondaryTunicAssigned(0) && !secondaryTunicAssigned(1)) {
