@@ -28,6 +28,9 @@ TwilitItemEntry g_twilitItems[] = {
      "Toggle Nayru's Love.", kNayruLoveIconResource, 0xFFu, 0, false},
     {kGiantMaskItem, "robin.giants_mask", "Giant's Mask",
      "Toggle Giant's Mask.", kGiantMaskIconResource, 0xFFu, 0, false},
+    {kOcarinaItemId, "robin.ocarina", "Ocarina",
+     "Play test notes with A and the D-pad; press B to exit.", nullptr,
+     kOcarinaDisplayItem, 0, false},
     {kShieldSurfItemId, "robin.shield_surf", "Shield Surf",
      "Toggle Shield Surfing.", nullptr, 0, 0, false},
     {kSitItemId, "robin.sit", "Sit",
@@ -83,11 +86,13 @@ uint32_t use_twilit_item(void* userData) {
 }
 
 bool register_twilit_essentials_items() {
+    g_twilitItemsRegistrationPending = false;
     if (!get_bool_option(g_useTwilitEssentialsItems, true)) {
         svc_log->info(mod_ctx, "Twilit Essentials item-page integration is disabled");
         return false;
     }
     if (svc_te_items == nullptr) {
+        g_twilitItemsRegistrationPending = true;
         svc_log->warn(
             mod_ctx, "Twilit Essentials item API is unavailable; using the legacy item wheel");
         return false;
@@ -109,8 +114,12 @@ bool register_twilit_essentials_items() {
         const ModResult result =
             svc_te_items->add_item(mod_ctx, &desc, &entry.handle);
         if (result != MOD_OK) {
-            svc_log->error(
-                mod_ctx, "failed to register a mod item with Twilit Essentials");
+            char errorMessage[128];
+            std::snprintf(
+                errorMessage, sizeof(errorMessage),
+                "Twilit Essentials rejected item '%s' (result %d)",
+                entry.id, static_cast<int>(result));
+            svc_log->error(mod_ctx, errorMessage);
             unregister_twilit_essentials_items();
             return false;
         }
@@ -118,11 +127,13 @@ bool register_twilit_essentials_items() {
     }
 
     g_twilitItemsActive = true;
-    svc_log->info(mod_ctx, "registered all 12 items with the Twilit Essentials item page");
+    g_twilitItemsRegistrationPending = false;
+    svc_log->info(mod_ctx, "registered all 13 items with the Twilit Essentials item page");
     return true;
 }
 
 void unregister_twilit_essentials_items() {
+    g_twilitItemsRegistrationPending = false;
     if (svc_te_items != nullptr) {
         for (auto& entry : g_twilitItems) {
             if (!entry.registered) {

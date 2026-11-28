@@ -217,6 +217,9 @@ u8 secondaryItemIdForSlot(u8 slotId) {
     if (slotId == kGoronTunicSlot) {
         return kGoronTunicItemId;
     }
+    if (slotId == kOcarinaSlot) {
+        return kOcarinaItemId;
+    }
 
     if (slotId >= kSecondarySlotBase &&
         slotId < kSecondarySlotBase + MAX_ITEM_SLOTS)
@@ -236,6 +239,9 @@ u8 secondaryDisplayItemForId(u8 itemId) {
     }
     if (itemId == kGoronTunicItemId) {
         return kGoronTunicDisplayItem;
+    }
+    if (itemId == kOcarinaItemId) {
+        return kOcarinaDisplayItem;
     }
     if (itemId == kDinFireItem || itemId == kNayruLoveItem ||
         itemId == kGiantMaskItem)
@@ -425,6 +431,9 @@ const char* secondaryItemNameForSlot(u8 slotId) {
     if (slotId == kGoronTunicSlot) {
         return "Goron Tunic";
     }
+    if (slotId == kOcarinaSlot) {
+        return "Ocarina";
+    }
 
     if (slotId >= kSecondarySlotBase &&
         slotId < kSecondarySlotBase + MAX_ITEM_SLOTS)
@@ -597,6 +606,7 @@ bool secondaryItemAssigned(int button) {
 bool isValidSecondaryAssignment(int64_t slotId) {
     return slotId == dItemNo_NONE_e || slotId == kShieldSurfSlot ||
            slotId == kSitSlot || slotId == kGoronTunicSlot ||
+           slotId == kOcarinaSlot ||
            (slotId >= kSecondarySlotBase &&
             slotId < kSecondarySlotBase + MAX_ITEM_SLOTS);
 }

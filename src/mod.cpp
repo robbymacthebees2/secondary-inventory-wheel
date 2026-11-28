@@ -20,6 +20,8 @@
 #include "JSystem/J2DGraph/J2DPicture.h"
 #include "JSystem/J2DGraph/J2DTextBox.h"
 #include "JSystem/JAudio2/JAUSectionHeap.h"
+#include "JSystem/JAudio2/JAISeq.h"
+#include "JSystem/JAudio2/JASTrack.h"
 #include "JSystem/JAudio2/JASWaveArcLoader.h"
 #include "JSystem/JAudio2/JASWaveInfo.h"
 #include "JSystem/JKernel/JKRExpHeap.h"
@@ -45,6 +47,7 @@
 #include "d/d_menu_ring.h"
 #include "d/d_menu_window.h"
 #include "d/d_meter_map.h"
+#include "d/d_camera.h"
 #include "d/d_meter2_info.h"
 #include "d/d_meter_HIO.h"
 #include "d/d_kankyo.h"
@@ -60,6 +63,7 @@
 #include "f_pc/f_pc_leaf.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_ext.h"
+#include "Z2AudioLib/Z2AudioMgr.h"
 
 #include <dolphin/os.h>
 #include <dolphin/pad.h>
@@ -71,6 +75,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 DEFINE_MOD();
 IMPORT_SERVICE(ConfigService, svc_config);
@@ -95,9 +100,12 @@ constexpr s32 kNativeRightStickButton = 8;
 constexpr u8 kShieldSurfSlot = 0xFC;
 constexpr u8 kSitSlot = 0xFD;
 constexpr u8 kGoronTunicSlot = 0xFE;
+constexpr u8 kOcarinaSlot = 0xF0;
 constexpr u8 kShieldSurfItemId = 0xF7;
 constexpr u8 kSitItemId = 0xF9;
 constexpr u8 kGoronTunicItemId = 0xFB;
+constexpr u8 kOcarinaItemId = 0xF4;
+constexpr u8 kOcarinaDisplayItem = dItemNo_HORSE_FLUTE_e;
 constexpr u8 kHawkGrassItem = 0xFD;
 constexpr u8 kHoverBootsItem = 0xFC;
 constexpr u8 kDarkLinkItem = 0xFA;
@@ -109,7 +117,7 @@ constexpr u8 kNayruLoveItem = 0xF2;
 constexpr u8 kGiantMaskItem = 0xF3;
 constexpr u8 kSecondarySlotBase = 0x80;
 constexpr int kHawkGrassIconTexture = 0x59;
-constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 3;
+constexpr u8 kSecondaryWheelSlotCount = MAX_ITEM_SLOTS + 4;
 constexpr u16 kFireDamagePulseInterval = 30;
 constexpr u8 kFireDamageAmount = 1;
 constexpr f32 kSecondaryIconScale = 0.55f;
@@ -401,6 +409,7 @@ std::array<u8, MAX_SELECT_ITEM> g_secondaryAlternateSelectedItems = [] {
     return items;
 }();
 bool g_twilitItemsActive = false;
+bool g_twilitItemsRegistrationPending = false;
 std::array<u8, kSecondaryWheelSlotCount> g_secondaryWheelSlotIds{};
 std::array<f32, kSecondaryWheelSlotCount> g_secondaryWheelSlotPosX{};
 std::array<f32, kSecondaryWheelSlotCount> g_secondaryWheelSlotPosY{};
@@ -412,6 +421,9 @@ JKRExpHeap* g_tunicWheelItemHeap = nullptr;
 J2DPicture* g_sitWheelItemTex = nullptr;
 ResTIMG* g_sitWheelItemBuf = nullptr;
 JKRExpHeap* g_sitWheelItemHeap = nullptr;
+std::array<J2DPicture*, 3> g_ocarinaWheelItemTex{};
+std::array<ResTIMG*, 3> g_ocarinaWheelItemBuf{};
+JKRExpHeap* g_ocarinaWheelItemHeap = nullptr;
 J2DPicture* g_lensOfTruthWheelItemTex = nullptr;
 ResTIMG* g_lensOfTruthWheelItemBuf = nullptr;
 JKRExpHeap* g_lensOfTruthWheelItemHeap = nullptr;
@@ -434,9 +446,11 @@ void unregister_twilit_essentials_items();
 bool twilit_item_assigned_to_button(int button);
 bool twilit_item_id_assigned_to_button(u8 itemId, int button);
 bool use_secondary_item(daAlink_c* alink, u8 itemId, int button);
+bool start_ocarina_whistle(daAlink_c* alink, u8 button);
 
 // Feature modules share this translation unit's private state and hook declarations.
 #include "features/core_helpers.cpp"
+#include "features/ocarina.cpp"
 #include "features/hover_boots.cpp"
 #include "features/secondary_wheel.cpp"
 #include "features/extra_buttons.cpp"
@@ -503,6 +517,12 @@ ModResult install_hooks() {
     ADD_PRE(SetHeavyBoots, handle_hover_boots_heavy_toggle);
     ADD_POST(SetStickData, update_secondary_assigned_item_input);
     ADD_POST(SetStickData, suppress_sit_stick_input);
+    ADD_POST(SetStickDataOcarina, handle_ocarina_input);
+    ADD_POST(CpadRead, activate_pending_ocarina_before_player_input);
+    ADD_POST(CpadRead, handle_ocarina_input);
+    ADD_POST(PlayerExecute, activate_pending_ocarina_after_player_execute);
+    ADD_PRE(OcarinaCheckDamageAction, suppress_ocarina_damage);
+    ADD_PRE(OcarinaGrassWhistleWait, update_ocarina_whistle_wait);
     ADD_PRE(CheckSnowCode, allow_shield_surf_on_any_ground);
     ADD_PRE(CheckShieldDraw, suppress_player_shield_draw_during_surf);
     ADD_PRE(CheckNextActionBow, suppress_bow_action_during_shield_surf);
@@ -540,6 +560,7 @@ ModResult install_hooks() {
     ADD_POST(CheckSceneChange, fire_sphere::clear_after_scene_change);
     ADD_POST(CheckSceneChange, nayru_love::clear_after_scene_change);
     ADD_POST(CheckSceneChange, deactivate_giant_mask_after_scene_change);
+    ADD_POST(CheckSceneChange, cancel_ocarina_after_scene_change);
     ADD_PRE(
         nayru_love::NayruLoveDamageAction,
         nayru_love::before_damage_action);
@@ -635,6 +656,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     g_darkLinkAppearanceModelData.fill(nullptr);
     g_darkLinkAppearanceModelDataCount = 0;
     g_secondaryItemInputHandled = false;
+    initialize_ocarina();
     g_hoverPlaneRaiseConfigReadFailureReported = false;
     g_hoverPlaneLowerBindingConfigReadFailureReported = false;
     g_hoverPlaneLowerBindingWasHeld = false;
@@ -883,6 +905,11 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 }
 
 MOD_EXPORT ModResult mod_update(ModError*) {
+    if (g_twilitItemsRegistrationPending && svc_te_items != nullptr) {
+        svc_log->info(
+            mod_ctx, "Twilit Essentials item service became available; retrying item registration");
+        register_twilit_essentials_items();
+    }
     if (mDoCPd_c::getTrigZ(PAD_1) == 0) {
         g_secondaryExtraButtonsSwapHandled = false;
     }
@@ -897,6 +924,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
     }
     update_dark_link_form_blend();
     update_sit_action();
+    update_ocarina();
     update_sit_music();
     update_goron_lava_contact_timer();
     update_hover_boots();
@@ -919,6 +947,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
 }
 
 MOD_EXPORT ModResult mod_shutdown(ModError*) {
+    exit_ocarina_mode(static_cast<daAlink_c*>(dComIfGp_getLinkPlayer()));
     unregister_twilit_essentials_items();
     fire_sphere::stop_effect();
     nayru_love::cancel();

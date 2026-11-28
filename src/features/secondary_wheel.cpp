@@ -61,6 +61,24 @@ void clear_sit_wheel_texture() {
     g_sitWheelItemHeap = nullptr;
 }
 
+void clear_ocarina_wheel_textures() {
+    for (auto*& picture : g_ocarinaWheelItemTex) {
+        if (picture != nullptr) {
+            JKR_DELETE(picture);
+            picture = nullptr;
+        }
+    }
+    if (g_ocarinaWheelItemHeap != nullptr) {
+        for (auto*& buffer : g_ocarinaWheelItemBuf) {
+            if (buffer != nullptr) {
+                g_ocarinaWheelItemHeap->free(buffer);
+                buffer = nullptr;
+            }
+        }
+    }
+    g_ocarinaWheelItemHeap = nullptr;
+}
+
 void clear_lens_of_truth_wheel_texture() {
     if (g_lensOfTruthWheelItemTex != nullptr) {
         JKR_DELETE(g_lensOfTruthWheelItemTex);
@@ -173,6 +191,41 @@ void load_sit_wheel_texture(dMenu_Ring_c* ring) {
     g_sitWheelItemTex->setBasePosition(J2DBasePosition_4);
 }
 
+void load_ocarina_wheel_textures(dMenu_Ring_c* ring) {
+    clear_ocarina_wheel_textures();
+    g_ocarinaWheelItemHeap = ring->mpHeap;
+    for (auto*& buffer : g_ocarinaWheelItemBuf) {
+        buffer = static_cast<ResTIMG*>(
+            g_ocarinaWheelItemHeap->alloc(kItemTextureBufferSize, 0x20));
+        if (buffer == nullptr) {
+            svc_log->error(mod_ctx, "failed to allocate Ocarina wheel icon buffers");
+            clear_ocarina_wheel_textures();
+            return;
+        }
+    }
+
+    const int textureCount = dMeter2Info_readItemTexture(
+        kOcarinaDisplayItem, g_ocarinaWheelItemBuf[0], nullptr,
+        g_ocarinaWheelItemBuf[1], nullptr, g_ocarinaWheelItemBuf[2], nullptr,
+        nullptr, nullptr, -1);
+    if (textureCount <= 0) {
+        svc_log->error(mod_ctx, "failed to load the Ocarina wheel icon");
+        clear_ocarina_wheel_textures();
+        return;
+    }
+
+    for (int texture = 0; texture < std::min(textureCount, 3); ++texture) {
+        g_ocarinaWheelItemTex[texture] =
+            JKR_NEW J2DPicture(g_ocarinaWheelItemBuf[texture]);
+        if (g_ocarinaWheelItemTex[texture] == nullptr) {
+            svc_log->error(mod_ctx, "failed to create the Ocarina wheel icon picture");
+            clear_ocarina_wheel_textures();
+            return;
+        }
+        g_ocarinaWheelItemTex[texture]->setBasePosition(J2DBasePosition_4);
+    }
+}
+
 void load_shield_surf_wheel_textures(dMenu_Ring_c* ring) {
     clear_shield_surf_wheel_textures();
     g_shieldSurfWheelItemHeap = ring->mpHeap;
@@ -238,6 +291,7 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
     g_secondaryWheelSlotIds[MAX_ITEM_SLOTS] = kShieldSurfSlot;
     g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 1] = kSitSlot;
     g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 2] = kGoronTunicSlot;
+    g_secondaryWheelSlotIds[MAX_ITEM_SLOTS + 3] = kOcarinaSlot;
 
     ring->mItemsTotal = MAX_ITEM_SLOTS;
     ring->mTotalItemTexToAlloc = MAX_ITEM_SLOTS;
@@ -362,6 +416,7 @@ void setup_secondary_ring(dMenu_Ring_c* ring) {
     }
     load_shield_surf_wheel_textures(ring);
     load_sit_wheel_texture(ring);
+    load_ocarina_wheel_textures(ring);
     load_lens_of_truth_wheel_texture(ring);
     load_tunic_wheel_textures(ring);
 
@@ -824,6 +879,27 @@ void draw_secondary_ring(dMenu_Ring_c* ring) {
             }
             continue;
         }
+        if (index == MAX_ITEM_SLOTS + 3) {
+            if (g_ocarinaWheelItemBuf[0] == nullptr) {
+                continue;
+            }
+            const f32 scale =
+                dItem_data::getTexScale(kOcarinaDisplayItem) / 100.0f *
+                kSecondaryIconScale;
+            const f32 width =
+                g_ocarinaWheelItemBuf[0]->width / 48.0f * scale * 48.0f;
+            const f32 height =
+                g_ocarinaWheelItemBuf[0]->height / 48.0f * scale * 48.0f;
+            for (auto* picture : g_ocarinaWheelItemTex) {
+                if (picture == nullptr) {
+                    continue;
+                }
+                picture->setAlpha(pose.alpha * 255.0f);
+                picture->draw(x + (48.0f - width) * 0.5f,
+                    y + (48.0f - height) * 0.5f, width, height, 0, 0, 0);
+            }
+            continue;
+        }
 
         if (secondaryItemIdForSlot(g_secondaryWheelSlotIds[index]) ==
             kLensOfTruthItem)
@@ -1002,6 +1078,7 @@ HookAction prepare_ring_delete(ModContext*, void* args, void*, void*) {
         forget_secondary_ring_pose(window->mpMenuRing);
         clear_shield_surf_wheel_textures();
         clear_sit_wheel_texture();
+        clear_ocarina_wheel_textures();
         clear_lens_of_truth_wheel_texture();
         clear_tunic_wheel_textures();
     }

@@ -44,10 +44,24 @@ void begin_secondary_hawk_grass_use(daAlink_c* alink, u8 button) {
         return;
     }
 
+    if (g_pendingHawkGrassUse != nullptr) {
+        return;
+    }
     g_pendingHawkGrassUse = alink;
     g_pendingHawkGrassButton = button;
     g_hawkGrassPhaseRequested = true;
     update_hawk_grass_resource();
+}
+
+bool begin_secondary_ocarina_use(daAlink_c* alink, u8 button) {
+    if (alink == nullptr || alink->checkWolf() || alink->checkEventRun()) {
+        return false;
+    }
+    if (g_ocarinaActive) {
+        exit_ocarina_mode(alink);
+        return true;
+    }
+    return start_ocarina_whistle(alink, button);
 }
 
 bool can_start_sit_action(const daAlink_c* alink) {

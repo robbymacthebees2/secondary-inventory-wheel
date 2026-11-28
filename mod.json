@@ -1,7 +1,7 @@
 {
   "id": "dev.twilitrealm.secondary_inventory_wheel",
   "name": "RobinWheelAndTweaks",
-  "version": "1.5.1",
+  "version": "1.9.1",
   "author": "RobinTheSoundsmith",
-  "description": "Registers 12 mod items on Twilit Essentials' Modded item page, with the legacy secondary wheel as a fallback, and includes Ice Arrow water platforms, Hover Boots, Shield Surf, Din's Fire, Nayru's Love, Giant's Mask, and other gameplay features."
+  "description": "Registers 13 mod items on Twilit Essentials' Modded item page, with the legacy secondary wheel as a fallback, and includes Ice Arrow water platforms, Hover Boots, Shield Surf, Din's Fire, Nayru's Love, Giant's Mask, and other gameplay features."
 }

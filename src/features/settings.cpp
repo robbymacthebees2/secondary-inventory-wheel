@@ -40,11 +40,13 @@ ModResult build_panel(ModContext*, UiElementHandle panel, void*, ModError*) {
     control.kind = UI_CONTROL_TOGGLE;
     control.label = "Use Twilit Essentials Modded item page";
     control.help_rml =
-        "When Twilit Essentials is installed, register all 12 mod items on its Modded item page. "
-        "Assign the items there; existing legacy-wheel assignments are not transferred. If the "
-        "service is unavailable or registration fails, the legacy wheel remains active. Restart "
-        "the game after changing this setting. Twilit Essentials assignments do not switch with "
-        "Extra Buttons' alternate X/Y item sets.";
+        "Register all 13 mod items through Twilit Essentials' local Items service (API v1.1); "
+        "this does not connect to the internet. The Modded page appears after an item registers. "
+        "Assign items there; existing legacy-wheel assignments are not transferred. If the "
+        "service is unavailable or registration fails, the legacy wheel remains active. The mod "
+        "retries if its optional service import resolves after startup. Restart the game after "
+        "changing this setting. Twilit Essentials assignments do not switch with Extra Buttons' "
+        "alternate X/Y item sets.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_useTwilitEssentialsItems;
     result = svc_ui->pane_add_control(mod_ctx, panel, &control, nullptr);

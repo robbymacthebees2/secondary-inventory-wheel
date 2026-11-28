@@ -237,6 +237,13 @@ void update_secondary_assigned_item_input(ModContext*, void* args, void*, void*)
     }
 
     recover_shield_surf_state(alink);
+    if (g_ocarinaActive) {
+        const u8 itemButtons = daAlink_c::BTN_X | daAlink_c::BTN_Y;
+        alink->mItemTrigger &= static_cast<u8>(~itemButtons);
+        alink->mItemButton &= static_cast<u8>(~itemButtons);
+        return;
+    }
+
     update_hover_plane_raise_input_edges();
 
     int raiseButtonMask = 0;
@@ -358,6 +365,8 @@ bool use_secondary_item(daAlink_c* alink, u8 itemId, int button) {
             mod_ctx, g_giantMaskActive ? "Giant's Mask equipped" :
                                          "Giant's Mask removed");
         return true;
+    case kOcarinaItemId:
+        return begin_secondary_ocarina_use(alink, static_cast<u8>(button));
     default:
         return false;
     }
